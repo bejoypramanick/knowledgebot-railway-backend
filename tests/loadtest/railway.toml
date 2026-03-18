@@ -1,0 +1,15 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "locust -f locustfile.py --host=https://api-gateway-common.up.railway.app --web-host=0.0.0.0 --web-port=$PORT"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[env]
+# Environment variables for the load test
+TARGET_HOST = "https://api-gateway-common.up.railway.app"
+LOCUST_WEB_HOST = "0.0.0.0"

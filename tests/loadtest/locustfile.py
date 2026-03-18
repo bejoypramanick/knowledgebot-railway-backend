@@ -44,6 +44,7 @@ import json
 import random
 import time
 import threading
+import os
 from datetime import datetime
 from flask import Flask, render_template_string
 from threading import Thread
@@ -52,12 +53,23 @@ from locust import HttpUser, task, constant, events
 from locust.web import WebUI
 
 # ============================================================
-# CONFIG
+# CONFIG - Railway Environment Support
 # ============================================================
 
-TARGET_USERS = 20  # Test stops after this many users complete
-CHATS_PER_USER = 5  # Each user sends 5 consecutive messages
+TARGET_USERS = int(os.getenv('TARGET_USERS', '20'))  # Test stops after this many users complete
+CHATS_PER_USER = int(os.getenv('CHATS_PER_USER', '5'))  # Each user sends 5 consecutive messages
 TOTAL_EXPECTED_CHATS = TARGET_USERS * CHATS_PER_USER  # 100 total chats
+
+# Railway-specific configuration
+RAILWAY_ENVIRONMENT = os.getenv('RAILWAY_ENVIRONMENT_NAME', 'local')
+TARGET_HOST = os.getenv('TARGET_HOST', 'https://api-gateway-common.up.railway.app')
+
+print(f"🚀 Load Test Configuration:")
+print(f"   Environment: {RAILWAY_ENVIRONMENT}")
+print(f"   Target Host: {TARGET_HOST}")
+print(f"   Users: {TARGET_USERS}")
+print(f"   Chats per user: {CHATS_PER_USER}")
+print(f"   Total expected chats: {TOTAL_EXPECTED_CHATS}")
 
 # ============================================================
 # SHARED STATE — tracks progress and stores detailed results
@@ -432,10 +444,10 @@ class ChatbotUser(HttpUser):
 
 
 # ============================================================
-# WEB UI EXTENSION — Custom endpoint for detailed results
+# WEB UI EXTENSION — Custom endpoint for detailed results with PDF export
 # ============================================================
 
-# HTML template for results page
+# HTML template for results page with PDF export functionality
 RESULTS_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -445,6 +457,11 @@ RESULTS_TEMPLATE = """
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .header { text-align: center; color: #333; margin-bottom: 30px; }
+        .controls { text-align: center; margin-bottom: 20px; }
+        .btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 0 5px; text-decoration: none; display: inline-block; }
+        .btn:hover { background: #0056b3; }
+        .btn-success { background: #28a745; }
+        .btn-success:hover { background: #1e7e34; }
         .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
         .stat-card { background: #f8f9fa; padding: 15px; border-radius: 6px; text-align: center; border-left: 4px solid #007bff; }
         .stat-value { font-size: 24px; font-weight: bold; color: #007bff; }
@@ -454,25 +471,101 @@ RESULTS_TEMPLATE = """
         .results-table th { background: #f8f9fa; font-weight: bold; }
         .status-success { color: #28a745; font-weight: bold; }
         .status-failed { color: #dc3545; font-weight: bold; }
-        .refresh-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
-        .refresh-btn:hover { background: #0056b3; }
         .progress { background: #e9ecef; border-radius: 4px; height: 20px; margin: 10px 0; }
         .progress-bar { background: #007bff; height: 100%; border-radius: 4px; transition: width 0.3s; }
+        .timestamp { color: #666; font-size: 14px; margin-bottom: 20px; text-align: center; }
+        
+        /* PDF-specific styles */
+        @media print {
+            body { background: white; margin: 0; }
+            .container { box-shadow: none; margin: 0; padding: 15px; }
+            .controls { display: none; }
+            .header h1 { font-size: 18px; }
+            .stats { grid-template-columns: repeat(4, 1fr); gap: 10px; }
+            .stat-card { padding: 10px; }
+            .stat-value { font-size: 16px; }
+            .results-table { font-size: 12px; }
+            .results-table th, .results-table td { padding: 4px 6px; }
+        }
     </style>
     <script>
         function refreshResults() {
             location.reload();
         }
-        // Auto-refresh every 5 seconds
-        setInterval(refreshResults, 5000);
+        
+        function downloadPDF() {
+            // Hide controls for PDF
+            document.querySelector('.controls').style.display = 'none';
+            
+            // Trigger browser print dialog
+            window.print();
+            
+            // Show controls again after print dialog
+            setTimeout(() => {
+                document.querySelector('.controls').style.display = 'block';
+            }, 1000);
+        }
+        
+        function exportCSV() {
+            const results = {{ summary.results | tojson }};
+            let csv = 'Timestamp,User ID,Chat Number,Question,Response Length,TTFC (s),Total Time (s),Chunks,Status,Error\\n';
+            
+            results.forEach(result => {
+                const row = [
+                    result.timestamp,
+                    result.user_id,
+                    result.chat_num,
+                    '"' + result.question.replace(/"/g, '""') + '"',
+                    result.response_length,
+                    result.ttfc,
+                    result.total_time,
+                    result.chunk_count,
+                    result.status,
+                    '"' + (result.error || '').replace(/"/g, '""') + '"'
+                ].join(',');
+                csv += row + '\\n';
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'stockholm_load_test_results_' + new Date().toISOString().slice(0,19).replace(/:/g, '-') + '.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+        
+        // Auto-refresh every 5 seconds (disable during print)
+        let autoRefreshInterval = setInterval(() => {
+            if (!window.matchMedia('print').matches) {
+                refreshResults();
+            }
+        }, 5000);
+        
+        // Pause auto-refresh when printing
+        window.addEventListener('beforeprint', () => {
+            clearInterval(autoRefreshInterval);
+        });
+        
+        window.addEventListener('afterprint', () => {
+            autoRefreshInterval = setInterval(refreshResults, 5000);
+        });
     </script>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Chatbot Load Test Results</h1>
-            <p>20 Users × 5 Chats Each = 100 Total Conversations</p>
-            <button class="refresh-btn" onclick="refreshResults()">🔄 Refresh Now</button>
+            <h1>🚀 Stockholm Chatbot Load Test Results</h1>
+            <p>20 Users × 5 Chats Each = 100 Total Stockholm Conversations</p>
+            <div class="timestamp">Generated: {{ timestamp }}</div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn" onclick="refreshResults()">🔄 Refresh Now</button>
+            <button class="btn btn-success" onclick="downloadPDF()">📄 Download PDF</button>
+            <button class="btn btn-success" onclick="exportCSV()">📊 Export CSV</button>
         </div>
         
         <div class="stats">
@@ -548,6 +641,17 @@ RESULTS_TEMPLATE = """
         {% if summary.results|length == 0 %}
         <p style="text-align: center; color: #666; margin: 40px 0;">No results yet. Start the load test to see data here.</p>
         {% endif %}
+        
+        <div style="margin-top: 30px; padding: 15px; background: #f8f9fa; border-radius: 6px; font-size: 12px; color: #666;">
+            <strong>Test Configuration:</strong><br>
+            • Target: https://api-gateway-common.up.railway.app/api/v1/gateway/chatbot/chat/stream<br>
+            • Endpoint: Customer-facing chat stream (same as frontend)<br>
+            • Users: 20 concurrent users<br>
+            • Chats per user: 5 consecutive conversations<br>
+            • Question types: Stockholm-focused (history, geography, culture, economy, tourism)<br>
+            • Session continuity: Maintained across all 5 chats per user<br>
+            • Auto-refresh: Every 5 seconds
+        </div>
     </div>
 </body>
 </html>
@@ -561,9 +665,27 @@ def setup_web_ui_extension(environment):
         @app.route("/test-results")
         def test_results():
             summary = get_results_summary()
+            # Add timestamp for PDF generation
+            summary['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')
             return render_template_string(RESULTS_TEMPLATE, summary=summary)
         
+        @app.route("/test-results/json")
+        def test_results_json():
+            """JSON endpoint for programmatic access to results."""
+            summary = get_results_summary()
+            summary['timestamp'] = datetime.now().isoformat()
+            summary['test_config'] = {
+                'target_users': TARGET_USERS,
+                'chats_per_user': CHATS_PER_USER,
+                'total_expected_chats': TOTAL_EXPECTED_CHATS,
+                'host': 'https://api-gateway-common.up.railway.app',
+                'endpoint': '/api/v1/gateway/chatbot/chat/stream'
+            }
+            return summary
+        
         print("📊 Custom results page available at: http://localhost:8089/test-results")
+        print("📄 PDF export and CSV download available on results page")
+        print("🔗 JSON API available at: http://localhost:8089/test-results/json")
 
 # Hook into Locust events
 @events.init.add_listener
@@ -576,7 +698,38 @@ def on_locust_init(environment, **kwargs):
 # ============================================================
 
 if __name__ == "__main__":
-    print(f"""
+    railway_env = os.getenv('RAILWAY_ENVIRONMENT_NAME')
+    if railway_env:
+        print(f"""
+╔═══════════════════════════════════════════════════════════╗
+║   🚂 RAILWAY DEPLOYMENT - Stockholm Load Test             ║
+║   Environment: {railway_env:<45} ║
+╚═══════════════════════════════════════════════════════════╝
+
+🌐 Railway Deployment URL: Check your Railway dashboard
+🎯 Target API: {TARGET_HOST}
+📊 Test Scale: {TARGET_USERS} users × {CHATS_PER_USER} chats = {TOTAL_EXPECTED_CHATS} conversations
+
+Railway Configuration:
+  • Auto-scaling: Enabled
+  • Health checks: Configured
+  • Restart policy: ON_FAILURE
+  • Max retries: 3
+
+Access Points:
+  • Main Dashboard: https://your-railway-app.railway.app/
+  • Detailed Results: https://your-railway-app.railway.app/test-results
+  • JSON API: https://your-railway-app.railway.app/test-results/json
+
+Stockholm Test Scenarios:
+  • Tourist planning conversations
+  • Historical deep dives  
+  • Geography and climate questions
+  • Cultural and educational topics
+  • Economic and technology discussions
+""")
+    else:
+        print(f"""
 ╔═══════════════════════════════════════════════════════════╗
 ║   CHATBOT LOAD TEST — 20 Users × 5 Chats = 100 Total     ║
 ╚═══════════════════════════════════════════════════════════╝

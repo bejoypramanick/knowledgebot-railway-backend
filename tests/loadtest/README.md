@@ -1,7 +1,7 @@
-# Enhanced Chatbot Load Test - Stockholm Knowledge Base
+# Enhanced Chatbot Load Test - Customer Chat Endpoint
 
 ## Overview
-This load test simulates 20 concurrent users, each having 5 consecutive conversations with the chatbot API about Stockholm-related topics, for a total of 100 chat interactions. The questions are based on comprehensive Stockholm Wikipedia content covering history, geography, culture, economy, and tourism.
+This load test simulates 20 concurrent users, each having 5 consecutive conversations with the **customer-facing chat API** (`/api/v1/gateway/chatbot/chat/stream`) - the same endpoint your frontend uses. The test covers Stockholm-related topics for a total of 100 chat interactions, based on comprehensive Wikipedia content covering history, geography, culture, economy, and tourism.
 
 ## Features
 - **20 concurrent users** × **5 chats each** = **100 total conversations**
@@ -13,24 +13,46 @@ This load test simulates 20 concurrent users, each having 5 consecutive conversa
 
 ## Quick Start
 
-### 1. Install Dependencies
+### Local Development
+
+#### 1. Install Dependencies
 ```bash
 cd tests/loadtest
 pip install -r requirements.txt
 ```
 
-### 2. Run with Web UI
+#### 2. Run with Web UI
 ```bash
 locust -f locustfile.py --host=https://api-gateway-common.up.railway.app
 ```
 Then open: http://localhost:8089
 
-### 3. Run Headless (No UI)
+#### 3. Run Headless (No UI)
 ```bash
 locust -f locustfile.py \
     --host=https://api-gateway-common.up.railway.app \
     --users=20 --spawn-rate=2 --headless
 ```
+
+### 🚂 Railway Cloud Deployment
+
+For realistic cloud-based load testing, deploy directly to Railway:
+
+#### Quick Deploy
+1. **Push to GitHub**: Ensure your code is in a GitHub repository
+2. **Deploy on Railway**: 
+   - Go to [Railway.app](https://railway.app)
+   - New Project → Deploy from GitHub repo
+   - Select your repo and `tests/loadtest` directory
+3. **Access**: Railway provides a public URL for your load test dashboard
+
+#### Benefits
+- **Realistic network conditions** from Railway's infrastructure
+- **Team access** via shared public URL
+- **Persistent testing** without local machine dependency
+- **Auto-scaling** based on load requirements
+
+📖 **Full Railway Guide**: See [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md) for detailed instructions
 
 ## Web UI Features
 
@@ -45,6 +67,30 @@ locust -f locustfile.py \
 - **Individual request/response details**: Question, response preview, timings
 - **Status tracking**: Success/failure for each chat
 - **Session continuity**: Track conversations across multiple chats
+- **📄 PDF Export**: Download professional PDF reports
+- **📊 CSV Export**: Export raw data for analysis
+- **🔗 JSON API**: Programmatic access at `/test-results/json`
+
+## Export Options
+
+### PDF Reports
+- **Professional formatting** optimized for printing and sharing
+- **Complete test summary** with all key metrics
+- **Detailed results table** with individual chat data
+- **Test configuration** and timestamp included
+- **Print-friendly layout** with proper page breaks
+
+### CSV Data Export
+- **Raw data export** for further analysis in Excel/Google Sheets
+- **All result fields** including timestamps, user IDs, questions, responses
+- **Filename includes timestamp** for easy organization
+- **Compatible with data analysis tools**
+
+### JSON API Access
+- **Programmatic access** at `/test-results/json`
+- **Real-time data** for integration with monitoring systems
+- **Complete test configuration** and metadata included
+- **Machine-readable format** for automated reporting
 
 ## Test Scenarios
 
@@ -107,9 +153,26 @@ locust -f locustfile.py \
 - Failures include: HTTP status codes, error messages, response previews
 - Session tracking shows continuity across conversations
 
-## Configuration
+## Export Options
 
-### Modify Test Parameters
+### PDF Reports
+- **Professional formatting** optimized for printing and sharing
+- **Complete test summary** with all key metrics
+- **Detailed results table** with individual chat data
+- **Test configuration** and timestamp included
+- **Print-friendly layout** with proper page breaks
+
+### CSV Data Export
+- **Raw data export** for further analysis in Excel/Google Sheets
+- **All result fields** including timestamps, user IDs, questions, responses
+- **Filename includes timestamp** for easy organization
+- **Compatible with data analysis tools**
+
+### JSON API Access
+- **Programmatic access** at `/test-results/json`
+- **Real-time data** for integration with monitoring systems
+- **Complete test configuration** and metadata included
+- **Machine-readable format** for automated reporting
 Edit `locustfile.py` to change:
 - `TARGET_USERS = 20` - Number of concurrent users
 - `CHATS_PER_USER = 5` - Conversations per user
