@@ -507,7 +507,7 @@ RESULTS_TEMPLATE = """
         }
         
         function exportCSV() {
-            const results = {{ summary.results | tojson }};
+            const results = {{ (summary.results or []) | tojson }};
             let csv = 'Timestamp,User ID,Chat Number,Question,Response Length,TTFC (s),Total Time (s),Chunks,Status,Error\\n';
             
             results.forEach(result => {
@@ -667,6 +667,11 @@ def setup_web_ui_extension(environment):
             summary = get_results_summary()
             # Add timestamp for PDF generation
             summary['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')
+            
+            # Ensure all values are JSON serializable
+            if 'results' not in summary:
+                summary['results'] = []
+            
             return render_template_string(RESULTS_TEMPLATE, summary=summary)
         
         @app.route("/test-results/json")
