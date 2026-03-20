@@ -119,6 +119,14 @@ class WidgetConfigService:
                     await widget_realtime_service.broadcast_state_change("display_chatbot")
                 except Exception as e:
                     logger.error(f"Error broadcasting state change: {e}")
+
+                # Invalidate Redis cache for display_chatbot
+                try:
+                    from shared.redis_widget_config_cache import invalidate_display_chatbot
+                    await invalidate_display_chatbot()
+                    logger.info("✅ Invalidated display_chatbot cache in Redis")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to invalidate display_chatbot cache: {e}")
             
         except Exception as e:
             logger.error(f"❌ Error updating widget config: {e}")
