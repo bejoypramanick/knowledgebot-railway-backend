@@ -2,6 +2,7 @@
 Widget Configuration Service for Widget Management
 Provides business logic layer for widget configuration operations
 """
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.otel_logger import get_otel_logger
@@ -25,21 +26,16 @@ class WidgetConfigService:
             logger.info("🔍 GET_WIDGET_CONFIG: Starting widget config retrieval")
             logger.info("=" * 100)
             
-            # Get main widget configuration
-            logger.info("📥 Fetching main widget configuration from DAO...")
-            widget_config = await self._widget_config_dao.get_widget_config()
-            logger.info(f"✅ Main widget config retrieved: {bool(widget_config)}")
-            
+            # Parallel fetch: widget config + suggested messages hit independent tables
+            widget_config, suggested_messages = await asyncio.gather(
+                self._widget_config_dao.get_widget_config(),
+                self._widget_config_dao.get_suggested_messages(),
+            )
+
             if not widget_config:
-                logger.warning("⚠️ No widget config found, using empty dict")
                 widget_config = {}
-            
-            # Get suggested messages
-            logger.info("📥 Fetching suggested messages from DAO...")
-            suggested_messages = await self._widget_config_dao.get_suggested_messages()
-            logger.info(f"✅ Suggested messages retrieved: {len(suggested_messages)} messages")
-            for i, msg in enumerate(suggested_messages, 1):
-                logger.info(f"   [{i}] {msg}")
+
+            logger.info(f"✅ Widget config + {len(suggested_messages)} suggested messages fetched (parallel)")
             
             # Resolve S3 keys to fresh presigned URLs
             profile_url = widget_config.get("profile_picture_url", "")

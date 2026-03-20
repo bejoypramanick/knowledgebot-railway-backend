@@ -2,6 +2,7 @@
 Chat Agent Configuration Service for Chat Agent Management
 Provides business logic layer for chat agent configuration operations
 """
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from shared.otel_logger import get_otel_logger
@@ -16,26 +17,37 @@ class ChatAgentConfigService:
         self._chatAgent_dao = ChatAgentConfigDAO()
     
     async def get_chatAgent_config(self):
-        """Get complete chatbot configuration with all data transformations"""
+        """Get complete chatbot configuration with all data transformations.
+
+        PG18 optimization: all 7 reads hit independent tables, so we run them
+        in parallel via asyncio.gather(). With PG18 io_method='worker' and
+        pool_size=3 + overflow=2, the pool handles 5 concurrent connections.
+        """
         try:
-            # Fetch database queries sequentially to avoid connection pool exhaustion
-            # Sequential approach: reduces peak connection usage from 6 to 1
-            # Performance: slightly slower but prevents timeout errors under load
-            widget_config = await self._chatAgent_dao.get_widget_config()
-            security_rows = await self._chatAgent_dao.get_security_settings()
-            llm_rows = await self._chatAgent_dao.get_llm_providers()
-            persona = await self._chatAgent_dao.get_active_persona()
-            human_agents_list = await self._chatAgent_dao.get_human_agents()
-            admin_emails_list = await self._chatAgent_dao.get_admins()
+            (
+                widget_config,
+                security_rows,
+                llm_rows,
+                persona,
+                human_agents_list,
+                admin_emails_list,
+                all_personas,
+            ) = await asyncio.gather(
+                self._chatAgent_dao.get_widget_config(),
+                self._chatAgent_dao.get_security_settings(),
+                self._chatAgent_dao.get_llm_providers(),
+                self._chatAgent_dao.get_active_persona(),
+                self._chatAgent_dao.get_human_agents(),
+                self._chatAgent_dao.get_admins(),
+                self._chatAgent_dao.get_all_personas(),
+            )
 
             # Build security settings dict
-            security = {
-                "response_timeout": 30
-            }
+            security = {"response_timeout": 30}
             for row in security_rows:
                 if row['setting_name'] == 'response_timeout':
                     security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
-               
+
             # Build metadata from widget config (HIL settings)
             metadata = {}
             if widget_config:
@@ -44,21 +56,19 @@ class ChatAgentConfigService:
                     "response_policy": widget_config.get('response_policy', 0.5),
                     "hil_disabled_message": widget_config.get('hil_disabled_message', '')
                 }
-               
-            # Build LLM tokens dict using llm_providers table data (show negative values)
+
+            # Build LLM tokens dict
             llm_tokens = {}
             for row in llm_rows:
                 provider = row['provider_name']
                 token_limit = row['token_limit']
                 used_tokens = row['token_used']
-                # Calculate available tokens (show negative when overused)
                 llm_tokens[provider] = {
                     "used": used_tokens,
                     "available": (token_limit - used_tokens),
                     "limit": token_limit
                 }
-                
-                          
+
             logger.info(f"✅ get_chatAgent_config : LLM tokens constructed from llm_providers table: {llm_tokens}")
 
             # Initialize persona config with active persona
@@ -67,23 +77,15 @@ class ChatAgentConfigService:
                 "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "KnowledgeBot"
             }
 
-            # Get all available personas
-            try:
-                all_personas = await self._chatAgent_dao.get_all_personas()
-                
-                # Use first persona as default if no active persona is set
-                if not persona and all_personas:
-                    first_persona = all_personas[0]
-                    persona_config = {
-                        "system_prompt": first_persona.get('system_prompt', ''),
-                        "selected_persona": first_persona.get('persona_name', 'KnowledgeBot')
-                    }
-                    
-            except Exception as e:
-                logger.error(f"Error fetching personas: {e}")
-                all_personas = []
+            # Use first persona as default if no active persona is set
+            if not persona and all_personas:
+                first_persona = all_personas[0]
+                persona_config = {
+                    "system_prompt": first_persona.get('system_prompt', ''),
+                    "selected_persona": first_persona.get('persona_name', 'KnowledgeBot')
+                }
 
-            # Build response with {id, masked_email} pairs for display + operations
+            # Build response
             response = {
                 "admin_emails": [{"id": item["id"], "email": item["email"]} for item in admin_emails_list],
                 "human_agents": [{"id": item["id"], "email": item["email"]} for item in human_agents_list],
@@ -94,7 +96,7 @@ class ChatAgentConfigService:
                 "metadata": metadata
             }
 
-            logger.info("✅ Chatbot config retrieved successfully")
+            logger.info("✅ Chatbot config retrieved successfully (parallel fetch)")
             return response
 
         except Exception as e:
