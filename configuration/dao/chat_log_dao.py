@@ -625,7 +625,7 @@ class ChatLogDAO:
         query = """
             SELECT * FROM chat_messages
             WHERE session_id = :session_id
-            ORDER BY created_at DESC
+            ORDER BY id DESC
             LIMIT 1
         """
         try:
@@ -732,7 +732,7 @@ class ChatLogDAO:
         query = """
             SELECT * FROM chat_messages
             WHERE session_id = :session_id
-            ORDER BY created_at ASC
+            ORDER BY id ASC
         """
         try:
             params = {"session_id": session_id}

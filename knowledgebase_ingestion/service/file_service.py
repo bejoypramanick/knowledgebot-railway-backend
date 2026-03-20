@@ -79,7 +79,7 @@ class FileService:
                         # Debug: Check all files with this exact hash (regardless of status)
                         logger.info(f"🔍 [HASH_CHECK] Running debug query for all files with this hash...")
                         result = await session.execute(
-                            text("SELECT id, original_filename, sha256_hash, processing_status FROM file_uploads WHERE sha256_hash = :hash ORDER BY created_at DESC"),
+                            text("SELECT id, original_filename, sha256_hash, processing_status FROM file_uploads WHERE sha256_hash = :hash ORDER BY id DESC"),
                             {"hash": sha256_hash}
                         )
                         all_with_hash = result.mappings().all()
@@ -332,7 +332,7 @@ class FileService:
                              file_size, sha256_hash, gemini_state, created_at, version,
                              celery_task_id, processing_status, error_message
                              FROM file_uploads
-                             ORDER BY created_at DESC""")
+                             ORDER BY id DESC""")
                 )
                 files = result.mappings().all()
 

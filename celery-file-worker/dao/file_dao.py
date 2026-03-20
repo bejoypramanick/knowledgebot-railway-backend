@@ -49,7 +49,7 @@ class FileDAO:
 
     async def get_files_by_status(self, status: str) -> List[Dict[str, Any]]:
         """Get files by processing status."""
-        query = "SELECT * FROM file_uploads WHERE processing_status = :status ORDER BY created_at DESC"
+        query = "SELECT * FROM file_uploads WHERE processing_status = :status ORDER BY id DESC"
         params = {"status": status}
         try:
             logger.log_db_operation(query, params)

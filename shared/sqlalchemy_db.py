@@ -136,6 +136,8 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
 
             async with asyncio.timeout(attempt_timeout):
                 # Create async engine with AsyncAdaptedQueuePool
+                # PG18: asyncpg natively uses async I/O; server-side io_method='worker'
+                # is configured via ALTER SYSTEM in the migration script.
                 _engine = create_async_engine(
                     async_url,
                     echo=False,
@@ -151,6 +153,12 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
                         "server_settings": {
                             "application_name": "knowledgebot_service",
                             "statement_timeout": statement_timeout,
+                            # PG18: JIT for complex analytics queries
+                            "jit": "on",
+                            # PG18: SSD-optimized cost model
+                            "random_page_cost": "1.1",
+                            # PG18: Prefetch for sequential scans
+                            "effective_io_concurrency": "200",
                         },
                     },
                 )
@@ -297,10 +305,11 @@ async def health_check() -> dict:
             }
 
         async with _engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
+            result = await conn.execute(text("SELECT current_setting('server_version') AS version"))
+            pg_version = result.scalar()
 
         latency_ms = (time.time() - start) * 1000
-        
+
         # Get connection pool statistics
         pool = _engine.pool
         pool_stats = {
@@ -319,6 +328,7 @@ async def health_check() -> dict:
             "status": "healthy",
             "message": "Database connection healthy",
             "latency_ms": round(latency_ms, 2),
+            "pg_version": pg_version,
             "pool": pool_stats,
         }
 

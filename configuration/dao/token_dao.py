@@ -77,7 +77,7 @@ class TokenDAO:
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
 
-            query += " ORDER BY created_at DESC LIMIT :limit"
+            query += " ORDER BY id DESC LIMIT :limit"
             params["limit"] = limit
 
             logger.log_db_operation(query, params)

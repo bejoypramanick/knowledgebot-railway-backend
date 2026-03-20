@@ -291,7 +291,7 @@ class WebCrawlDAO:
                 processed_content_s3_key
             FROM scraped_websites
             {where_clause}
-            ORDER BY depth ASC, created_at DESC
+            ORDER BY depth ASC, id DESC
         """
         try:
             logger.info(f"📋 [TREE_QUERY] Fetching root websites (parent_id IS NULL)")
@@ -343,7 +343,7 @@ class WebCrawlDAO:
                         FROM scraped_websites
                         WHERE parent_id IS NOT NULL
                         AND processing_status NOT IN ('pending', 'processing', 'queued', 'completed')
-                        ORDER BY created_at DESC
+                        ORDER BY id DESC
                     """
                     orphan_pages_result = await session.execute(text(orphan_query))
                     orphan_pages = orphan_pages_result.fetchall()
@@ -402,7 +402,7 @@ class WebCrawlDAO:
                 processed_content_s3_key
             FROM scraped_websites
             {where_clause}
-            ORDER BY depth ASC, created_at ASC
+            ORDER BY depth ASC, id ASC
         """
         try:
             children_result = await session.execute(text(query), {"parent_id": parent_id})

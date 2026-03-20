@@ -67,7 +67,7 @@ class ScrapingDAO:
 
     async def get_all_websites(self) -> List[Dict[str, Any]]:
         """Get all website records."""
-        query = "SELECT * FROM scraped_websites ORDER BY created_at DESC"
+        query = "SELECT * FROM scraped_websites ORDER BY id DESC"
         try:
             logger.log_db_operation(query, {})
             async with get_db_session() as session:
@@ -460,29 +460,10 @@ class ScrapingDAO:
         logger.info(f"   Char Count: {char_count:,}")
         logger.info(f"   Mark as completed: {mark_completed}")
 
-        # First, get the existing metadata to preserve scraping_config
-        get_query = "SELECT metadata FROM scraped_websites WHERE id = :website_id"
-        existing_metadata = {}
-
-        try:
-            async with get_db_session() as session:
-                result = (await session.execute(text(get_query), {"website_id": website_id})).scalar()
-                if result:
-                    if isinstance(result, dict):
-                        existing_metadata = result
-                    elif isinstance(result, str):
-                        try:
-                            existing_metadata = json.loads(result)
-                        except (json.JSONDecodeError, ValueError):
-                            existing_metadata = {}
-        except Exception as e:
-            logger.warning(f"⚠️ Could not fetch existing metadata: {e}")
-
-        # Merge existing metadata with file_search_metadata
-        # Preserve scraping_config from existing metadata
-        merged_metadata = {**existing_metadata, **file_search_metadata}
-
-        logger.info(f"   Merged metadata: {merged_metadata}")
+        # PG18: Atomic metadata merge with RETURNING OLD/NEW
+        # metadata || :new_metadata merges existing + new in a single atomic operation
+        # This eliminates the read-before-write anti-pattern (no separate SELECT needed)
+        # The || operator preserves existing keys (e.g. scraping_config) while merging new ones
 
         # Build query based on mark_completed flag
         if mark_completed:
@@ -496,11 +477,12 @@ class ScrapingDAO:
                     description = :description,
                     crawl_session_id = :crawl_session_id,
                     pages_scraped = :pages_scraped,
-                    metadata = CAST(:metadata AS jsonb),
+                    metadata = metadata || CAST(:metadata AS jsonb),
                     processed_content_s3_key = :processed_content_s3_key,
                     processing_status = 'completed',
                     updated_at = NOW()
                 WHERE id = :website_id
+                RETURNING OLD.metadata AS previous_metadata, OLD.processing_status AS old_status, NEW.processing_status AS new_status
             """
         else:
             # Don't update processing_status - keep it as 'processing' for multi-page crawls
@@ -514,10 +496,11 @@ class ScrapingDAO:
                     description = :description,
                     crawl_session_id = :crawl_session_id,
                     pages_scraped = :pages_scraped,
-                    metadata = CAST(:metadata AS jsonb),
+                    metadata = metadata || CAST(:metadata AS jsonb),
                     processed_content_s3_key = :processed_content_s3_key,
                     updated_at = NOW()
                 WHERE id = :website_id
+                RETURNING OLD.metadata AS previous_metadata, OLD.processing_status AS old_status, NEW.processing_status AS new_status
             """
 
         params = {
@@ -529,7 +512,7 @@ class ScrapingDAO:
             "description": description,
             "crawl_session_id": crawl_session_id,
             "pages_scraped": 1,
-            "metadata": json.dumps(merged_metadata),
+            "metadata": json.dumps(file_search_metadata),
             "processed_content_s3_key": processed_content_s3_key,
             "website_id": website_id
         }
@@ -537,8 +520,13 @@ class ScrapingDAO:
         try:
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
-                await session.execute(text(query), params)
+                result = (await session.execute(text(query), params)).fetchone()
                 await session.commit()
+
+                if result:
+                    logger.info(f"   Previous metadata: {result.previous_metadata}")
+                    logger.info(f"   Status transition: {result.old_status} -> {result.new_status}")
+
                 if mark_completed:
                     logger.info(f"✅ [UPDATE_WEBSITE_PAGE_SUCCESS] Website record updated and marked as completed")
                 else:
@@ -561,25 +549,15 @@ class ScrapingDAO:
         This is called after each child page is recorded to ensure parent
         status is updated as soon as all children finish processing.
 
+        Uses a single atomic UPDATE with a subquery condition and RETURNING OLD/NEW
+        to eliminate the separate SELECT for the parent row.
+
         Returns: True if parent was updated to completed, False otherwise
         """
         logger.info(f"🔍 [PARENT_CHECK] Checking completion status for parent {parent_id}")
 
         try:
             async with get_db_session() as session:
-                # Get parent record
-                parent = (await session.execute(text("SELECT id, processing_status FROM scraped_websites WHERE id = :parent_id"),
-                    {"parent_id": parent_id})).fetchone()
-
-                if not parent:
-                    logger.warning(f"⚠️ [PARENT_CHECK] Parent {parent_id} not found")
-                    return False
-
-                # Skip if parent is already completed or failed
-                if parent.processing_status in ('completed', 'failed', 'cancelled', 'deleted'):
-                    logger.info(f"ℹ️ [PARENT_CHECK] Parent {parent_id} already in terminal state: {parent.processing_status}")
-                    return False
-
                 # Count total children and completed children
                 stats = (await session.execute(text("""
                     SELECT
@@ -605,41 +583,38 @@ class ScrapingDAO:
                     logger.info(f"ℹ️ [PARENT_CHECK] Parent {parent_id} has no children yet")
                     return False
 
-                # If all children are completed, mark parent as completed
-                if completed == total:
-                    logger.info(f"✅ [PARENT_COMPLETE] All {total} children completed for parent {parent_id}")
-
-                    # Update parent status to completed
-                    await session.execute(text("""
-                        UPDATE scraped_websites
-                        SET processing_status = 'completed',
-                            updated_at = NOW()
-                        WHERE id = :parent_id
-                    """), {"parent_id": parent_id})
-                    await session.commit()
-
-                    logger.info(f"✅ [PARENT_UPDATE] Parent {parent_id} marked as completed")
-                    return True
-
-                # If all children are in terminal state (completed or failed), mark parent as completed
-                elif completed + failed == total:
-                    logger.info(f"⚠️ [PARENT_PARTIAL] Parent {parent_id}: {completed} completed, {failed} failed out of {total}")
-
-                    # Update parent status to completed (even with some failures)
-                    await session.execute(text("""
-                        UPDATE scraped_websites
-                        SET processing_status = 'completed',
-                            updated_at = NOW()
-                        WHERE id = :parent_id
-                    """), {"parent_id": parent_id})
-                    await session.commit()
-
-                    logger.info(f"✅ [PARENT_UPDATE] Parent {parent_id} marked as completed (with {failed} failures)")
-                    return True
-
-                else:
+                # All children must be in a terminal state (completed or failed)
+                if completed + failed < total:
                     logger.info(f"⏳ [PARENT_PENDING] Parent {parent_id} still has children in progress")
                     return False
+
+                # All children are in terminal state - atomically update parent
+                # The WHERE clause ensures we only update if parent is NOT already in a terminal state
+                # RETURNING OLD/NEW gives us the status transition without a separate SELECT
+                update_result = (await session.execute(text("""
+                    UPDATE scraped_websites
+                    SET processing_status = 'completed',
+                        updated_at = NOW()
+                    WHERE id = :parent_id
+                      AND processing_status NOT IN ('completed', 'failed', 'cancelled', 'deleted')
+                    RETURNING OLD.processing_status AS old_status, NEW.processing_status AS new_status
+                """), {"parent_id": parent_id})).fetchone()
+
+                if not update_result:
+                    # No row updated: either parent doesn't exist or is already in terminal state
+                    logger.info(f"ℹ️ [PARENT_CHECK] Parent {parent_id} not found or already in terminal state")
+                    return False
+
+                await session.commit()
+
+                if completed == total:
+                    logger.info(f"✅ [PARENT_COMPLETE] All {total} children completed for parent {parent_id}")
+                    logger.info(f"✅ [PARENT_UPDATE] Parent {parent_id} status: {update_result.old_status} -> {update_result.new_status}")
+                else:
+                    logger.info(f"⚠️ [PARENT_PARTIAL] Parent {parent_id}: {completed} completed, {failed} failed out of {total}")
+                    logger.info(f"✅ [PARENT_UPDATE] Parent {parent_id} status: {update_result.old_status} -> {update_result.new_status} (with {failed} failures)")
+
+                return True
 
         except Exception as e:
             logger.error(f"❌ [PARENT_CHECK_ERROR] Failed to check parent completion: {e}")

@@ -116,7 +116,7 @@ class TokenDAO:
                            request_metadata, created_at, updated_at
                     FROM token_usage_log
                     WHERE session_id = :session_id
-                    ORDER BY created_at DESC
+                    ORDER BY id DESC
                 """
                 logger.log_db_operation(query, integer_session_id)
                 result = (await session.execute(text(query), {"session_id": integer_session_id})).fetchall()

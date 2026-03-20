@@ -28,7 +28,7 @@ class WidgetConfigDAO:
                 profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
                 hil_enabled, response_policy, hil_disabled_message
             FROM widget_configuration
-            WHERE id = 1
+            WHERE is_singleton = true
         """
         try:
             logger.log_db_operation(query)
@@ -47,7 +47,7 @@ class WidgetConfigDAO:
         query = """
             SELECT message_text
             FROM widget_suggested_messages
-            WHERE widget_config_id = 1
+            WHERE widget_config_id = (SELECT id FROM widget_configuration WHERE is_singleton = true)
             ORDER BY display_order
         """
         try:
@@ -159,7 +159,7 @@ class WidgetConfigDAO:
             query = f"""
                 UPDATE widget_configuration
                 SET {', '.join(set_clauses)}
-                WHERE id = 1
+                WHERE is_singleton = true
             """
 
             logger.log_db_operation(query, params)
@@ -256,7 +256,7 @@ class WidgetConfigDAO:
             query = f"""
                 UPDATE widget_configuration
                 SET {url_column} = :storage_url, {filename_column} = :storage_filename, updated_at = NOW()
-                WHERE id = 1
+                WHERE is_singleton = true
             """
             params = {"storage_url": storage_url, "storage_filename": storage_filename}
 
@@ -276,7 +276,7 @@ class WidgetConfigDAO:
         query = """
             SELECT profile_picture_filename, chat_icon_filename
             FROM widget_configuration
-            WHERE id = 1
+            WHERE is_singleton = true
         """
         try:
             async with get_db_session() as session:
@@ -317,7 +317,7 @@ class WidgetConfigDAO:
         """Add a suggested message."""
         query = """
             INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
-            VALUES (1, :message_text, :display_order, true, NOW(), NOW())
+            VALUES ((SELECT id FROM widget_configuration WHERE is_singleton = true), :message_text, :display_order, true, NOW(), NOW())
         """
         params = {"message_text": message, "display_order": index}
         try:

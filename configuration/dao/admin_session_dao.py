@@ -99,7 +99,7 @@ class AdminSessionDAO:
                        login_at, last_activity_at, expires_at, is_active, action_count
                 FROM admin_sessions
                 WHERE email = :email AND is_active = true
-                ORDER BY login_at DESC
+                ORDER BY id DESC
             """
             params = {"email": email}
         else:
@@ -108,7 +108,7 @@ class AdminSessionDAO:
                        login_at, last_activity_at, expires_at, is_active, action_count
                 FROM admin_sessions
                 WHERE is_active = true
-                ORDER BY login_at DESC
+                ORDER BY id DESC
             """
             params = {}
 
@@ -146,11 +146,13 @@ class AdminSessionDAO:
             return False
 
     async def logout_session(self, session_id: str, reason: str = "manual") -> bool:
-        """Logout a session by marking it inactive."""
+        """Logout a session by marking it inactive. PG18: RETURNING OLD/NEW for atomic audit."""
         query = """
             UPDATE admin_sessions
             SET is_active = false, logout_at = :now, logout_reason = :reason
             WHERE session_id = :session_id
+            RETURNING OLD.is_active AS was_active, OLD.action_count AS final_action_count,
+                      NEW.logout_at AS logout_at, NEW.logout_reason AS logout_reason
         """
 
         now = datetime.utcnow()
@@ -159,30 +161,42 @@ class AdminSessionDAO:
         try:
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
-                await session.execute(text(query), params)
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
                 await session.commit()
-                logger.log_db_query(query, params, None)
+                if row:
+                    change = dict(row._mapping)
+                    logger.info(f"Session {session_id} logged out: was_active={change.get('was_active')}, "
+                               f"actions={change.get('final_action_count')}, reason={change.get('logout_reason')}")
+                logger.log_db_query(query, params, row)
                 return True
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return False
 
     async def expire_old_sessions(self) -> int:
-        """Mark expired sessions as inactive. Returns count of updated sessions."""
+        """Mark expired sessions as inactive. PG18: RETURNING OLD/NEW for audit log."""
         query = """
             UPDATE admin_sessions
             SET is_active = false, logout_reason = 'expired'
             WHERE is_active = true AND expires_at < NOW()
+            RETURNING OLD.session_id AS session_id, OLD.email AS email,
+                      OLD.expires_at AS expired_at, OLD.action_count AS action_count
         """
 
         try:
             logger.log_db_operation(query)
             async with get_db_session() as session:
                 result = await session.execute(text(query))
+                rows = result.fetchall()
                 await session.commit()
+                count = len(rows)
+                if count > 0:
+                    for row in rows:
+                        change = dict(row._mapping)
+                        logger.info(f"Expired session {change.get('session_id')} "
+                                   f"(email={change.get('email')}, actions={change.get('action_count')})")
                 logger.log_db_query(query, result=None)
-                # Get the count of rows affected
-                count = result.rowcount if hasattr(result, 'rowcount') else 0
                 return count
         except Exception as e:
             logger.log_db_query(query, error=e)

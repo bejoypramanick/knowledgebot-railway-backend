@@ -139,7 +139,7 @@ class ChatAgentConfigDAO:
                    is_active, created_at, updated_at
             FROM persona_configurations
             WHERE is_active = true
-            ORDER BY created_at DESC
+            ORDER BY id DESC
             LIMIT 1
         """)
         try:

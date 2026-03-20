@@ -55,7 +55,7 @@ class AdminActionDAO:
                 ip_address, user_agent, created_at
             FROM admin_actions
             WHERE {' AND '.join(where_clauses)}
-            ORDER BY created_at DESC LIMIT :limit OFFSET :offset
+            ORDER BY id DESC LIMIT :limit OFFSET :offset
         """
         query = text(query_str)
 
@@ -118,8 +118,12 @@ class AdminActionDAO:
                 created_at
             FROM admin_actions
             WHERE success = false
-              AND created_at > NOW() - INTERVAL '1 day' * :days
-            ORDER BY created_at DESC
+              AND id >= (
+                  SELECT COALESCE(MIN(id), '00000000-0000-0000-0000-000000000000'::uuid)
+                  FROM admin_actions
+                  WHERE created_at > NOW() - INTERVAL '1 day' * :days
+              )
+            ORDER BY id DESC
             LIMIT :limit
         """)
 
@@ -150,7 +154,7 @@ class AdminActionDAO:
                 created_at
             FROM admin_actions
             WHERE email = :email
-            ORDER BY created_at DESC
+            ORDER BY id DESC
             LIMIT :limit OFFSET :offset
         """)
 

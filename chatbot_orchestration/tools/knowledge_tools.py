@@ -1044,7 +1044,7 @@ async def query_railway_postgres(query: str) -> str:
             elif any(word in query_lower for word in ['recent', 'latest', 'last']):
                 if any(word in query_lower for word in ['file', 'document', 'upload']):
                     result = await session.execute(
-                        text("SELECT display_name, mime_type, file_size, created_at FROM file_uploads WHERE processing_status = 'completed' ORDER BY created_at DESC LIMIT 5")
+                        text("SELECT display_name, mime_type, file_size, created_at FROM file_uploads WHERE processing_status = 'completed' ORDER BY id DESC LIMIT 5")
                     )
                     rows = result.mappings().all()
                     if rows:
@@ -1111,7 +1111,7 @@ async def request_human_agent_connection(
             hil_query = """
                 SELECT hil_enabled 
                 FROM widget_configuration 
-                WHERE id = 1 
+                WHERE is_singleton = true
                 LIMIT 1
             """
             hil_result = await db_session.execute(text(hil_query))
@@ -1226,7 +1226,7 @@ async def request_human_agent_connection(
                             logger.info(f"🔄 Got session details, querying for latest message...")
 
                             # Get latest message (using numeric session_id, not UUID)
-                            msg_query = "SELECT id, content, role, created_at FROM chat_messages WHERE session_id = :session_id ORDER BY created_at DESC LIMIT 1"
+                            msg_query = "SELECT id, content, role, created_at FROM chat_messages WHERE session_id = :session_id ORDER BY id DESC LIMIT 1"
                             logger.info(f"🔄 Executing message query with numeric session_id={session_numeric_id}")
                             msg_result = await db_session.execute(text(msg_query), {"session_id": session_numeric_id})
                             msg_row = msg_result.mappings().first()

@@ -61,7 +61,7 @@ class NotificationsDAO:
                                 CASE WHEN read_at IS NULL THEN false ELSE true END as read
                         FROM notifications
                         WHERE user_email = :user_email AND read_at IS NULL
-                        ORDER BY created_at DESC
+                        ORDER BY id DESC
                         LIMIT :limit OFFSET :offset
                     """
                 else:
@@ -70,7 +70,7 @@ class NotificationsDAO:
                                 CASE WHEN read_at IS NULL THEN false ELSE true END as read
                         FROM notifications
                         WHERE user_email = :user_email
-                        ORDER BY created_at DESC
+                        ORDER BY id DESC
                         LIMIT :limit OFFSET :offset
                     """
                 params = {"user_email": user_email, "limit": limit, "offset": offset}
