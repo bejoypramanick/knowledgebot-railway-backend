@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from shared.otel_logger import get_otel_logger
 from configuration.dao.widget_config_dao import WidgetConfigDAO
+from configuration.core.railway_storage import railway_storage
 
 logger = get_otel_logger("widget_config_service", "configuration")
 
@@ -40,6 +41,14 @@ class WidgetConfigService:
             for i, msg in enumerate(suggested_messages, 1):
                 logger.info(f"   [{i}] {msg}")
             
+            # Resolve S3 keys to fresh presigned URLs
+            profile_url = widget_config.get("profile_picture_url", "")
+            chat_icon_url = widget_config.get("chat_icon_url", "")
+            if profile_url and not profile_url.startswith(("http", "data:")):
+                profile_url = railway_storage.get_public_url(profile_url)
+            if chat_icon_url and not chat_icon_url.startswith(("http", "data:")):
+                chat_icon_url = railway_storage.get_public_url(chat_icon_url)
+
             # Transform configuration for frontend
             transformed_config = {
                 "display_name": widget_config.get("display_name", "Chat Assistant"),
@@ -51,8 +60,8 @@ class WidgetConfigService:
                 "use_primary_for_header": widget_config.get("use_primary_for_header", True),
                 "chat_bubble_color": widget_config.get("chat_bubble_color", "#f3f4f6"),
                 "align_bubble": widget_config.get("align_bubble", "bottom-right"),
-                "profile_picture_url": widget_config.get("profile_picture_url", ""),
-                "chat_icon_url": widget_config.get("chat_icon_url", ""),
+                "profile_picture_url": profile_url,
+                "chat_icon_url": chat_icon_url,
                 "chat_header": widget_config.get("chat_header", ""),
                 "chat_welcome_message": widget_config.get("chat_welcome_message", ""),
                 "suggested_messages": suggested_messages,

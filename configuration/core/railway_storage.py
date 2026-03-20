@@ -125,22 +125,7 @@ class RailwayStorageService:
                 # Cloudflare R2 format
                 storage_url = f"https://pub-{self.bucket_name}.{self.endpoint_url.replace('https://', '')}/{unique_filename}"
             else:
-                # Generic S3 format - try to make it public by adding query parameters if needed
-                storage_url = f"{self.endpoint_url}/{self.bucket_name}/{unique_filename}"
-                
-                # For Railway storage, we might need to use a different approach
-                # Let's try to generate a presigned URL that lasts for a week (maximum allowed)
-                try:
-                    presigned_url = self._s3_client.generate_presigned_url(
-                        'get_object',
-                        Params={'Bucket': self.bucket_name, 'Key': unique_filename},
-                        ExpiresIn=604800  # 7 days (maximum allowed by Railway)
-                    )
-                    storage_url = presigned_url
-                    logger.info("✅ Using presigned URL for Railway storage (7 days)")
-                except Exception as presign_error:
-                    logger.warning(f"⚠️ Could not generate presigned URL: {presign_error}")
-                    # Fall back to direct URL
+                storage_url = unique_filename
             
             logger.info(f"✅ Image uploaded successfully: {unique_filename}")
             return storage_url, unique_filename
