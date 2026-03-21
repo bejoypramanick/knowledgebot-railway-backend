@@ -159,77 +159,6 @@ class ConfigurationService:
             logger.error(f"Error updating widget image: {e}")
             raise
 
-    # Individual configuration data endpoints for progressive loading
-    async def get_security_settings(self) -> Dict[str, Any]:
-        """Get security settings only"""
-        try:
-            security_rows = await self._chat_agent_dao.get_security_settings()
-            security = {
-                "response_timeout": 30,
-                "response_policy": 0.5,
-                "hil_enabled": False,
-                "hil_disabled_message": ""
-            }
-            for row in security_rows:
-                setting_name = row['setting_name']
-                setting_value = row['setting_value']
-                setting_type = row['setting_type']
-
-                if setting_name == 'response_timeout' and setting_type == 'integer':
-                    security['response_timeout'] = int(setting_value)
-                elif setting_name == 'response_policy' and setting_type in ('integer', 'float'):
-                    security['response_policy'] = float(setting_value)
-                elif setting_name == 'hil_enabled' and setting_type == 'boolean':
-                    security['hil_enabled'] = setting_value.lower() in ('true', '1', 't', 'yes')
-                elif setting_name == 'hil_disabled_message' and setting_type == 'string':
-                    security['hil_disabled_message'] = setting_value
-            return security
-        except Exception as e:
-            logger.error(f"Error getting security settings: {e}")
-            raise
-
-    async def get_llm_providers(self) -> Dict[str, Any]:
-        """Get LLM providers and token usage"""
-        try:
-            llm_rows = await self._chat_agent_dao.get_llm_providers()
-            llm_tokens = {}
-            for row in llm_rows:
-                provider = row['provider_name']
-                token_limit = row['token_limit']
-                used_tokens = row['token_used']
-                llm_tokens[provider] = {
-                    "used": used_tokens,
-                    "available": (token_limit - used_tokens),
-                    "limit": token_limit
-                }
-            return llm_tokens
-        except Exception as e:
-            logger.error(f"Error getting LLM providers: {e}")
-            raise
-
-    async def get_active_persona(self) -> Dict[str, Any]:
-        """Get active persona configuration"""
-        try:
-            persona = await self._chat_agent_dao.get_active_persona()
-            all_personas = []
-
-            try:
-                all_personas = await self._chat_agent_dao.get_all_personas()
-                if not persona and all_personas:
-                    persona = all_personas[0]
-            except Exception as e:
-                logger.error(f"Error fetching personas: {e}")
-
-            persona_config = {
-                "system_prompt": persona.get('system_prompt', '') if persona else "",
-                "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "KnowledgeBot",
-                "available_personas": all_personas
-            }
-            return persona_config
-        except Exception as e:
-            logger.error(f"Error getting active persona: {e}")
-            raise
-
     async def get_human_agents(self):
         """Get human agents list with {id, email} for display"""
         try:
@@ -237,15 +166,6 @@ class ConfigurationService:
             return [{"id": a["id"], "email": a["email"]} for a in agents]
         except Exception as e:
             logger.error(f"Error getting human agents: {e}")
-            raise
-
-    async def get_admin_emails(self):
-        """Get admin emails list with {id, email} for display"""
-        try:
-            admins = await self._chat_agent_dao.get_admins()
-            return [{"id": a["id"], "email": a["email"]} for a in admins]
-        except Exception as e:
-            logger.error(f"Error getting admin emails: {e}")
             raise
 
     async def add_human_agent(self, email: str) -> bool:
