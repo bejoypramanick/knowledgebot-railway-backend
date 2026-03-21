@@ -945,7 +945,7 @@ class ProcessingService:
                 logger.error(f"   ❌ Failed to create upload operation")
                 return None
             
-            return await self._waitForGeminiUploadCompletion(operation, job_context)
+            return await self._waitForGeminiUploadCompletion(operation, job_context, display_name=doc_name)
         finally:
             try:
                 os.unlink(temp_file)
@@ -966,7 +966,7 @@ class ProcessingService:
             ]
         }
 
-    async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext) -> Optional[UploadResult]:
+    async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext, display_name: str = None) -> Optional[UploadResult]:
         """Poll Gemini upload operation until done using async client"""
         from core.ai import get_genai_client
 
@@ -1010,9 +1010,9 @@ class ProcessingService:
                     break
                 continue
         
-        return await self._extractDocumentNameFromOperation(current_operation, job_context.store_name)
+        return await self._extractDocumentNameFromOperation(current_operation, job_context.store_name, display_name=display_name)
 
-    async def _extractDocumentNameFromOperation(self, operation, store_name: str) -> Optional[UploadResult]:
+    async def _extractDocumentNameFromOperation(self, operation, store_name: str, display_name: str = None) -> Optional[UploadResult]:
         """Extract document name and URI from operation"""
         # Handle case where operation is still a string (ID)
         if isinstance(operation, str):
@@ -1033,7 +1033,8 @@ class ProcessingService:
                 document_name=doc_name,
                 file_search_store_name=store_name,
                 uploaded_at=datetime.utcnow(),
-                gemini_file_uri=doc_uri
+                gemini_file_uri=doc_uri,
+                display_name=display_name
             )
         
         logger.error(f"   ❌ Upload failed or invalid response - no document_name in operation.response")

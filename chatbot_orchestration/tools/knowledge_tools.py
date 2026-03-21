@@ -127,12 +127,11 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
     Batch lookup original source URLs from database using Gemini retrieved_context.title values.
     Returns {title: url} mapping.
 
-    How it works:
-    1. Single query fetches ALL active scraped_websites (gemini_file_name → original_url)
-    2. For each Gemini title, normalize both sides and compare
-       - Gemini title can be: display_name ("page_7127_1773651148") or full path
-       - DB stores: full document path ("fileSearchStores/.../documents/page71271773651148-xyz")
-    3. Normalization: strip path prefixes, remove underscores/hyphens/suffixes → compare core ID
+    Gemini FileSearch returns retrieved_context.title = the display_name set during upload
+    (e.g. "page_019d122b-1c64-793c-88d4-7caae454d1bc_1774126453").
+
+    This is stored in file_search_metadata->>'display_name' in the scraped_websites table.
+    Single query matches all titles at once.
     """
     if not doc_titles:
         return {}
@@ -140,70 +139,60 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
     try:
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text
-        import re as _re
 
         async with get_db_session() as session:
             logger.info(f"📎 [CITATION_LOOKUP] Looking up URLs for {len(doc_titles)} titles: {doc_titles}")
 
-            # Single query: fetch all active scraped website records
+            # Single query: match titles against display_name in JSONB, gemini_file_name, or pattern
             result = await session.execute(text("""
-                SELECT gemini_file_name, original_url FROM scraped_websites
+                SELECT
+                    file_search_metadata->>'display_name' AS display_name,
+                    gemini_file_name,
+                    original_url
+                FROM scraped_websites
                 WHERE processing_status != 'deleted'
                 AND original_url IS NOT NULL
-                AND gemini_file_name IS NOT NULL
-            """))
-            db_rows = result.fetchall()
-            logger.info(f"📎 [CITATION_LOOKUP] Fetched {len(db_rows)} scraped_websites records")
+                AND (
+                    file_search_metadata->>'display_name' = ANY(:titles)
+                    OR gemini_file_name = ANY(:titles)
+                )
+            """), {"titles": doc_titles})
+            rows = result.fetchall()
 
-            if not db_rows:
-                logger.warning(f"📎 [CITATION_LOOKUP] No scraped_websites records found in database")
-                return {}
-
-            def normalize(value: str) -> str:
-                """Extract core numeric ID by stripping paths, prefixes, underscores, hyphens, and random suffixes.
-                'page_7127_1773651148'                                      → 'page71271773651148'
-                'fileSearchStores/.../documents/page71271773651148-c5rsigc7' → 'page71271773651148'
-                """
-                # Take last path segment if it's a full path
-                if '/' in value:
-                    value = value.rsplit('/', 1)[-1]
-                # Strip random suffix after last hyphen (Gemini appends e.g. -c5rsigc7mc1k)
-                # But only if it looks like a random suffix (contains letters after hyphen)
-                parts = value.rsplit('-', 1)
-                if len(parts) == 2 and _re.search(r'[a-z]', parts[1]):
-                    value = parts[0]
-                # Remove underscores and hyphens to normalize
-                value = value.replace('_', '').replace('-', '')
-                return value.lower()
-
-            # Build normalized lookup index from DB: {normalized_key: original_url}
-            db_index = {}
-            for gemini_name, original_url in db_rows:
-                norm_key = normalize(gemini_name)
-                db_index[norm_key] = original_url
-                # Also index by exact gemini_file_name for direct matches
-                db_index[gemini_name] = original_url
-
-            # Match each Gemini title against the index
             url_map = {}
-            for title in doc_titles:
-                # Try direct match first
-                if title in db_index:
-                    url_map[title] = db_index[title]
-                    logger.info(f"📎 [CITATION_LOOKUP] ✅ Direct match: {title} → {url_map[title]}")
-                    continue
+            for display_name, gemini_file_name, original_url in rows:
+                # Map by whichever title matched
+                for title in doc_titles:
+                    if title == display_name or title == gemini_file_name:
+                        url_map[title] = original_url
+                        logger.info(f"📎 [CITATION_LOOKUP] ✅ {title} → {original_url}")
 
-                # Try normalized match
-                norm_title = normalize(title)
-                if norm_title in db_index:
-                    url_map[title] = db_index[norm_title]
-                    logger.info(f"📎 [CITATION_LOOKUP] ✅ Normalized match: {title} (norm={norm_title}) → {url_map[title]}")
-                    continue
+            # For any unmatched titles, try fallback: extract website_id from title and match by parent/child id
+            unmatched = [t for t in doc_titles if t not in url_map]
+            if unmatched:
+                import re as _re
+                for title in unmatched:
+                    # Title format: page_{website_id}_{timestamp}
+                    # Extract the UUID between first and last underscore
+                    match = _re.match(r'^page_(.+)_(\d+)$', title)
+                    if match:
+                        website_id = match.group(1)
+                        logger.info(f"📎 [CITATION_LOOKUP] Fallback: extracting website_id={website_id} from title {title}")
 
-                logger.warning(f"📎 [CITATION_LOOKUP] ❌ No match for title: {title} (norm={norm_title})")
-                # Log a few DB entries for debugging
-                sample_keys = list(db_index.keys())[:5]
-                logger.warning(f"📎 [CITATION_LOOKUP] Sample DB keys: {sample_keys}")
+                        fallback_result = await session.execute(text("""
+                            SELECT original_url FROM scraped_websites
+                            WHERE (id::text = :website_id OR parent_id::text = :website_id)
+                            AND processing_status != 'deleted'
+                            AND original_url IS NOT NULL
+                            LIMIT 1
+                        """), {"website_id": website_id})
+                        fallback_row = fallback_result.fetchone()
+
+                        if fallback_row:
+                            url_map[title] = fallback_row[0]
+                            logger.info(f"📎 [CITATION_LOOKUP] ✅ Fallback match: {title} → {fallback_row[0]}")
+                        else:
+                            logger.warning(f"📎 [CITATION_LOOKUP] ❌ No match for title: {title}")
 
             logger.info(f"📎 [CITATION_LOOKUP] Result: {len(url_map)}/{len(doc_titles)} URLs mapped")
             return url_map

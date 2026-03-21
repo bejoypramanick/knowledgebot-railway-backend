@@ -57,17 +57,21 @@ class UploadResult:
     file_search_store_name: str
     uploaded_at: datetime
     gemini_file_uri: Optional[str] = None
+    display_name: Optional[str] = None
 
     @property
     def file_search_metadata(self) -> Dict[str, Any]:
         """Build FileSearch metadata dict from upload result"""
-        return {
+        metadata = {
             "type": "file_search",
             "file_search_store_name": self.file_search_store_name,
             "document_name": self.document_name,
             "gemini_file_uri": self.gemini_file_uri,
             "uploaded_at": self.uploaded_at.isoformat()
         }
+        if self.display_name:
+            metadata["display_name"] = self.display_name
+        return metadata
 
     def __repr__(self) -> str:
         return f"UploadResult(doc_id={self.document_name})"
