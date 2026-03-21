@@ -144,25 +144,27 @@ logger.info("✅ Redis Pub/Sub manager initialized for agent and customer SSE ev
 
 @router.get("/chatAgentConfig")
 async def get_chatbot_config(cache: bool = True):
-    """Get complete chatbot configuration with caching support"""
+    """Get complete chatbot configuration — Redis DB7 cache first, PG fallback"""
     import time
     start_time = time.time()
-    logger.info("[ENTRY] GET /chatAgentConfig endpoint")
-    logger.info(f"[PARAM] cache={cache}")
-    
+
     try:
-        logger.info("[FLOW] Calling config_service.get_chatAgent_config()")
+        if cache:
+            from shared.redis_ui_cache import cache_get, cache_set, CHAT_AGENT_CONFIG_KEY, TTL_LONG
+            cached = await cache_get(CHAT_AGENT_CONFIG_KEY)
+            if cached:
+                logger.info(f"[CACHE HIT] GET /chatAgentConfig ({time.time() - start_time:.3f}s)")
+                return {"success": True, "data": cached}
+
         config = await config_service.get_chatAgent_config()
-        
-        elapsed_time = time.time() - start_time
-        logger.info(f"[RESULT] Config retrieved with keys: {list(config.keys())}")
-        logger.info(f"[EXIT] GET /chatAgentConfig - Success (elapsed: {elapsed_time:.3f}s)")
-        
+
+        if cache:
+            await cache_set(CHAT_AGENT_CONFIG_KEY, config, TTL_LONG)
+
+        logger.info(f"[DB] GET /chatAgentConfig ({time.time() - start_time:.3f}s)")
         return {"success": True, "data": config}
     except Exception as e:
-        elapsed_time = time.time() - start_time
-        logger.error(f"[EXIT] GET /chatAgentConfig - Error (elapsed: {elapsed_time:.3f}s)")
-        logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
+        logger.error(f"[ERROR] GET /chatAgentConfig: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/chatAgentConfig")
@@ -204,11 +206,16 @@ async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
             logger.warning(f"⚠️ Could not clear agent cache: {cache_error}")
             # Don't fail the request if cache clearing fails
         
+        # Invalidate UI cache
+        try:
+            from shared.redis_ui_cache import cache_invalidate, CHAT_AGENT_CONFIG_KEY
+            await cache_invalidate(CHAT_AGENT_CONFIG_KEY)
+        except Exception:
+            pass
+
         return {"success": True, "message": "Chatbot configuration saved successfully"}
     except Exception as e:
         logger.error(f"❌ Error saving chatbot config: {e}")
-        logger.error(f"❌ Error type: {type(e)}")
-        logger.error(f"❌ Error details: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error saving chatbot config: {str(e)}")
 
 # =================================
@@ -332,33 +339,25 @@ async def get_admin_emails():
 
 @router.get("/widgetConfig")
 async def get_widget_config():
-    """Get widget configuration - fails on error (no fallback)"""
+    """Get widget configuration — Redis DB7 cache first, PG fallback"""
     try:
-        logger.info("=" * 100)
-        logger.info("📥 GET /widgetConfig endpoint called")
-        logger.info("=" * 100)
-        
-        config = await config_service.get_widget_config()
+        from shared.redis_ui_cache import cache_get, cache_set, WIDGET_CONFIG_KEY, TTL_LONG
+        cached = await cache_get(WIDGET_CONFIG_KEY)
+        if cached:
+            logger.info("[CACHE HIT] GET /widgetConfig")
+            return {"success": True, "data": cached}
 
-        # If no config exists, raise error instead of using default
+        config = await config_service.get_widget_config()
         if not config:
-            logger.error("❌ No widget configuration found in database")
             raise HTTPException(status_code=404, detail="Widget configuration not found")
 
-        logger.info(f"✓ Widget config retrieved: {config.get('display_name', 'Unknown')}")
-        logger.info(f"📋 Suggested messages in response: {len(config.get('suggested_messages', []))}")
-        logger.info(f"📋 Config keys being returned: {list(config.keys())}")
-        logger.info(f"📋 Full config object: {config}")
-        logger.info("=" * 100)
+        await cache_set(WIDGET_CONFIG_KEY, config, TTL_LONG)
+        logger.info("[DB] GET /widgetConfig")
         return {"success": True, "data": config}
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
         logger.error(f"❌ Error getting widget config: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        # Fail explicitly with error details
         raise HTTPException(status_code=500, detail=f"Failed to fetch widget configuration: {str(e)}")
 
 @router.post("/widgetConfig")
@@ -461,7 +460,12 @@ async def update_widget_config(
             logger.info("📞 [Router] About to call config_service.update_widget_config(config_data) for multipart")
             logger.info(f"📞 [Router] config_data contains suggested_messages: {'suggested_messages' in config_data}")
             await config_service.update_widget_config(config_data)
-            logger.info("📞 [Router] config_service.update_widget_config(config_data) completed successfully for multipart")
+            # Invalidate widget cache
+            try:
+                from shared.redis_ui_cache import cache_invalidate, WIDGET_CONFIG_KEY
+                await cache_invalidate(WIDGET_CONFIG_KEY)
+            except Exception:
+                pass
             return {"success": True, "message": "Widget configuration updated successfully with images"}
 
         else:
@@ -502,7 +506,12 @@ async def update_widget_config(
             logger.info("📞 [Router] About to call config_service.update_widget_config(body)")
             logger.info(f"📞 [Router] Body contains suggested_messages: {'suggested_messages' in body}")
             await config_service.update_widget_config(body)
-            logger.info("📞 [Router] config_service.update_widget_config(body) completed successfully")
+            # Invalidate widget cache
+            try:
+                from shared.redis_ui_cache import cache_invalidate, WIDGET_CONFIG_KEY
+                await cache_invalidate(WIDGET_CONFIG_KEY)
+            except Exception:
+                pass
             return {"success": True, "message": "Widget configuration updated successfully"}
 
     except json.JSONDecodeError as e:
@@ -579,6 +588,13 @@ async def upload_widget_image(
         # Store in widget_configuration table via service
         await config_service.update_widget_image(type, data_url, file.filename)
 
+        # Invalidate widget cache
+        try:
+            from shared.redis_ui_cache import cache_invalidate, WIDGET_CONFIG_KEY
+            await cache_invalidate(WIDGET_CONFIG_KEY)
+        except Exception:
+            pass
+
         return {
             "success": True,
             "url": data_url,
@@ -654,6 +670,11 @@ async def add_admin_user(request_data: AdminManagementRequest, request: Request)
     """Add a new admin user"""
     try:
         result = await config_service.add_admin(request_data.email)
+        try:
+            from shared.redis_ui_cache import cache_invalidate, CHAT_AGENT_CONFIG_KEY
+            await cache_invalidate(CHAT_AGENT_CONFIG_KEY)
+        except Exception:
+            pass
         return {"success": True, "message": "Admin user added successfully"}
     except Exception as e:
         logger.error(f"Error adding admin user: {e}")
@@ -664,6 +685,11 @@ async def remove_admin_user(user_id: str, request: Request):
     """Remove an admin user by user ID"""
     try:
         result = await config_service.remove_admin(user_id)
+        try:
+            from shared.redis_ui_cache import cache_invalidate, CHAT_AGENT_CONFIG_KEY
+            await cache_invalidate(CHAT_AGENT_CONFIG_KEY)
+        except Exception:
+            pass
         return {"success": True, "message": "Admin user removed successfully"}
     except Exception as e:
         logger.error(f"Error removing admin user: {e}")
@@ -684,6 +710,11 @@ async def add_human_agent(request_data: AdminManagementRequest, request: Request
     """Add a new human agent"""
     try:
         result = await config_service.add_human_agent(request_data.email)
+        try:
+            from shared.redis_ui_cache import cache_invalidate, CHAT_AGENT_CONFIG_KEY
+            await cache_invalidate(CHAT_AGENT_CONFIG_KEY)
+        except Exception:
+            pass
         return {"success": True, "message": "Human agent added successfully"}
     except Exception as e:
         logger.error(f"Error adding human agent: {e}")
@@ -694,6 +725,11 @@ async def remove_human_agent(user_id: str, request: Request):
     """Remove a human agent by user ID"""
     try:
         result = await config_service.remove_human_agent(user_id)
+        try:
+            from shared.redis_ui_cache import cache_invalidate, CHAT_AGENT_CONFIG_KEY
+            await cache_invalidate(CHAT_AGENT_CONFIG_KEY)
+        except Exception:
+            pass
         return {"success": True, "message": "Human agent removed successfully"}
     except Exception as e:
         logger.error(f"Error removing human agent: {e}")
@@ -2086,9 +2122,16 @@ async def get_user_unique_id(request: Request, role: str = "customer"):
 
 @router.get("/performance/metrics")
 async def get_performance_metrics():
-    """Get performance metrics"""
+    """Get performance metrics — Redis DB7 cache first (5min TTL), PG fallback"""
     try:
+        from shared.redis_ui_cache import cache_get, cache_set, PERFORMANCE_METRICS_KEY, TTL_SHORT
+        cached = await cache_get(PERFORMANCE_METRICS_KEY)
+        if cached:
+            logger.info("[CACHE HIT] GET /performance/metrics")
+            return {"success": True, "data": cached}
+
         metrics = await performance_service.get_performance_metrics()
+        await cache_set(PERFORMANCE_METRICS_KEY, metrics, TTL_SHORT)
         return {"success": True, "data": metrics}
     except Exception as e:
         logger.error(f"Error getting metrics: {e}")
@@ -2096,9 +2139,16 @@ async def get_performance_metrics():
 
 @router.get("/admin/token-usage/detailed")
 async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_call_type: str = None):
-    """Get detailed token usage"""
+    """Get detailed token usage — Redis DB7 cache first (5min TTL), PG fallback"""
     try:
+        from shared.redis_ui_cache import cache_get, cache_set, TOKEN_USAGE_KEY_PREFIX, TTL_SHORT
+        cache_key = f"{TOKEN_USAGE_KEY_PREFIX}{limit}:{provider}:{api_call_type}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return {"success": True, "data": cached}
+
         usage = await token_usage_service.get_detailed_token_usage(limit, provider, api_call_type)
+        await cache_set(cache_key, usage, TTL_SHORT)
         return {"success": True, "data": usage}
     except Exception as e:
         logger.error(f"Error getting detailed token usage: {e}")

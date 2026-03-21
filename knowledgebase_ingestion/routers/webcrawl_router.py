@@ -19,6 +19,16 @@ from shared.celery_dispatcher import web_celery
 
 logger = get_otel_logger("webcrawl_router", "knowledgebase-ingestion")
 
+
+async def _invalidate_kb_cache():
+    """Invalidate all KB file cache keys in Redis DB7."""
+    try:
+        from shared.redis_ui_cache import cache_invalidate_pattern
+        await cache_invalidate_pattern("ui_cache:kb_files:*")
+    except Exception:
+        pass
+
+
 # NOTE: Prefix is provided by include_router() in main.py
 # Do NOT include full path here to avoid double prefix (prefix=/api/v1/knowledgebase in include_router)
 router = APIRouter(tags=["web-crawl"])
@@ -122,12 +132,13 @@ async def cancel_web_task(item_id: str, request: Request = None):
         else:
             logger.error(f"❌ Failed to set cancellation flag for website task {item_id}")
 
+        await _invalidate_kb_cache()
         return {
             "success": success,
             "message": "Website task cancellation requested" if success else "Failed to cancel website task",
             "item_id": item_id
         }
-        
+
     except Exception as e:
         logger.error(f"Error cancelling website task {item_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -158,6 +169,7 @@ async def cancel_all_web_tasks(request: Request = None):
         if websites_cancelled > 0:
             logger.info(f"✅ Marked {websites_cancelled} website tasks as cancelled in database")
 
+        await _invalidate_kb_cache()
         return {
             "success": True,
             "message": f"Cancelled {websites_cancelled} website tasks",
@@ -216,15 +228,7 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
 
         if result.get('success'):
             logger.info(f"✅ [WEBSITE_DELETE_SUCCESS] Website {website_id} deleted completely")
-            logger.info(f"   Type: {'Parent Website' if result.get('is_parent') else 'Child Page'}")
-            logger.info(f"   Child pages deleted: {result.get('child_pages_count', 0)}")
-            logger.info(f"   Celery tasks revoked: {result['cleanup_summary']['celery_tasks_revoked']}")
-            logger.info(f"   Redis keys deleted: {result['cleanup_summary']['redis_keys_deleted']}")
-            logger.info(f"   Gemini files deleted: {result['cleanup_summary']['gemini_files_deleted']}")
-            logger.info(f"   Gemini FileSearch docs deleted: {result['cleanup_summary']['gemini_filesearch_docs_deleted']}")
-            logger.info(f"   S3 raw files deleted: {result['cleanup_summary']['s3_raw_files_deleted']}")
-            logger.info(f"   S3 processed files deleted: {result['cleanup_summary']['s3_processed_files_deleted']}")
-            logger.info(f"   DB records affected: {result['cleanup_summary']['db_records_affected']}")
+            await _invalidate_kb_cache()
             return result
         else:
             error_msg = result.get('errors')[0].get('error') if result.get('errors') else 'Deletion failed'
@@ -280,6 +284,7 @@ async def scrape_website_async_endpoint(request: Request = None):
         
         if result.get('success'):
             logger.info(f"✅ Website scraping queued: {result.get('task_id')}")
+            await _invalidate_kb_cache()
             return result
         else:
             # Check if this is a duplicate error (409 Conflict) vs other errors (500)

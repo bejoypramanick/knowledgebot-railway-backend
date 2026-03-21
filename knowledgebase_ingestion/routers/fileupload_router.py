@@ -23,6 +23,15 @@ from shared.celery_dispatcher import file_celery
 logger = get_otel_logger("fileupload_router", "knowledgebase-ingestion")
 
 
+async def _invalidate_kb_cache():
+    """Invalidate all KB file cache keys in Redis DB7."""
+    try:
+        from shared.redis_ui_cache import cache_invalidate_pattern
+        await cache_invalidate_pattern("ui_cache:kb_files:*")
+    except Exception:
+        pass
+
+
 def get_mime_type_fallback(filename: str, db_mime_type: Optional[str] = None) -> str:
     """Get MIME type from database or derive from filename as fallback."""
     if db_mime_type:
@@ -94,26 +103,26 @@ async def get_upload_constraints(request: Request = None):
 @router.get("/files")
 async def get_all_files(request: Request = None, status: Optional[str] = None):
     """
-    Get all files and websites with their current status and hierarchical structure
-    
-    Query Parameters:
-        status: Optional filter for item status
-            - 'inactive': Returns items that are NOT pending, processing, queued, and NOT completed (cancelled, deleted, failed)
-            - None (default): Returns pending, processing, queued, and completed items
+    Get all files and websites — Redis DB7 cache first (10min TTL), PG fallback
     """
     try:
+        # Check Redis cache first
+        from shared.redis_ui_cache import cache_get, cache_set, KB_FILES_KEY_PREFIX, TTL_MEDIUM
+        cache_key = f"{KB_FILES_KEY_PREFIX}{status or 'active'}"
+        cached = await cache_get(cache_key)
+        if cached:
+            return cached
+
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
         # Get files based on status parameter
         from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
         fileupload_dao = FileUploadDAO()
-        
+
         if status == 'inactive':
-            # Get items that are NOT pending and NOT completed
             files = await fileupload_dao.get_inactive_files()
         else:
-            # Get items that are pending or completed
             files = await fileupload_dao.get_active_files()
 
         # Get hierarchical websites based on status parameter
@@ -143,16 +152,19 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
             for f in files
         ]
 
-        return {
+        response = {
             "success": True,
             "files": files_list,
-            "websites": websites,  # hierarchical website tree (filtered)
+            "websites": websites,
             "count": len(files_list),
             "sources": {
                 "upload": len(files_list),
-                "scrape": len(websites)  # Count of root-level websites
+                "scrape": len(websites)
             }
         }
+        # Cache the response
+        await cache_set(cache_key, response, TTL_MEDIUM)
+        return response
     except Exception as e:
         logger.error(f"Error getting files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -255,12 +267,13 @@ async def cancel_file_task(item_id: str, request: Request = None):
         else:
             logger.error(f"❌ Failed to set cancellation flag for file task {item_id}")
 
+        await _invalidate_kb_cache()
         return {
             "success": success,
             "message": "File task cancellation requested" if success else "Failed to cancel file task",
             "item_id": item_id
         }
-        
+
     except Exception as e:
         logger.error(f"Error cancelling file task {item_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -291,6 +304,7 @@ async def cancel_all_file_tasks(request: Request = None):
         if files_cancelled > 0:
             logger.info(f"✅ Marked {files_cancelled} file tasks as cancelled in database")
 
+        await _invalidate_kb_cache()
         return {
             "success": True,
             "message": f"Cancelled {files_cancelled} file tasks",
@@ -345,12 +359,7 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
 
         if result.get('success'):
             logger.info(f"✅ [FILE_DELETE_SUCCESS] File {file_id} deleted completely")
-            logger.info(f"   Celery tasks revoked: {result['cleanup_summary']['celery_tasks_revoked']}")
-            logger.info(f"   Redis keys deleted: {result['cleanup_summary']['redis_keys_deleted']}")
-            logger.info(f"   Gemini files deleted: {result['cleanup_summary']['gemini_files_deleted']}")
-            logger.info(f"   Gemini FileSearch docs deleted: {result['cleanup_summary']['gemini_filesearch_docs_deleted']}")
-            logger.info(f"   S3 raw files deleted: {result['cleanup_summary']['s3_raw_files_deleted']}")
-            logger.info(f"   S3 processed files deleted: {result['cleanup_summary']['s3_processed_files_deleted']}")
+            await _invalidate_kb_cache()
             return result
         else:
             error_msg = result.get('errors')[0].get('error') if result.get('errors') else 'Deletion failed'
@@ -414,6 +423,7 @@ async def delete_all_knowledge_endpoint(request: Request = None):
             logger.info(f"   Database records retained with status='deleted' for audit trail")
             logger.info(f"   Cleared by: {user_email}")
 
+            await _invalidate_kb_cache()
             return {
                 "success": True,
                 "message": result.get("message"),
@@ -748,9 +758,8 @@ async def upload_file_async(
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 raise
 
-            logger.info("=" * 80)
             logger.info("✨ [UPLOAD_COMPLETE] File upload process completed successfully")
-            logger.info("=" * 80)
+            await _invalidate_kb_cache()
 
             # Fetch the complete file record for UI population (like webcrawl does)
             try:

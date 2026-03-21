@@ -142,6 +142,42 @@ async def lifespan(app: FastAPI):
             app.state.database_ready = False
             logger.warning("⚠️ LIFESPAN: Service starting without database - endpoints will return 503")
 
+        # Warm Redis UI cache (DB7) — non-blocking, failures won't prevent startup
+        try:
+            logger.info("🔥 LIFESPAN: Warming Redis UI cache (DB7)...")
+            from shared.redis_ui_cache import (
+                init_ui_cache_redis, cache_set,
+                CHAT_AGENT_CONFIG_KEY, WIDGET_CONFIG_KEY,
+                PERFORMANCE_METRICS_KEY, TTL_LONG, TTL_SHORT
+            )
+            await init_ui_cache_redis()
+
+            from configuration.service.chat_agent_config_service import ChatAgentConfigService
+            from configuration.service.widget_config_service import WidgetConfigService
+            from configuration.service.performance_service import PerformanceService
+
+            config_svc = ChatAgentConfigService()
+            widget_svc = WidgetConfigService()
+            perf_svc = PerformanceService()
+
+            config_data, widget_data, perf_data = await asyncio.gather(
+                config_svc.get_chatAgent_config(),
+                widget_svc.get_widget_config(),
+                perf_svc.get_performance_metrics(),
+                return_exceptions=True
+            )
+
+            if not isinstance(config_data, Exception):
+                await cache_set(CHAT_AGENT_CONFIG_KEY, config_data, TTL_LONG)
+            if not isinstance(widget_data, Exception):
+                await cache_set(WIDGET_CONFIG_KEY, widget_data, TTL_LONG)
+            if not isinstance(perf_data, Exception):
+                await cache_set(PERFORMANCE_METRICS_KEY, perf_data, TTL_SHORT)
+
+            logger.info("✅ LIFESPAN: Redis UI cache warmed successfully")
+        except Exception as cache_err:
+            logger.warning(f"⚠️ LIFESPAN: UI cache warmup failed (non-fatal): {cache_err}")
+
         service_status.set_status("running")
         logger.info(f"🚀 LIFESPAN: Configuration service started successfully on port {PORT}")
         logger.info("✅ LIFESPAN: Startup complete - yielding to application")
@@ -150,6 +186,11 @@ async def lifespan(app: FastAPI):
         # Shutdown
         logger.info("🛑 LIFESPAN: Starting shutdown sequence")
         service_status.set_status("stopping")
+        try:
+            from shared.redis_ui_cache import close_ui_cache_redis
+            await close_ui_cache_redis()
+        except Exception:
+            pass
         await close_database()
         logger.info("✅ LIFESPAN: Configuration service shutdown complete")
     except Exception as e:

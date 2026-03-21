@@ -115,9 +115,59 @@ async def lifespan(app: FastAPI):
         except Exception as lookup_error:
             logger.error(f"❌ Error looking up FileSearch store: {lookup_error}")
 
+        # Warm Redis UI cache (DB7) for KB screen
+        try:
+            from shared.redis_ui_cache import (
+                init_ui_cache_redis, cache_set, KB_FILES_KEY_PREFIX, TTL_MEDIUM
+            )
+            await init_ui_cache_redis()
+
+            from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
+            from knowledgebase_ingestion.dao.webcrawl_dao import WebCrawlDAO
+
+            fileupload_dao = FileUploadDAO()
+            webcrawl_dao = WebCrawlDAO()
+
+            files = await fileupload_dao.get_active_files()
+            websites = await webcrawl_dao.get_hierarchical_websites(include_inactive=False)
+
+            files_list = [
+                {
+                    "id": str(f['id']),
+                    "type": "file",
+                    "source": "upload",
+                    "name": f['original_filename'],
+                    "file_extension": f.get('file_extension'),
+                    "processing_status": f['processing_status'],
+                    "error_message": f['error_message'],
+                    "size_bytes": f.get('file_size', 0),
+                    "char_count": f.get('char_count', 0),
+                    "processed_content_s3_key": f.get('processed_content_s3_key'),
+                    "created_at": f['created_at'].isoformat() if f.get('created_at') else None,
+                    "updated_at": f['updated_at'].isoformat() if f.get('updated_at') else None,
+                }
+                for f in files
+            ]
+            response = {
+                "success": True,
+                "files": files_list,
+                "websites": websites,
+                "count": len(files_list),
+                "sources": {"upload": len(files_list), "scrape": len(websites)},
+            }
+            await cache_set(f"{KB_FILES_KEY_PREFIX}active", response, TTL_MEDIUM)
+            logger.info(f"✅ KB cache warmed: {len(files_list)} files, {len(websites)} websites")
+        except Exception as cache_err:
+            logger.warning(f"⚠️ KB cache warmup failed (non-fatal): {cache_err}")
+
         logger.info("🚀 Knowledgebase ingestion service started successfully")
         yield
 
+        try:
+            from shared.redis_ui_cache import close_ui_cache_redis
+            await close_ui_cache_redis()
+        except Exception:
+            pass
         try:
             await close_database()
             logger.info("✅ Database closed")
