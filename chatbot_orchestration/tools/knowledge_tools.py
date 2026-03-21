@@ -130,7 +130,7 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
     Gemini FileSearch returns retrieved_context.title = the display_name set during upload
     (e.g. "page_019d122b-1c64-793c-88d4-7caae454d1bc_1774126453").
 
-    This is stored in file_search_metadata->>'display_name' in the scraped_websites table.
+    This is stored in metadata->>'display_name' in the scraped_websites table.
     Single query matches all titles at once.
     """
     if not doc_titles:
@@ -146,14 +146,14 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
             # Single query: match titles against display_name in JSONB, gemini_file_name, or pattern
             result = await session.execute(text("""
                 SELECT
-                    file_search_metadata->>'display_name' AS display_name,
+                    metadata->>'display_name' AS display_name,
                     gemini_file_name,
                     original_url
                 FROM scraped_websites
                 WHERE processing_status != 'deleted'
                 AND original_url IS NOT NULL
                 AND (
-                    file_search_metadata->>'display_name' = ANY(:titles)
+                    metadata->>'display_name' = ANY(:titles)
                     OR gemini_file_name = ANY(:titles)
                 )
             """), {"titles": doc_titles})
