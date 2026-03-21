@@ -467,12 +467,9 @@ class ChatLogService:
             else:
                 customer_name = user_display_id
 
-            # Get agent_id from SQL join (session_assignments → user_role_mapping → users)
-            raw_agent_id = session_row.get('agent_id')
-            assigned_agent_id = str(raw_agent_id) if raw_agent_id is not None else None
-            is_assigned_to_me = (raw_agent_id is not None and current_user_id is not None and raw_agent_id == current_user_id)
-            if assigned_agent and not is_assigned_to_me:
-                logger.warning(f"🔍 [ASSIGN_DEBUG] session={session_db_id} assigned_agent={assigned_agent} agent_id={assigned_agent_id} (type={type(raw_agent_id).__name__ if raw_agent_id else 'None'}) current_user_id={current_user_id} (type={type(current_user_id).__name__}) agent_email_from_join={session_row.get('agent_email')} is_assigned_to_me={is_assigned_to_me}")
+            # Get agent_id from SQL join (already cast to text in DAO)
+            assigned_agent_id = session_row.get('agent_id')
+            is_assigned_to_me = (assigned_agent_id is not None and current_user_id is not None and assigned_agent_id == str(current_user_id))
 
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
@@ -617,9 +614,9 @@ class ChatLogService:
                 customer_name = user_display_id
 
             # Assignment check
-            raw_agent_id = session_row.get('agent_id')
-            assigned_agent_id = str(raw_agent_id) if raw_agent_id is not None else None
-            is_assigned_to_me = (raw_agent_id is not None and current_user_id is not None and raw_agent_id == current_user_id)
+            # agent_id already cast to text in DAO
+            assigned_agent_id = session_row.get('agent_id')
+            is_assigned_to_me = (assigned_agent_id is not None and current_user_id is not None and assigned_agent_id == str(current_user_id))
 
             session_obj = ChatSessionResponse(
                 id=str(session_db_id),

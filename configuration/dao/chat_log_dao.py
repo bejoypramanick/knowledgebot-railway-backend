@@ -343,7 +343,7 @@ class ChatLogDAO:
                     WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
                 ),
                 agent_sessions AS (
-                    SELECT rs.*, u.email as agent_email, u.id as agent_id
+                    SELECT rs.*, u.email as agent_email, u.id::text as agent_id
                     FROM ranked_sessions rs
                     JOIN session_assignments sa ON rs.id = sa.session_id
                     JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
@@ -431,7 +431,7 @@ class ChatLogDAO:
                     WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
                 ),
                 deduped AS (
-                    SELECT DISTINCT ON (rs.id) rs.*, u.email as agent_email, u.id as agent_id
+                    SELECT DISTINCT ON (rs.id) rs.*, u.email as agent_email, u.id::text as agent_id
                     FROM ranked_sessions rs
                     LEFT JOIN session_assignments sa ON rs.id = sa.session_id
                     LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
@@ -470,7 +470,7 @@ class ChatLogDAO:
                       AND (cs.message_count > 0 OR cs.message_count IS NULL)
                 ),
                 deduped AS (
-                    SELECT DISTINCT ON (rs.id) rs.*, u.email as agent_email, u.id as agent_id
+                    SELECT DISTINCT ON (rs.id) rs.*, u.email as agent_email, u.id::text as agent_id
                     FROM ranked_sessions rs
                     LEFT JOIN session_assignments sa ON rs.id = sa.session_id
                     LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
@@ -1225,7 +1225,7 @@ class ChatLogDAO:
         query = f"""
             SELECT cs.*,
                    ag.email as agent_email,
-                   ag.user_id as agent_id,
+                   ag.user_id::text as agent_id,
                    lm.content as latest_msg_content,
                    lm.role as latest_msg_role,
                    lm.created_at as latest_msg_at,
