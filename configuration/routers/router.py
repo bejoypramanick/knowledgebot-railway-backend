@@ -1759,7 +1759,8 @@ async def end_customer_session(request: Request):
         session_id = body.get("session_id") or getattr(request.state, 'session_id', None)
 
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required")
+            # No session to end — return success silently (bubble close without active session)
+            return {"success": True, "message": "No active session"}
 
         user_email = request.headers.get("X-User-Email", "customer@example.com")
         await chat_log_service.end_customer_session(session_id, user_email)
