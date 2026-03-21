@@ -1075,6 +1075,16 @@ class ProcessingService:
                     processed_content_s3_key=processed_content_s3_key
                 )
 
+                # Cache citation URL mappings in Redis for fast lookup during chat
+                try:
+                    from shared.redis_citation_cache import cache_single_url
+                    if upload_result.display_name and page_data.page_url:
+                        await cache_single_url(upload_result.display_name, page_data.page_url)
+                    if upload_result.document_name and page_data.page_url:
+                        await cache_single_url(upload_result.document_name, page_data.page_url)
+                except Exception as cache_err:
+                    logger.warning(f"⚠️ Citation cache update failed (non-blocking): {cache_err}")
+
                 return job_context.website_id
 
             # Check if this is the root URL in multi-page mode
@@ -1095,6 +1105,16 @@ class ProcessingService:
                     processed_content_s3_key=processed_content_s3_key
                 )
 
+                # Cache citation URL mappings in Redis for fast lookup during chat
+                try:
+                    from shared.redis_citation_cache import cache_single_url
+                    if upload_result.display_name and page_data.page_url:
+                        await cache_single_url(upload_result.display_name, page_data.page_url)
+                    if upload_result.document_name and page_data.page_url:
+                        await cache_single_url(upload_result.document_name, page_data.page_url)
+                except Exception as cache_err:
+                    logger.warning(f"⚠️ Citation cache update failed (non-blocking): {cache_err}")
+
                 return job_context.website_id
 
             # This is a child page - record it as such
@@ -1112,6 +1132,16 @@ class ProcessingService:
                 crawl_session_id=page_data.session_id,
                 processed_content_s3_key=processed_content_s3_key
             )
+
+            # Cache citation URL mappings in Redis for fast lookup during chat
+            try:
+                from shared.redis_citation_cache import cache_single_url
+                if upload_result.display_name and page_data.page_url:
+                    await cache_single_url(upload_result.display_name, page_data.page_url)
+                if upload_result.document_name and page_data.page_url:
+                    await cache_single_url(upload_result.document_name, page_data.page_url)
+            except Exception as cache_err:
+                logger.warning(f"⚠️ Citation cache update failed (non-blocking): {cache_err}")
 
             # Don't check parent completion here - it will be checked after ALL pages are crawled
             # Checking here causes premature completion when not all pages have been discovered yet

@@ -124,26 +124,59 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
 
 async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict[str, str]:
     """
-    Batch lookup original source URLs from database using Gemini retrieved_context.title values.
+    Batch lookup original source URLs using Gemini retrieved_context.title values.
     Returns {title: url} mapping.
+
+    Lookup order:
+    1. Redis cache (fast, 24h TTL)
+    2. Database fallback (cache misses only)
+    3. Cache DB results back to Redis
 
     Gemini FileSearch returns retrieved_context.title = the display_name set during upload
     (e.g. "page_019d122b-1c64-793c-88d4-7caae454d1bc_1774126453").
-
     This is stored in metadata->>'display_name' in the scraped_websites table.
-    Single query matches all titles at once.
     """
     if not doc_titles:
         return {}
 
     try:
+        from shared.redis_citation_cache import get_cached_urls, cache_url_mappings
+
+        # Phase 1: Check Redis cache first
+        url_map = await get_cached_urls(doc_titles)
+        cache_hits = len(url_map)
+
+        # Phase 2: DB lookup for cache misses only
+        uncached_titles = [t for t in doc_titles if t not in url_map]
+
+        if uncached_titles:
+            logger.info(f"📎 [CITATION_LOOKUP] Cache: {cache_hits} hits, {len(uncached_titles)} misses → querying DB")
+            db_results = await _db_lookup_urls(uncached_titles)
+            url_map.update(db_results)
+
+            # Phase 3: Cache DB results for next time
+            if db_results:
+                await cache_url_mappings(db_results)
+        else:
+            logger.info(f"📎 [CITATION_LOOKUP] All {cache_hits} titles resolved from cache")
+
+        logger.info(f"📎 [CITATION_LOOKUP] Result: {len(url_map)}/{len(doc_titles)} URLs mapped (cache: {cache_hits}, db: {len(url_map) - cache_hits})")
+        return url_map
+
+    except Exception as e:
+        logger.error(f"❌ [CITATION_LOOKUP] Error looking up URLs: {e}", exc_info=True)
+        return {}
+
+
+async def _db_lookup_urls(doc_titles: List[str]) -> Dict[str, str]:
+    """Database fallback for citation URL lookup. Called on Redis cache miss."""
+    try:
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text
 
         async with get_db_session() as session:
-            logger.info(f"📎 [CITATION_LOOKUP] Looking up URLs for {len(doc_titles)} titles: {doc_titles}")
+            logger.info(f"📎 [CITATION_DB] Looking up {len(doc_titles)} titles in database")
 
-            # Single query: match titles against display_name in JSONB, gemini_file_name, or pattern
             result = await session.execute(text("""
                 SELECT
                     metadata->>'display_name' AS display_name,
@@ -161,23 +194,20 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
 
             url_map = {}
             for display_name, gemini_file_name, original_url in rows:
-                # Map by whichever title matched
                 for title in doc_titles:
                     if title == display_name or title == gemini_file_name:
                         url_map[title] = original_url
-                        logger.info(f"📎 [CITATION_LOOKUP] ✅ {title} → {original_url}")
+                        logger.info(f"📎 [CITATION_DB] ✅ {title} → {original_url}")
 
-            # For any unmatched titles, try fallback: extract website_id from title and match by parent/child id
+            # Fallback: extract website_id from title pattern and match by id
             unmatched = [t for t in doc_titles if t not in url_map]
             if unmatched:
                 import re as _re
                 for title in unmatched:
-                    # Title format: page_{website_id}_{timestamp}
-                    # Extract the UUID between first and last underscore
                     match = _re.match(r'^page_(.+)_(\d+)$', title)
                     if match:
                         website_id = match.group(1)
-                        logger.info(f"📎 [CITATION_LOOKUP] Fallback: extracting website_id={website_id} from title {title}")
+                        logger.info(f"📎 [CITATION_DB] Fallback: website_id={website_id} from {title}")
 
                         fallback_result = await session.execute(text("""
                             SELECT original_url FROM scraped_websites
@@ -190,14 +220,14 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
 
                         if fallback_row:
                             url_map[title] = fallback_row[0]
-                            logger.info(f"📎 [CITATION_LOOKUP] ✅ Fallback match: {title} → {fallback_row[0]}")
+                            logger.info(f"📎 [CITATION_DB] ✅ Fallback: {title} → {fallback_row[0]}")
                         else:
-                            logger.warning(f"📎 [CITATION_LOOKUP] ❌ No match for title: {title}")
+                            logger.warning(f"📎 [CITATION_DB] ❌ No match: {title}")
 
-            logger.info(f"📎 [CITATION_LOOKUP] Result: {len(url_map)}/{len(doc_titles)} URLs mapped")
             return url_map
+
     except Exception as e:
-        logger.error(f"❌ [CITATION_LOOKUP] Error looking up URLs: {e}", exc_info=True)
+        logger.error(f"❌ [CITATION_DB] Database lookup failed: {e}", exc_info=True)
         return {}
 
 
