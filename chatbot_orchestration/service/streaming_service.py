@@ -1092,7 +1092,47 @@ class StreamingService:
                 # Strip out [Time-to-Solve: X mins] or similar timing information
                 full_response = re.sub(r'\[Time-to-Solve:.*?\]', '', full_response).strip()
                 logger.info(f"✅ Removed Time-to-Solve metadata if present")
-                
+
+                # ================================================================
+                # CITATION POST-PROCESSING: Convert [1] markers to clickable links
+                # ================================================================
+                # The search_knowledge_base tool appends [CITATION_SOURCES] to its
+                # return value, but the agent generates its own response text with
+                # plain [1] markers. Extract URLs from tool responses and make them clickable.
+                citation_urls = []
+                for msg in all_messages:
+                    if hasattr(msg, 'parts'):
+                        for part in msg.parts:
+                            if hasattr(part, 'content') and isinstance(part.content, str):
+                                content = part.content
+                                # Extract URLs from [CITATION_SOURCES]...[/CITATION_SOURCES] block
+                                citation_match = re.search(
+                                    r'\[CITATION_SOURCES\](.*?)\[/CITATION_SOURCES\]',
+                                    content, re.DOTALL
+                                )
+                                if citation_match:
+                                    urls_text = citation_match.group(1)
+                                    for line in urls_text.strip().split('\n'):
+                                        line = line.strip()
+                                        if line.startswith('- '):
+                                            url = line[2:].strip()
+                                            if url and url not in citation_urls:
+                                                citation_urls.append(url)
+
+                if citation_urls:
+                    logger.info(f"📎 [CITATION_POST] Found {len(citation_urls)} citation URLs from tool responses: {citation_urls}")
+                    # Replace plain [N] markers with clickable <a> links
+                    for i, url in enumerate(citation_urls, 1):
+                        plain_marker = f'[{i}]'
+                        clickable_link = f'<a href="{url}" target="_blank" rel="noopener noreferrer">[{i}]</a>'
+                        if plain_marker in full_response:
+                            full_response = full_response.replace(plain_marker, clickable_link)
+                            logger.info(f"📎 [CITATION_POST] Replaced {plain_marker} → clickable link to {url}")
+                        else:
+                            logger.info(f"📎 [CITATION_POST] Marker {plain_marker} not found in response")
+                else:
+                    logger.info("📎 [CITATION_POST] No [CITATION_SOURCES] found in tool responses")
+
                 # Add all debug download links if S3 upload succeeded
                 download_links = []
                 
