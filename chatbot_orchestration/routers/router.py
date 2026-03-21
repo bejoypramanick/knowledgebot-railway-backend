@@ -12,7 +12,6 @@ from shared.otel_logger import get_otel_logger
 from ..service.chat_service import ChatService
 from ..service.agent_service import PydanticAIGatewayService
 from ..schemas.models import ChatRequest
-from ..dao.session_persistence_dao import SessionPersistenceDAO
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 from ..core.utils import log_endpoint_request
@@ -29,9 +28,10 @@ agent_service = PydanticAIGatewayService()
 
 @router.post("/chat/stream")
 async def chat_with_agent_stream(request: Request):
-    """Chat with AI agent with streaming response using Pydantic AI
+    """Chat with AI agent with streaming response using Pydantic AI.
 
-    Creates session in database on first message if it doesn't exist.
+    Session must be pre-created via /validate-chat on page load.
+    Focused purely on getting the chat response — no session setup.
     """
     try:
         body = await request.json()
@@ -42,22 +42,24 @@ async def chat_with_agent_stream(request: Request):
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
 
-        # If no session_id provided, create one via PG18 UUIDv7
-        is_new_session = not session_id
         if not session_id:
-            from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
-            session_dao = SessionPersistenceDAO()
-            session_id = await session_dao.create_session()
-            logger.info(f"✅ Created new PG18 UUIDv7 session: {session_id}")
-        else:
-            # Ensure existing session is in both Redis and PG
-            try:
-                from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
-                session_dao = SessionPersistenceDAO()
-                await session_dao.ensure_session(session_id)
-                logger.info(f"✅ Session {session_id} ensured in database")
-            except Exception as e:
-                logger.error(f"⚠️ Failed to ensure session in database: {e}")
+            raise HTTPException(status_code=400, detail="session_id is required. Call /validate-chat on page load first.")
+
+        # Validate session exists in Redis or PG — no fallback creation
+        from shared.redis_chat_store import get_chat_store
+        store = get_chat_store()
+        redis_session = await store.get_session(session_id)
+
+        if not redis_session:
+            # Check PG as last resort (Redis may have expired after 24h)
+            from chatbot_orchestration.dao.chat_dao import ChatDAO
+            chat_dao = ChatDAO()
+            pg_exists = await chat_dao.ensure_session_exists(session_id)
+            if not pg_exists:
+                raise HTTPException(status_code=404, detail="Session not found. Please refresh the page to start a new session.")
+            # Re-create Redis session from PG (session was valid but Redis TTL expired)
+            await store.get_or_create_session(session_uuid=session_id)
+            logger.info(f"♻️ Redis session re-created from PG for {session_id} (TTL had expired)")
 
         # Build response headers
         response_headers = {
@@ -65,24 +67,13 @@ async def chat_with_agent_stream(request: Request):
             "X-Accel-Buffering": "no"
         }
 
-        # For new sessions, prepend session UUID in first SSE event
-        async def generate_response_with_session():
-            # If new session, send session UUID as first event
-            if is_new_session:
-                import json
-                session_event = json.dumps({"type": "session_created", "session_id": session_id})
-                yield f"data: {session_event}\n\n"
-                logger.info(f"📋 Sent session_created event with UUID: {session_id}")
-            
-            # Then stream the actual response
-            chunk_counter = 0
+        # Stream the AI response directly — no session setup needed
+        async def generate_response():
             async for chunk in agent_service.stream_agent_response(message, session_id):
-                chunk_counter += 1
-                logger.info(f"🔍 [YIELD-DEBUG] Yielding chunk #{chunk_counter} for session {session_id}")
                 yield chunk
 
         return StreamingResponse(
-            generate_response_with_session(),
+            generate_response(),
             media_type="text/event-stream",
             headers=response_headers
         )

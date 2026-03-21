@@ -189,29 +189,10 @@ class StreamingService:
             else:
                 logger.info("📁 Agent S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
 
-            # STEP 1: Ensure session exists in Redis (DB 6)
-            # PG18: session_id IS the UUIDv7 PK — no separate db_id needed
-            try:
-                from shared.redis_chat_store import get_chat_store
-
-                chat_store = get_chat_store()
-
-                # Get or create session in Redis
-                redis_session = await chat_store.get_or_create_session(
-                    session_uuid=session_id,
-                    metadata={"created_by": "first_message", "user_email": user_email}
-                )
-
-                if redis_session:
-                    logger.info(f"Session in Redis: {session_id}")
-                else:
-                    logger.warning(f"Redis session creation returned None for {session_id}")
-
-                # Ensure PG row exists (idempotent)
-                await self.chat_dao.ensure_session_exists(session_id)
-
-            except Exception as e:
-                logger.error(f"Error managing session in Redis: {e}", exc_info=True)
+            # Session setup (PG + Redis DB6) is done at page load via /validate-chat
+            # Here we only update activity and proceed with the response
+            from shared.redis_chat_store import get_chat_store
+            chat_store = get_chat_store()
 
             # Update session activity
             session_state_manager.update_session_activity(session_id)

@@ -144,40 +144,63 @@ async def validate_chat_window_load(request: Request):
                 "reason": "Chat is currently disabled"
             }
 
-        # Step 3: Create session with PG18 database-generated UUIDv7
-        try:
-            session_dao = SessionPersistenceDAO()
-            session_uuid = await session_dao.create_session()
+        # Step 3: Warm up downstream services (chatbot orchestration + configuration)
+        # This ensures serverless containers are ready before the user sends their first message
+        import httpx
+        settings = get_settings()
 
-            logger.info(f"[{correlation_id}] ✅ Session created with PG18 UUIDv7: {session_uuid}")
+        service_checks = {
+            "chatbot_orchestration": f"{settings.chatbot_orchestration_url}/api/v1/chatbot/health",
+            "configuration": f"{settings.configuration_service_url}/api/v1/configuration/health",
+        }
 
-            return {
-                "ready": True,
-                "chat_enabled": True,
-                "domain_authorized": True,
-                "session_uuid": session_uuid,
-                "reason": None
-            }
-        except Exception as e:
-            logger.error(f"[{correlation_id}] ❌ Session creation failed: {e}")
-            # Fail open - allow chat, session will be created on first message
-            return {
-                "ready": True,
-                "chat_enabled": True,
-                "domain_authorized": True,
-                "session_uuid": None,
-                "reason": f"Session creation deferred to first message: {str(e)}"
-            }
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            for service_name, health_url in service_checks.items():
+                try:
+                    resp = await client.get(health_url)
+                    if resp.status_code == 200:
+                        logger.info(f"[{correlation_id}] ✅ {service_name} is healthy")
+                    else:
+                        logger.error(f"[{correlation_id}] ❌ {service_name} health check failed: {resp.status_code}")
+                        return {
+                            "ready": False,
+                            "chat_enabled": True,
+                            "domain_authorized": True,
+                            "session_uuid": None,
+                            "reason": f"Service {service_name} is not ready (status {resp.status_code})"
+                        }
+                except Exception as svc_err:
+                    logger.error(f"[{correlation_id}] ❌ {service_name} unreachable: {svc_err}")
+                    return {
+                        "ready": False,
+                        "chat_enabled": True,
+                        "domain_authorized": True,
+                        "session_uuid": None,
+                        "reason": f"Service {service_name} is not reachable"
+                    }
 
-    except Exception as e:
-        logger.error(f"Validation endpoint error: {e}", exc_info=True)
-        # Fail open for any unexpected errors
+        # Step 4: Create session with PG18 database-generated UUIDv7
+        session_dao = SessionPersistenceDAO()
+        session_uuid = await session_dao.create_session()
+
+        logger.info(f"[{correlation_id}] ✅ Session created with PG18 UUIDv7: {session_uuid}")
+
         return {
             "ready": True,
             "chat_enabled": True,
             "domain_authorized": True,
+            "session_uuid": session_uuid,
+            "reason": None
+        }
+
+    except Exception as e:
+        logger.error(f"Validation endpoint error: {e}", exc_info=True)
+        return {
+            "ready": False,
+            "chat_enabled": False,
+            "domain_authorized": True,
             "session_uuid": None,
-            "reason": "Validation deferred to streaming endpoint"
+            "reason": f"Chat initialization failed: {str(e)}"
         }
 
 # =================================
