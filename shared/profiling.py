@@ -229,6 +229,144 @@ class PipelineTimer:
 
 
 # ============================================================
+# HTML DASHBOARD RENDERER
+# ============================================================
+
+def _render_stats_html(result: dict, sort_by: str, limit: int, filter_module: Optional[str]) -> str:
+    """Render profiling stats as a styled HTML dashboard."""
+    stats = result.get("stats", [])
+    is_running = result.get("is_running", False)
+    clock_type = result.get("clock_type", "?")
+    total_functions = result.get("total_functions", 0)
+
+    # Build table rows
+    rows_html = ""
+    for i, s in enumerate(stats):
+        ttot = s["ttot"]
+        # Color-code by total time
+        if ttot > 1.0:
+            bar_color = "#ef4444"  # red
+        elif ttot > 0.1:
+            bar_color = "#f59e0b"  # amber
+        elif ttot > 0.01:
+            bar_color = "#3b82f6"  # blue
+        else:
+            bar_color = "#22c55e"  # green
+
+        # Bar width relative to max ttot
+        max_ttot = stats[0]["ttot"] if stats else 1
+        bar_pct = min((ttot / max_ttot) * 100, 100) if max_ttot > 0 else 0
+
+        rows_html += f"""
+        <tr>
+            <td class="rank">{i+1}</td>
+            <td class="fn-name" title="{s['module']}:{s['lineno']}">{s['name']}</td>
+            <td class="module">{s['module']}:{s['lineno']}</td>
+            <td class="num">{s['ncall']}</td>
+            <td class="num time">
+                <div class="bar-container">
+                    <div class="bar" style="width:{bar_pct:.1f}%;background:{bar_color}"></div>
+                    <span>{ttot:.4f}s</span>
+                </div>
+            </td>
+            <td class="num">{s['tsub']:.4f}s</td>
+            <td class="num">{s['tavg']:.6f}s</td>
+        </tr>"""
+
+    status_badge = (
+        '<span class="badge running">PROFILING</span>'
+        if is_running else
+        '<span class="badge stopped">STOPPED</span>'
+    )
+
+    filter_info = f' | filter: <code>{filter_module}</code>' if filter_module else ''
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yappi Profiler Dashboard</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+         background: #0f172a; color: #e2e8f0; padding: 24px; }}
+  h1 {{ font-size: 1.5rem; margin-bottom: 8px; color: #f8fafc; }}
+  .meta {{ color: #94a3b8; font-size: 0.85rem; margin-bottom: 20px; }}
+  .meta code {{ background: #1e293b; padding: 2px 6px; border-radius: 4px; color: #38bdf8; }}
+  .badge {{ padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }}
+  .badge.running {{ background: #22c55e20; color: #4ade80; border: 1px solid #22c55e40; }}
+  .badge.stopped {{ background: #64748b20; color: #94a3b8; border: 1px solid #64748b40; }}
+  .controls {{ margin-bottom: 20px; display: flex; gap: 8px; flex-wrap: wrap; }}
+  .controls a {{ background: #1e293b; color: #38bdf8; padding: 8px 16px; border-radius: 6px;
+                 text-decoration: none; font-size: 0.85rem; border: 1px solid #334155;
+                 transition: background 0.2s; }}
+  .controls a:hover {{ background: #334155; }}
+  .controls a.danger {{ color: #f87171; border-color: #7f1d1d; }}
+  .controls a.danger:hover {{ background: #7f1d1d40; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
+  th {{ text-align: left; padding: 10px 12px; background: #1e293b; color: #94a3b8;
+       font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;
+       border-bottom: 2px solid #334155; position: sticky; top: 0; }}
+  td {{ padding: 8px 12px; border-bottom: 1px solid #1e293b; }}
+  tr:hover {{ background: #1e293b60; }}
+  .rank {{ color: #64748b; width: 40px; }}
+  .fn-name {{ color: #f8fafc; font-weight: 500; max-width: 300px; overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; }}
+  .module {{ color: #64748b; font-size: 0.75rem; max-width: 250px; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }}
+  .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+  .time {{ min-width: 180px; }}
+  .bar-container {{ display: flex; align-items: center; gap: 8px; }}
+  .bar {{ height: 6px; border-radius: 3px; min-width: 2px; }}
+  .bar-container span {{ white-space: nowrap; }}
+  .sort-link {{ color: #94a3b8; text-decoration: none; }}
+  .sort-link:hover {{ color: #38bdf8; }}
+  .sort-active {{ color: #38bdf8; font-weight: 700; }}
+  .empty {{ text-align: center; padding: 40px; color: #64748b; }}
+</style>
+</head>
+<body>
+<h1>Yappi Profiler Dashboard {status_badge}</h1>
+<p class="meta">
+  clock: <code>{clock_type}</code> |
+  showing {len(stats)} of {total_functions} functions |
+  sorted by: <code>{sort_by}</code>{filter_info}
+</p>
+
+<div class="controls">
+  <a href="start?clock_type=wall">Start (wall)</a>
+  <a href="start?clock_type=cpu">Start (cpu)</a>
+  <a href="stop" class="danger">Stop</a>
+  <a href="stats?format=html&sort_by=ttot&limit={limit}{'&filter_module=' + filter_module if filter_module else ''}">Refresh</a>
+  <a href="stats?format=html&sort_by=ttot&limit={limit}&filter_module=streaming_service">Filter: streaming</a>
+  <a href="stats?format=html&sort_by=ttot&limit={limit}&filter_module=knowledge_tools">Filter: RAG</a>
+  <a href="stats?format=html&sort_by=ttot&limit={limit}">All modules</a>
+  <a href="threads">Threads (JSON)</a>
+  <a href="stats?format=json&sort_by={sort_by}&limit={limit}">Raw JSON</a>
+</div>
+
+<table>
+<thead>
+<tr>
+  <th>#</th>
+  <th>Function</th>
+  <th>Module</th>
+  <th><a class="sort-link {'sort-active' if sort_by=='ncall' else ''}" href="stats?format=html&sort_by=ncall&limit={limit}{'&filter_module=' + filter_module if filter_module else ''}">Calls</a></th>
+  <th><a class="sort-link {'sort-active' if sort_by=='ttot' else ''}" href="stats?format=html&sort_by=ttot&limit={limit}{'&filter_module=' + filter_module if filter_module else ''}">Total Time</a></th>
+  <th><a class="sort-link {'sort-active' if sort_by=='tsub' else ''}" href="stats?format=html&sort_by=tsub&limit={limit}{'&filter_module=' + filter_module if filter_module else ''}">Own Time</a></th>
+  <th><a class="sort-link {'sort-active' if sort_by=='tavg' else ''}" href="stats?format=html&sort_by=tavg&limit={limit}{'&filter_module=' + filter_module if filter_module else ''}">Avg Time</a></th>
+</tr>
+</thead>
+<tbody>
+{rows_html if rows_html else '<tr><td colspan="7" class="empty">No profiling data. Start the profiler, send some chat messages, then refresh.</td></tr>'}
+</tbody>
+</table>
+</body>
+</html>"""
+
+
+# ============================================================
 # FASTAPI ROUTER (mount in chatbot orchestration app)
 # ============================================================
 
@@ -269,9 +407,9 @@ def create_profiling_router():
         sort_by: str = Query("ttot", enum=["ttot", "tsub", "ncall", "tavg"]),
         limit: int = Query(50, ge=1, le=500),
         filter_module: Optional[str] = Query(None, description="Filter by module name substring"),
-        format: str = Query("json", enum=["json", "text"]),
+        format: str = Query("json", enum=["json", "text", "html"]),
     ):
-        """Get profiling stats. Use format=text for pstat-style output."""
+        """Get profiling stats. Use format=html for a styled dashboard view."""
         result = get_profiling_stats(sort_by, limit, filter_module)
         status = result.pop("status", 200)
         if status != 200:
@@ -280,6 +418,12 @@ def create_profiling_router():
 
         if format == "text":
             return PlainTextResponse(result.get("pstat_text", "No stats available"))
+
+        if format == "html":
+            from fastapi.responses import HTMLResponse
+            html = _render_stats_html(result, sort_by, limit, filter_module)
+            return HTMLResponse(content=html)
+
         return result
 
     @router.get("/threads")

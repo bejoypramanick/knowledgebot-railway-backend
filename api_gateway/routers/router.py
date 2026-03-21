@@ -745,6 +745,14 @@ async def proxy_profiling(request: Request, path: str):
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(target_url)
+            content_type = resp.headers.get("content-type", "")
+            # Pass through HTML/text responses as-is (for the dashboard)
+            if "text/html" in content_type:
+                return Response(content=resp.content, status_code=resp.status_code,
+                                media_type="text/html")
+            if "text/plain" in content_type:
+                return Response(content=resp.content, status_code=resp.status_code,
+                                media_type="text/plain")
             return JSONResponse(content=resp.json(), status_code=resp.status_code)
     except Exception as e:
         logger.error(f"Profiling proxy error: {e}")
