@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from shared.otel_logger import get_otel_logger
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
+from configuration.dao.widget_config_dao import WidgetConfigDAO
 
 logger = get_otel_logger("chat_agent_config_service", "configuration")
 
@@ -15,6 +16,7 @@ class ChatAgentConfigService:
 
     def __init__(self):
         self._chatAgent_dao = ChatAgentConfigDAO()
+        self._widget_dao = WidgetConfigDAO()
     
     async def get_chatAgent_config(self):
         """Get complete chatbot configuration with all data transformations.
@@ -33,7 +35,7 @@ class ChatAgentConfigService:
                 admin_emails_list,
                 all_personas,
             ) = await asyncio.gather(
-                self._chatAgent_dao.get_widget_config(),
+                self._widget_dao.get_widget_config(),
                 self._chatAgent_dao.get_security_settings(),
                 self._chatAgent_dao.get_llm_providers(),
                 self._chatAgent_dao.get_active_persona(),
