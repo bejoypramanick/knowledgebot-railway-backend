@@ -25,10 +25,11 @@ class FeedbackDAO:
         if feedback_type not in ['positive', 'negative']:
             raise ValueError(f"Invalid feedback_type: {feedback_type}. Must be 'positive' or 'negative'")
 
+        # PG18: id IS the UUIDv7 PK — no separate session_id column
         query = """
             UPDATE chat_sessions
             SET feedback_type = :feedback_type, feedback_provided_at = NOW()
-            WHERE session_id = :session_id
+            WHERE id = :session_id::uuid
         """
         params = {"feedback_type": feedback_type, "session_id": session_id}
 
@@ -48,7 +49,7 @@ class FeedbackDAO:
     async def get_all_feedback(self) -> List[Dict[str, Any]]:
         """Get all feedback (sessions with feedback provided)."""
         query = """
-            SELECT session_id, feedback_type, feedback_provided_at, feedback_user_role_id
+            SELECT id as session_id, feedback_type, feedback_provided_at, feedback_user_role_id
             FROM chat_sessions
             WHERE feedback_type IS NOT NULL
             ORDER BY feedback_provided_at DESC
@@ -85,12 +86,13 @@ class FeedbackDAO:
         # Initialize result with zero counts for all sessions
         result_dict = {session_id: {'positive': 0, 'negative': 0} for session_id in session_ids}
 
+        # PG18: id IS the UUIDv7 PK — alias as session_id for backward compat
         query = f"""
             SELECT
-                session_id,
+                id as session_id,
                 feedback_type
             FROM chat_sessions
-            WHERE session_id IN ({placeholders})
+            WHERE id IN ({placeholders})
         """
 
         try:

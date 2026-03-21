@@ -46,14 +46,15 @@ class TokenDAO:
         logger.info(f"🔍 save_token_usage called - session: {session_id}, total_tokens: {total_tokens}")
         logger.info(f"[PARAM] request_metadata type: {type(request_metadata)}, value: {request_metadata}")
         
-        session_query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
+        # PG18: id IS the UUIDv7 PK — verify session exists
+        session_query = "SELECT id FROM chat_sessions WHERE id = :session_id::uuid"
         try:
             async with get_db_session() as session:
                 logger.log_db_operation(session_query, session_id)
                 session_record = (await session.execute(text(session_query), {"session_id": session_id})).fetchone()
                 logger.log_db_query(session_query, {"session_id": session_id}, session_record)
 
-                integer_session_id = session_record.id if session_record else None
+                uuid_session_id = str(session_record.id) if session_record else None
                 integer_message_id = None
 
                 logger.info(f"🔍 Updating llm_providers - provider: {provider}, total_tokens: {total_tokens}")
@@ -74,7 +75,7 @@ class TokenDAO:
                 logger.info(f"[TRANSFORM] request_metadata converted to JSON: {metadata_json}")
                 
                 params = {
-                    "session_id": integer_session_id,
+                    "session_id": uuid_session_id,
                     "message_id": integer_message_id,
                     "provider": provider,
                     "model": model,
@@ -98,7 +99,8 @@ class TokenDAO:
 
     async def get_token_usage(self, session_id: str) -> List[Dict[str, Any]]:
         """Get token usage for a session"""
-        session_query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
+        # PG18: id IS the UUIDv7 PK — verify session exists
+        session_query = "SELECT id FROM chat_sessions WHERE id = :session_id::uuid"
         try:
             async with get_db_session() as session:
                 logger.log_db_operation(session_query, session_id)
@@ -108,7 +110,7 @@ class TokenDAO:
                 if not session_record:
                     return []
 
-                integer_session_id = session_record.id
+                uuid_session_id = str(session_record.id)
 
                 query = """
                     SELECT id, session_id, message_id, provider, model, prompt_tokens,
@@ -118,9 +120,9 @@ class TokenDAO:
                     WHERE session_id = :session_id
                     ORDER BY id DESC
                 """
-                logger.log_db_operation(query, integer_session_id)
-                result = (await session.execute(text(query), {"session_id": integer_session_id})).fetchall()
-                logger.log_db_query(query, {"session_id": integer_session_id}, result)
+                logger.log_db_operation(query, uuid_session_id)
+                result = (await session.execute(text(query), {"session_id": uuid_session_id})).fetchall()
+                logger.log_db_query(query, {"session_id": uuid_session_id}, result)
                 return [dict(row._mapping) for row in result]
         except Exception as e:
             logger.log_db_query("get_token_usage", {"session_id": session_id}, error=e)

@@ -142,17 +142,16 @@ class ChatWriteThroughService:
                     else:
                         last_activity_at = last_activity_str
 
-                    # PG18: session_uuid IS the UUIDv7 PK — use for both id and session_id
+                    # PG18: id IS the UUIDv7 PK — no separate session_id column
                     result = await db.execute(
                         text("""
-                            INSERT INTO chat_sessions (id, session_id, is_active, archive_status, started_at, last_activity_at, message_count)
-                            VALUES (:id::uuid, :session_uuid, true, 'active', :started_at, :last_activity_at, 0)
-                            ON CONFLICT (session_id) DO UPDATE SET last_activity_at = EXCLUDED.last_activity_at
+                            INSERT INTO chat_sessions (id, is_active, archive_status, started_at, last_activity_at, message_count)
+                            VALUES (:id::uuid, true, 'active', :started_at, :last_activity_at, 0)
+                            ON CONFLICT (id) DO UPDATE SET last_activity_at = EXCLUDED.last_activity_at
                             RETURNING id
                         """),
                         {
                             "id": session_uuid,
-                            "session_uuid": session_uuid,
                             "started_at": started_at,
                             "last_activity_at": last_activity_at
                         }

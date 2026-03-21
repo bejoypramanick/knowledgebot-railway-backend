@@ -68,7 +68,7 @@ class ChatAgentConfigDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                return [{"id": row._mapping["id"], "email": row._mapping["email"]} for row in rows] if rows else []
+                return [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
         except Exception as e:
             logger.error(f"Error fetching human agents: {type(e).__name__}")
             raise
@@ -90,7 +90,7 @@ class ChatAgentConfigDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                return [{"id": row._mapping["id"], "email": row._mapping["email"]} for row in rows] if rows else []
+                return [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
         except Exception as e:
             logger.error(f"Error fetching admin emails: {type(e).__name__}")
             raise
@@ -263,7 +263,7 @@ class ChatAgentConfigDAO:
         try:
             query = text("""
                 DELETE FROM user_role_mapping
-                WHERE user_id = :user_id
+                WHERE user_id = :user_id::uuid
                 AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')
             """)
             params = {"user_id": user_id}
@@ -355,7 +355,7 @@ class ChatAgentConfigDAO:
         try:
             query = text("""
                 DELETE FROM user_role_mapping
-                WHERE user_id = :user_id
+                WHERE user_id = :user_id::uuid
                 AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')
             """)
             params = {"user_id": user_id}

@@ -118,23 +118,24 @@ class SessionStateManager:
                     from sqlalchemy import text
 
                     async with get_db_session() as db_session:
+                        # PG18: id IS the UUIDv7 PK — no separate session_id column
                         session_result = await db_session.execute(
-                            text("SELECT id FROM chat_sessions WHERE session_id = :session_id"),
+                            text("SELECT id FROM chat_sessions WHERE id = :session_id::uuid"),
                             {"session_id": session_id}
                         )
                         session_row = session_result.mappings().first()
                         if session_row:
-                            integer_session_id = session_row["id"]
+                            uuid_session_id = str(session_row["id"])
                             assignment_query = """
                                 SELECT u.email as agent_email
                                 FROM session_assignments sa
                                 LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                                 LEFT JOIN users u ON urm.user_id = u.id
-                                WHERE sa.session_id = :session_id AND sa.status = 'active'
+                                WHERE sa.session_id = :session_id::uuid AND sa.status = 'active'
                             """
                             assignment_result = await db_session.execute(
                                 text(assignment_query),
-                                {"session_id": integer_session_id}
+                                {"session_id": uuid_session_id}
                             )
                             assignment = assignment_result.mappings().first()
                             assigned_agent = assignment["agent_email"] if assignment else None

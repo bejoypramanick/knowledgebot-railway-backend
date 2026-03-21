@@ -203,10 +203,10 @@ class ChatLogDAO:
             return None
 
     async def get_session_db_id_by_uuid(self, session_uuid: str) -> Optional[str]:
-        """Get database ID for a session by its session_id (UUID) column.
-        Used for special cases like heartbeat sessions that use string UUIDs."""
+        """Get database ID for a session by UUID.
+        PG18: id IS the UUIDv7 PK — same as get_session_db_id."""
         try:
-            query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
+            query = "SELECT id FROM chat_sessions WHERE id = :session_id::uuid"
             params = {"session_id": session_uuid}
 
             logger.log_db_operation(query, params)
@@ -220,13 +220,13 @@ class ChatLogDAO:
             return None
 
     async def get_session_by_uuid(self, session_uuid: str) -> Optional[Dict[str, Any]]:
-        """Get session data by UUID (session_id column)."""
+        """Get session data by UUID. PG18: id IS the UUIDv7 PK."""
         try:
             query = """
-                SELECT id, session_id, started_at, last_activity_at, is_active, 
+                SELECT id, started_at, last_activity_at, is_active,
                        message_count, archive_status, customer_email, customer_name
-                FROM chat_sessions 
-                WHERE session_id = :session_id
+                FROM chat_sessions
+                WHERE id = :session_id::uuid
             """
             params = {"session_id": session_uuid}
 
@@ -241,10 +241,10 @@ class ChatLogDAO:
             return None
 
     async def create_chat_session(self, session_id: str, metadata: Dict[str, Any]) -> str:
-        """Create a new chat session."""
+        """Create a new chat session. PG18: id IS the UUIDv7 PK."""
         query = """
-            INSERT INTO chat_sessions (session_id, metadata, created_at, last_activity_at, is_active)
-            VALUES (:session_id, :metadata, NOW(), NOW(), true)
+            INSERT INTO chat_sessions (id, metadata, created_at, last_activity_at, is_active)
+            VALUES (:session_id::uuid, :metadata, NOW(), NOW(), true)
             RETURNING id
         """
         try:
@@ -942,8 +942,8 @@ class ChatLogDAO:
             return None
 
     async def get_session_uuid(self, session_db_id: str) -> Optional[str]:
-        """Get session UUID from session database ID."""
-        query = "SELECT session_id FROM chat_sessions WHERE id = :id"
+        """Get session UUID from session database ID. PG18: id IS the UUID."""
+        query = "SELECT id FROM chat_sessions WHERE id = :id::uuid"
         try:
             params = {"id": session_db_id}
             logger.log_db_operation(query, params)
@@ -963,8 +963,8 @@ class ChatLogDAO:
 
 
     async def get_session_numeric_id(self, session_uuid: str) -> Optional[str]:
-        """Get session database ID from session UUID."""
-        query = "SELECT id FROM chat_sessions WHERE session_id = :uuid"
+        """Get session database ID from session UUID. PG18: id IS the UUID — same lookup."""
+        query = "SELECT id FROM chat_sessions WHERE id = :uuid::uuid"
         try:
             params = {"uuid": session_uuid}
             logger.log_db_operation(query, params)
@@ -1005,11 +1005,12 @@ class ChatLogDAO:
 
     async def get_session_feedback_counts(self, session_id: str) -> Dict[str, int]:
         """Get feedback counts for a session (returns 1 or 0 for each type since each session has only one feedback)."""
+        # PG18: id IS the UUIDv7 PK — no separate session_id column
         query = """
             SELECT
                 feedback_type
             FROM chat_sessions
-            WHERE session_id = :session_id
+            WHERE id = :session_id::uuid
         """
         params = {"session_id": session_id}
 
@@ -1045,12 +1046,13 @@ class ChatLogDAO:
         placeholders = ",".join([f":id_{i}" for i in range(len(session_ids))])
         params = {f"id_{i}": sid for i, sid in enumerate(session_ids)}
 
+        # PG18: id IS the UUIDv7 PK — alias as session_id for backward compat
         query = f"""
             SELECT
-                session_id,
+                id as session_id,
                 feedback_type
             FROM chat_sessions
-            WHERE session_id IN ({placeholders})
+            WHERE id IN ({placeholders})
         """
         
         explain_query = f"EXPLAIN ANALYZE {query}"

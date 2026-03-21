@@ -30,8 +30,7 @@ class ChatDAO:
         if session:
             logger.info(f"Session created in Redis: {session_id}")
             return {
-                "id": session.get("db_id"),
-                "session_id": session.get("session_uuid"),
+                "id": session.get("session_uuid"),
                 "user_role_id": session.get("user_role_id"),
                 "started_at": session.get("started_at"),
                 "last_activity_at": session.get("last_activity_at"),
@@ -111,10 +110,8 @@ class ChatDAO:
             async with get_db_session() as db_session:
                 result = await db_session.execute(
                     text("""
-                        WITH new_uuid AS (SELECT uuidv7() AS sid)
-                        INSERT INTO chat_sessions (id, session_id, is_active, archive_status, started_at, last_activity_at, message_count)
-                        SELECT sid, sid::text, true, 'active', NOW(), NOW(), 0
-                        FROM new_uuid
+                        INSERT INTO chat_sessions (id, is_active, archive_status, started_at, last_activity_at, message_count)
+                        VALUES (uuidv7(), true, 'active', NOW(), NOW(), 0)
                         RETURNING id
                     """)
                 )
@@ -131,18 +128,18 @@ class ChatDAO:
     async def ensure_session_exists(self, session_id: str) -> Optional[str]:
         """
         Ensure session exists in PG. Creates row if needed (idempotent).
-        PG18: session_id IS the UUIDv7 PK — used for both id and session_id columns.
+        PG18: id IS the UUIDv7 PK — no separate session_id column.
         """
         try:
             async with get_db_session() as db_session:
                 result = await db_session.execute(
                     text("""
-                        INSERT INTO chat_sessions (id, session_id, is_active, archive_status, started_at, last_activity_at, message_count)
-                        VALUES (:id::uuid, :session_id, true, 'active', NOW(), NOW(), 0)
-                        ON CONFLICT (session_id) DO UPDATE SET last_activity_at = NOW()
+                        INSERT INTO chat_sessions (id, is_active, archive_status, started_at, last_activity_at, message_count)
+                        VALUES (:id::uuid, true, 'active', NOW(), NOW(), 0)
+                        ON CONFLICT (id) DO UPDATE SET last_activity_at = NOW()
                         RETURNING id
                     """),
-                    {"id": session_id, "session_id": session_id}
+                    {"id": session_id}
                 )
                 db_id = str(result.scalar())
                 await db_session.commit()
@@ -172,7 +169,7 @@ class ChatDAO:
     async def get_all_sessions(self) -> List[Dict[str, Any]]:
         """Get all chat sessions (admin cold path — PG only)."""
         query = """
-            SELECT session_id, user_email, metadata, created_at, last_activity_at
+            SELECT id, user_email, metadata, created_at, last_activity_at
             FROM chat_sessions
             ORDER BY last_activity_at DESC
         """
