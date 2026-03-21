@@ -561,14 +561,15 @@ class ChatLogDAO:
                 # Group messages by session_id, skip NULL message rows
                 result_dict = {}
                 for r in rows:
+                    row = dict(r._mapping)
                     # Skip rows where message is NULL (session has no messages)
-                    if r['id'] is None:
+                    if row.get('id') is None:
                         continue
 
-                    session_id = r['session_id']
+                    session_id = str(row['session_id'])
                     if session_id not in result_dict:
                         result_dict[session_id] = []
-                    result_dict[session_id].append(dict(r._mapping))
+                    result_dict[session_id].append(row)
 
                 return result_dict
         except Exception as e:
