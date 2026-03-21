@@ -253,7 +253,7 @@ END $$;
 DROP INDEX IF EXISTS idx_session_assignments_status;
 DROP INDEX IF EXISTS idx_session_assignments_status_covering;
 CREATE INDEX idx_session_assignments_status_covering ON session_assignments(status)
-  INCLUDE (session_id, user_role_id, assigned_at DESC);
+  INCLUDE (session_id, user_role_id, assigned_at);
 DROP INDEX IF EXISTS idx_session_assignments_active;
 CREATE INDEX idx_session_assignments_active ON session_assignments(user_role_id, assigned_at DESC)
   WHERE status IN ('active', 'waiting');
