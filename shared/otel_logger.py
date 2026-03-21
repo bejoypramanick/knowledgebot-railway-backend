@@ -3,7 +3,7 @@ Unified OpenTelemetry Logging Utilities
 Provides structured logging with OTel span context integration for all services
 """
 import logging
-import inspect
+import sys
 from typing import Dict, Any, Optional
 from contextvars import ContextVar
 from opentelemetry import trace
@@ -82,21 +82,24 @@ def clear_workflow() -> None:
     workflow_ctx_var.set(None)
 
 def get_calling_file_info() -> Dict[str, str]:
-    """Get complete file info of calling code (3 levels up the stack)"""
+    """Get file info of calling code using sys._getframe (fast, no stack walk).
+
+    sys._getframe(N) returns a single frame object directly — O(1).
+    inspect.stack() builds FrameInfo for the ENTIRE stack — O(N) and very slow.
+    """
     try:
-        # Go up 3 levels in the stack to get the actual calling code
-        # Level 0: this function
-        # Level 1: _log_with_context method  
-        # Level 2: info/error/warning/etc. method
-        # Level 3: actual calling code (where logger.info() is called)
-        frame = inspect.stack()[3]
+        # Go up 3 levels: this function → _log_with_context → info/error/etc → caller
+        frame = sys._getframe(3)
+        filename = frame.f_code.co_filename
+        lineno = frame.f_lineno
+        funcname = frame.f_code.co_name
         return {
-            'file_path': frame.filename,
-            'line_number': str(frame.lineno),
-            'method_name': frame.function,
-            'full_info': f"{frame.filename}:{frame.lineno}"  # Simplified: just file:line
+            'file_path': filename,
+            'line_number': str(lineno),
+            'method_name': funcname,
+            'full_info': f"{filename}:{lineno}"
         }
-    except (IndexError, AttributeError):
+    except (ValueError, AttributeError):
         return {
             'file_path': 'unknown_file',
             'line_number': 'unknown',
@@ -225,36 +228,8 @@ class OpenTelemetryLogger:
         for reserved_attr in RESERVED_LOGRECORD_ATTRS:
             extra.pop(reserved_attr, None)
 
-        # Calculate correct stacklevel by finding the first frame outside of otel_logger and logging
-        # This ensures we always point to the actual caller, not the logger wrapper
-        stacklevel = 2
-        try:
-            stack = inspect.stack()
-            # Skip frames from:
-            # - otel_logger.py (this file)
-            # - logging module (Python's logging internals)
-            # - asyncio module (async wrapper frames)
-            # - concurrent.futures (thread pool frames)
-            skip_modules = {'otel_logger.py', 'logging', 'asyncio', 'concurrent', 'threading'}
-            
-            for i, frame_info in enumerate(stack[1:], start=1):
-                filename = frame_info.filename
-                # Check if this frame should be skipped
-                should_skip = False
-                for skip_module in skip_modules:
-                    if skip_module in filename:
-                        should_skip = True
-                        break
-                
-                # Also skip frames from the OpenTelemetryLogger class methods
-                if frame_info.function in {'info', 'error', 'warning', 'debug', 'critical', '_log_with_context', 'log'}:
-                    should_skip = True
-                
-                if not should_skip:
-                    stacklevel = i + 1
-                    break
-        except Exception:
-            stacklevel = 4  # Fallback to 4 if inspection fails
+        # stacklevel=4 maps to: logger.log → _log_with_context → info/error/etc → caller
+        stacklevel = 4
 
         # Prepare logger.log kwargs
         log_kwargs = {'extra': extra, 'stacklevel': stacklevel}
