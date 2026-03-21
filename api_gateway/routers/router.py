@@ -731,7 +731,7 @@ async def public_chat_stream(request: Request):
 # PROFILING PROXY ENDPOINTS (Admin only - auth required)
 # =================================
 
-@router.api_route("/chatbot/profiling/{path:path}", methods=["GET", "POST"])
+@router.get("/chatbot/profiling/{path:path}")
 async def proxy_profiling(request: Request, path: str):
     """Proxy profiling endpoints to chatbot orchestration service."""
     try:
@@ -744,11 +744,7 @@ async def proxy_profiling(request: Request, path: str):
             target_url += f"?{request.query_params}"
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            if request.method == "POST":
-                resp = await client.post(target_url)
-            else:
-                resp = await client.get(target_url)
-
+            resp = await client.get(target_url)
             return JSONResponse(content=resp.json(), status_code=resp.status_code)
     except Exception as e:
         logger.error(f"Profiling proxy error: {e}")

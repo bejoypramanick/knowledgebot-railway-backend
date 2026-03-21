@@ -244,7 +244,7 @@ def create_profiling_router():
 
     router = APIRouter(tags=["profiling"])
 
-    @router.post("/start")
+    @router.get("/start")
     async def api_start_profiling(clock_type: str = Query("wall", enum=["wall", "cpu"])):
         """Start the yappi profiler."""
         result = start_profiling(clock_type)
@@ -254,7 +254,7 @@ def create_profiling_router():
             return JSONResponse(content=result, status_code=status)
         return result
 
-    @router.post("/stop")
+    @router.get("/stop")
     async def api_stop_profiling():
         """Stop the yappi profiler."""
         result = stop_profiling()
