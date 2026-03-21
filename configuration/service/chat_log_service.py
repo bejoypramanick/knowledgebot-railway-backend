@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
@@ -149,14 +150,10 @@ class ChatLogService:
                 except (json.JSONDecodeError, TypeError):
                     metadata = {}
             
-            # Set customer_name to "User-<numeric_id>" if not already set
-            if not metadata.get('customer_name'):
-                metadata['customer_name'] = f"User-{session_db_id}"
-            
             # Store assigned_agent in metadata for persistence
             metadata['assigned_agent'] = agent_email
             await self.dao.update_chat_session_metadata(session_db_id, metadata)
-            logger.info(f"✅ Updated metadata: customer_name='User-{session_db_id}', assigned_agent='{agent_email}' for session {session_uuid}")
+            logger.info(f"✅ Updated metadata: assigned_agent='{agent_email}' for session {session_uuid}")
             
             logger.info(f"Chat session {session_db_id} assigned to agent {agent_email} (ID: {agent_id})")
             assignee_type = "agent"
@@ -461,11 +458,13 @@ class ChatLogService:
                 session_feedback = 'negative'
 
             # Get User-N identifier (pre-computed in DAO via global ROW_NUMBER)
-            user_display_id = session_row.get('user_display_id') or f"User-{session_db_id[:8]}"
+            user_display_id = session_row.get('user_display_id')
 
-            # Get customer_name from metadata or generate it
-            customer_name = metadata.get('customer_name')
-            if not customer_name:
+            # Use user_display_id as canonical name; only use metadata customer_name if it's a real name
+            meta_name = metadata.get('customer_name') or ''
+            if meta_name and not re.match(r'^User-\d+$', meta_name):
+                customer_name = meta_name
+            else:
                 customer_name = user_display_id
 
             # Get agent_id from SQL join (session_assignments → user_role_mapping → users)
@@ -606,9 +605,15 @@ class ChatLogService:
             feedback_type = session_row.get('feedback_type')
             session_feedback = feedback_type if feedback_type in ('positive', 'negative') else None
 
-            # User display ID
-            user_display_id = session_row.get('user_display_id') or f"User-{session_db_id[:8]}"
-            customer_name = metadata.get('customer_name') or user_display_id
+            # User display ID (from pre-fetched ROW_NUMBER map)
+            user_display_id = session_row.get('user_display_id')
+
+            # Use user_display_id as canonical name; only use metadata customer_name if it's a real name
+            meta_name = metadata.get('customer_name') or ''
+            if meta_name and not re.match(r'^User-\d+$', meta_name):
+                customer_name = meta_name
+            else:
+                customer_name = user_display_id
 
             # Assignment check
             assigned_agent_id = session_row.get('agent_id')
