@@ -24,6 +24,82 @@ ALTER TABLE api_usage ALTER COLUMN request_metadata SET COMPRESSION pglz;
 ALTER TABLE api_usage ALTER COLUMN metadata SET COMPRESSION pglz;
 ALTER TABLE token_usage_log ALTER COLUMN request_metadata SET COMPRESSION pglz;
 
+-- =============================================
+-- STORED generated columns (indexable)
+-- =============================================
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'file_uploads' AND column_name = 'file_category') THEN
+    ALTER TABLE file_uploads DROP COLUMN file_category;
+  END IF;
+  ALTER TABLE file_uploads ADD COLUMN file_category varchar(50)
+    GENERATED ALWAYS AS (
+      CASE
+        WHEN file_extension IN ('pdf','docx','xlsx','pptx','txt','doc','xls','odt') THEN 'document'
+        WHEN file_extension IN ('jpg','png','gif','svg','webp','bmp','tiff') THEN 'image'
+        WHEN file_extension IN ('mp4','mov','avi','mkv','webm','flv') THEN 'video'
+        WHEN file_extension IN ('mp3','wav','m4a','flac','ogg','aac') THEN 'audio'
+        ELSE 'other'
+      END
+    ) STORED;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'scraped_websites' AND column_name = 'is_root_page') THEN
+    ALTER TABLE scraped_websites DROP COLUMN is_root_page;
+  END IF;
+  ALTER TABLE scraped_websites ADD COLUMN is_root_page boolean
+    GENERATED ALWAYS AS (parent_id IS NULL) STORED;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'scraped_websites' AND column_name = 'url_domain') THEN
+    ALTER TABLE scraped_websites DROP COLUMN url_domain;
+  END IF;
+  ALTER TABLE scraped_websites ADD COLUMN url_domain varchar(500)
+    GENERATED ALWAYS AS (substring(original_url from '://([^/?#]+)')) STORED;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'llm_providers' AND column_name = 'tokens_remaining') THEN
+    ALTER TABLE llm_providers DROP COLUMN tokens_remaining;
+  END IF;
+  ALTER TABLE llm_providers ADD COLUMN tokens_remaining bigint
+    GENERATED ALWAYS AS (token_limit - token_used) STORED;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'api_usage' AND column_name = 'token_cost_cents') THEN
+    ALTER TABLE api_usage DROP COLUMN token_cost_cents;
+  END IF;
+  ALTER TABLE api_usage ADD COLUMN token_cost_cents int
+    GENERATED ALWAYS AS ((tokens_input * 3 + tokens_output * 12)) STORED;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'token_usage_log' AND column_name = 'calculated_cost_cents') THEN
+    ALTER TABLE token_usage_log DROP COLUMN calculated_cost_cents;
+  END IF;
+  ALTER TABLE token_usage_log ADD COLUMN calculated_cost_cents int
+    GENERATED ALWAYS AS (ROUND((prompt_tokens * 0.003 + completion_tokens * 0.006)::numeric)::int) STORED;
+END $$;
+
+-- =============================================
+-- VIRTUAL generated columns (not indexed, zero storage)
+-- =============================================
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns
@@ -71,35 +147,9 @@ END $$;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                 WHERE table_name = 'file_uploads' AND column_name = 'file_category') THEN
-    ALTER TABLE file_uploads ADD COLUMN file_category varchar(50)
-      GENERATED ALWAYS AS (
-        CASE
-          WHEN file_extension IN ('pdf','docx','xlsx','pptx','txt','doc','xls','odt') THEN 'document'
-          WHEN file_extension IN ('jpg','png','gif','svg','webp','bmp','tiff') THEN 'image'
-          WHEN file_extension IN ('mp4','mov','avi','mkv','webm','flv') THEN 'video'
-          WHEN file_extension IN ('mp3','wav','m4a','flac','ogg','aac') THEN 'audio'
-          ELSE 'other'
-        END
-      ) VIRTUAL;
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                  WHERE table_name = 'file_uploads' AND column_name = 'is_successful') THEN
     ALTER TABLE file_uploads ADD COLUMN is_successful boolean
       GENERATED ALWAYS AS (processing_status = 'completed') VIRTUAL;
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                 WHERE table_name = 'scraped_websites' AND column_name = 'url_domain') THEN
-    ALTER TABLE scraped_websites ADD COLUMN url_domain varchar(500)
-      GENERATED ALWAYS AS (substring(original_url from '://([^/?#]+)')) VIRTUAL;
   END IF;
 END $$;
 
@@ -113,15 +163,6 @@ BEGIN
         ELSE ROUND((token_used::numeric / token_limit) * 100, 2)
         END
       ) VIRTUAL;
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                 WHERE table_name = 'api_usage' AND column_name = 'token_cost_cents') THEN
-    ALTER TABLE api_usage ADD COLUMN token_cost_cents int
-      GENERATED ALWAYS AS ((tokens_input * 3 + tokens_output * 12)) VIRTUAL;
   END IF;
 END $$;
 
@@ -143,14 +184,9 @@ BEGIN
   END IF;
 END $$;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                 WHERE table_name = 'token_usage_log' AND column_name = 'calculated_cost_cents') THEN
-    ALTER TABLE token_usage_log ADD COLUMN calculated_cost_cents int
-      GENERATED ALWAYS AS (ROUND((prompt_tokens * 0.003 + completion_tokens * 0.006)::numeric)::int) VIRTUAL;
-  END IF;
-END $$;
+-- =============================================
+-- Indexes (STORED columns restored in INCLUDE/WHERE)
+-- =============================================
 
 DROP INDEX IF EXISTS idx_users_email;
 DROP INDEX IF EXISTS idx_users_email_covering;
@@ -266,15 +302,15 @@ CREATE INDEX idx_session_assignments_transferred ON session_assignments(user_rol
 DROP INDEX IF EXISTS idx_file_uploads_processing_pending;
 DROP INDEX IF EXISTS idx_file_uploads_processing_active;
 CREATE INDEX idx_file_uploads_processing_active ON file_uploads(processing_status, created_at DESC)
-  INCLUDE (display_name, user_role_id)
+  INCLUDE (display_name, user_role_id, file_category)
   WHERE processing_status IN ('pending', 'processing');
 DROP INDEX IF EXISTS idx_file_uploads_completed_lookup;
 CREATE INDEX idx_file_uploads_completed_lookup ON file_uploads(gemini_file_name)
-  INCLUDE (display_name, processed_content_s3_key, file_size)
+  INCLUDE (display_name, processed_content_s3_key, file_size, file_category)
   WHERE processing_status = 'completed';
 DROP INDEX IF EXISTS idx_file_uploads_user_files;
 CREATE INDEX idx_file_uploads_user_files ON file_uploads(user_role_id, processing_status, created_at DESC)
-  INCLUDE (display_name, file_size);
+  INCLUDE (display_name, file_size, file_category);
 DROP INDEX IF EXISTS idx_file_uploads_docling_perf;
 CREATE INDEX idx_file_uploads_docling_perf ON file_uploads(docling_processing_time_ms DESC)
   INCLUDE (docling_images_extracted, docling_images_with_ocr, processed_by_docling)
@@ -295,16 +331,16 @@ CREATE INDEX idx_file_uploads_s3_processed ON file_uploads(processed_content_s3_
 DROP INDEX IF EXISTS idx_scraped_websites_parent_id;
 DROP INDEX IF EXISTS idx_scraped_websites_parent_hierarchy;
 CREATE INDEX idx_scraped_websites_parent_hierarchy ON scraped_websites(parent_id, created_at DESC)
-  INCLUDE (processing_status, depth, pages_scraped)
+  INCLUDE (processing_status, depth, pages_scraped, is_root_page)
   WHERE parent_id IS NOT NULL;
 DROP INDEX IF EXISTS idx_scraped_websites_processing_pending;
 DROP INDEX IF EXISTS idx_scraped_websites_processing_active;
 CREATE INDEX idx_scraped_websites_processing_active ON scraped_websites(processing_status, created_at DESC)
-  INCLUDE (domain, pages_scraped, file_size)
+  INCLUDE (domain, pages_scraped, file_size, url_domain)
   WHERE processing_status IN ('pending', 'processing');
 DROP INDEX IF EXISTS idx_scraped_websites_domain_processed;
 CREATE INDEX idx_scraped_websites_domain_processed ON scraped_websites(domain, processing_status, created_at DESC)
-  INCLUDE (pages_scraped, file_size);
+  INCLUDE (pages_scraped, file_size, url_domain);
 DROP INDEX IF EXISTS idx_scraped_websites_domain_content;
 CREATE INDEX idx_scraped_websites_domain_content ON scraped_websites(domain)
   INCLUDE (title, pages_scraped, char_count)
@@ -322,7 +358,7 @@ CREATE INDEX idx_scraped_websites_metadata_source ON scraped_websites((metadata-
   WHERE metadata->>'source_type' IS NOT NULL;
 DROP INDEX IF EXISTS idx_scraped_websites_url_lookup;
 CREATE INDEX idx_scraped_websites_url_lookup ON scraped_websites(original_url, processing_status, created_at DESC)
-  INCLUDE (title, domain)
+  INCLUDE (title, domain, url_domain)
   WHERE processing_status != 'deleted';
 DROP INDEX IF EXISTS idx_scraped_websites_failed_analysis;
 CREATE INDEX idx_scraped_websites_failed_analysis ON scraped_websites(created_at DESC)
@@ -375,47 +411,55 @@ CREATE INDEX idx_security_settings_lookup ON security_settings(setting_name)
 DROP INDEX IF EXISTS idx_llm_providers_provider_name;
 DROP INDEX IF EXISTS idx_llm_providers_lookup;
 CREATE INDEX idx_llm_providers_lookup ON llm_providers(provider_name)
-  INCLUDE (is_active, token_limit, token_used);
+  INCLUDE (is_active, token_limit, token_used, tokens_remaining);
 DROP INDEX IF EXISTS idx_llm_providers_critical;
 CREATE INDEX idx_llm_providers_critical ON llm_providers(provider_name)
-  WHERE (token_limit - token_used) < 100000 AND is_active = true;
+  WHERE tokens_remaining < 100000 AND is_active = true;
 
 DROP INDEX IF EXISTS idx_api_usage_provider;
 DROP INDEX IF EXISTS idx_api_usage_provider_activity;
 CREATE INDEX idx_api_usage_provider_activity ON api_usage(api_provider, created_at DESC)
-  INCLUDE (http_method, tokens_input, tokens_output, user_email);
+  INCLUDE (http_method, tokens_input, tokens_output, user_email, token_cost_cents);
 DROP INDEX IF EXISTS idx_api_usage_endpoint;
 DROP INDEX IF EXISTS idx_api_usage_endpoint_perf;
 CREATE INDEX idx_api_usage_endpoint_perf ON api_usage(api_endpoint, http_method, created_at DESC)
-  INCLUDE (response_size_bytes, tokens_output);
+  INCLUDE (response_size_bytes, tokens_output, token_cost_cents);
 DROP INDEX IF EXISTS idx_api_usage_user_email;
 DROP INDEX IF EXISTS idx_api_usage_user_activity;
 CREATE INDEX idx_api_usage_user_activity ON api_usage(user_email, created_at DESC)
-  INCLUDE (api_provider, api_endpoint, tokens_input, tokens_output);
+  INCLUDE (api_provider, api_endpoint, tokens_input, tokens_output, token_cost_cents);
+DROP INDEX IF EXISTS idx_api_usage_expensive_calls;
+CREATE INDEX idx_api_usage_expensive_calls ON api_usage(created_at DESC)
+  INCLUDE (api_provider, tokens_output, request_size_bytes, token_cost_cents)
+  WHERE token_cost_cents > 1000;
 DROP INDEX IF EXISTS idx_api_usage_recent_activity;
 CREATE INDEX idx_api_usage_recent_activity ON api_usage(api_provider, created_at DESC)
-  INCLUDE (tokens_input, tokens_output)
+  INCLUDE (tokens_input, tokens_output, token_cost_cents)
   WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '7 days';
 
 DROP INDEX IF EXISTS idx_token_usage_log_session_id;
 DROP INDEX IF EXISTS idx_token_usage_session_spend;
 CREATE INDEX idx_token_usage_session_spend ON token_usage_log(session_id, created_at DESC)
-  INCLUDE (total_tokens, cost_cents, provider, model)
+  INCLUDE (total_tokens, cost_cents, provider, model, calculated_cost_cents)
   WHERE session_id IS NOT NULL;
 DROP INDEX IF EXISTS idx_token_usage_log_provider;
 DROP INDEX IF EXISTS idx_token_usage_provider_metrics;
 CREATE INDEX idx_token_usage_provider_metrics ON token_usage_log(provider, created_at DESC)
-  INCLUDE (model, prompt_tokens, completion_tokens, cost_cents, api_call_type);
+  INCLUDE (model, prompt_tokens, completion_tokens, cost_cents, api_call_type, calculated_cost_cents);
 DROP INDEX IF EXISTS idx_token_usage_model_analysis;
 CREATE INDEX idx_token_usage_model_analysis ON token_usage_log(provider, model, created_at DESC)
-  INCLUDE (prompt_tokens, completion_tokens, cost_cents, total_tokens);
+  INCLUDE (prompt_tokens, completion_tokens, cost_cents, total_tokens, calculated_cost_cents);
 DROP INDEX IF EXISTS idx_token_usage_message_tracking;
 CREATE INDEX idx_token_usage_message_tracking ON token_usage_log(message_id, created_at DESC)
   INCLUDE (provider, total_tokens, cost_cents, api_call_type)
   WHERE message_id IS NOT NULL;
+DROP INDEX IF EXISTS idx_token_usage_expensive;
+CREATE INDEX idx_token_usage_expensive ON token_usage_log(created_at DESC)
+  INCLUDE (provider, model, cost_cents, calculated_cost_cents)
+  WHERE calculated_cost_cents > 1000;
 DROP INDEX IF EXISTS idx_token_usage_recent;
 CREATE INDEX idx_token_usage_recent ON token_usage_log(provider, created_at DESC)
-  INCLUDE (model, total_tokens, cost_cents)
+  INCLUDE (model, total_tokens, cost_cents, calculated_cost_cents)
   WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '7 days';
 
 DROP INDEX IF EXISTS idx_metrics_type;
