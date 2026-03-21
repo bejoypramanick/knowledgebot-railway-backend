@@ -17,6 +17,7 @@ from ..core.dependencies import ChatSessionDeps
 from ..core.ai import MODEL_NAME
 from .session_manager import session_state_manager
 from .agent_manager import agent_manager
+from shared.profiling import trace_phase, PipelineTimer
 
 logger = get_otel_logger("streaming_service", "chatbot-orchestration")
 
@@ -162,6 +163,9 @@ class StreamingService:
             logger.info(f"🚀 Starting agent stream for session: {session_id}")
             logger.info(f"📝 Message: {message[:100]}...")
 
+            # Pipeline performance timer - tracks each phase
+            pipeline_timer = PipelineTimer(session_id)
+
             # 📁 UPLOAD AGENT REQUEST TO S3 (if enabled)
             agent_request_download_url = None
             enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "true").lower() == "true"
@@ -188,6 +192,8 @@ class StreamingService:
                     # Continue without S3 upload - don't block the response
             else:
                 logger.info("📁 Agent S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
+
+            pipeline_timer.mark("s3_request_upload")
 
             # Session setup (PG + Redis DB6) is done at page load via /validate-chat
             # Here we only update activity and proceed with the response
@@ -236,6 +242,8 @@ class StreamingService:
             # Convert chat history to Pydantic AI format
             pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
             logger.info(f"✅ Converted {len(pydantic_messages)} messages to Pydantic AI format")
+
+            pipeline_timer.mark("session_setup_and_history")
 
             # System Prompt Strategy: Cache-aware handling
             #
@@ -519,6 +527,8 @@ class StreamingService:
             except Exception as db_error:
                 logger.error(f"❌ Failed to save user message: {db_error}")
 
+            pipeline_timer.mark("pre_agent_checks")
+
             # Start streaming response
             logger.info("🌊 Starting agent stream...")
             full_response = ""
@@ -701,6 +711,8 @@ class StreamingService:
                     json_response = json.dumps(error_data, ensure_ascii=False)
                     yield f"data: {json_response}\n\n"
                     return
+
+                pipeline_timer.mark("agent_inference")
 
                 # After iteration completes, get final result
                 logger.info("🔍 Agent iteration completed, extracting response from all_messages()...")
@@ -1064,6 +1076,8 @@ class StreamingService:
                 return
 
 
+            pipeline_timer.mark("response_extraction")
+
             # ================================================================
             # ================================================================
             # STREAM THE RESPONSE IN CHUNKS (after enforcement check)
@@ -1301,6 +1315,9 @@ class StreamingService:
                     logger.info(f"   Broadcast result: {broadcast_result}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to post to admin channels: {e}")
+
+            pipeline_timer.mark("save_and_broadcast")
+            pipeline_timer.done()
 
             # Send completion signal via Redis (for SSE to pick up)
             logger.info("=" * 80)

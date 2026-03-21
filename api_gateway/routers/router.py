@@ -728,6 +728,34 @@ async def public_chat_stream(request: Request):
 
 
 # =================================
+# PROFILING PROXY ENDPOINTS (Admin only - auth required)
+# =================================
+
+@router.api_route("/chatbot/profiling/{path:path}", methods=["GET", "POST"])
+async def proxy_profiling(request: Request, path: str):
+    """Proxy profiling endpoints to chatbot orchestration service."""
+    try:
+        settings = get_settings()
+        chatbot_service_url = settings.chatbot_orchestration_url
+        target_url = f"{chatbot_service_url}/api/v1/chatbot/profiling/{path}"
+
+        # Forward query params
+        if request.query_params:
+            target_url += f"?{request.query_params}"
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if request.method == "POST":
+                resp = await client.post(target_url)
+            else:
+                resp = await client.get(target_url)
+
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except Exception as e:
+        logger.error(f"Profiling proxy error: {e}")
+        raise HTTPException(status_code=502, detail=f"Profiling proxy error: {str(e)}")
+
+
+# =================================
 # PUBLIC WIDGET CONFIGURATION ENDPOINT (No Authentication Required)
 # =================================
 

@@ -118,6 +118,12 @@ app.add_middleware(
 # Include Routers
 app.include_router(router, prefix="/api/v1/chatbot")
 
+# Profiling endpoints (yappi remote toggle) - only when ENABLE_PROFILING=true
+if os.getenv("ENABLE_PROFILING", "false").lower() == "true":
+    from shared.profiling import create_profiling_router
+    app.include_router(create_profiling_router(), prefix="/api/v1/chatbot/profiling")
+    logger.info("Profiling endpoints enabled at /api/v1/chatbot/profiling")
+
 @app.get("/")
 async def root_diagnostic(request: Request):
     """Simple root endpoint for basic liveliness check."""
