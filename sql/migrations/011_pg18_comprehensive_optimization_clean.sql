@@ -375,10 +375,10 @@ CREATE INDEX idx_security_settings_lookup ON security_settings(setting_name)
 DROP INDEX IF EXISTS idx_llm_providers_provider_name;
 DROP INDEX IF EXISTS idx_llm_providers_lookup;
 CREATE INDEX idx_llm_providers_lookup ON llm_providers(provider_name)
-  INCLUDE (is_active, token_limit, token_used, token_remaining);
+  INCLUDE (is_active, token_limit, token_used);
 DROP INDEX IF EXISTS idx_llm_providers_critical;
 CREATE INDEX idx_llm_providers_critical ON llm_providers(provider_name)
-  WHERE token_remaining < 100000 AND is_active = true;
+  WHERE tokens_remaining < 100000 AND is_active = true;
 
 DROP INDEX IF EXISTS idx_api_usage_provider;
 DROP INDEX IF EXISTS idx_api_usage_provider_activity;
