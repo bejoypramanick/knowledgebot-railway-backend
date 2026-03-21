@@ -533,7 +533,7 @@ class StreamingService:
                 from datetime import datetime
 
                 user_message_event = {
-                    "type": "user_message",
+                    "type": "customer_message",
                     "message_id": f"user-{session_id}-{int(time.time() * 1000)}",
                     "session_id": session_id,
                     "text": message,
