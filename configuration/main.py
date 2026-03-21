@@ -168,6 +168,8 @@ async def lifespan(app: FastAPI):
             )
 
             if not isinstance(config_data, Exception):
+                import json
+                logger.info(f"📋 LIFESPAN: chat_agent_config going into Redis: {json.dumps(config_data, default=str)}")
                 await cache_set(CHAT_AGENT_CONFIG_KEY, config_data, TTL_LONG)
             if not isinstance(widget_data, Exception):
                 await cache_set(WIDGET_CONFIG_KEY, widget_data, TTL_LONG)
