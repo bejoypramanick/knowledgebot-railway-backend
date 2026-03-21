@@ -90,15 +90,8 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        # 🔄 STEP 1: Extract chat session UUID from httpOnly cookie ONLY for customer endpoints
-        # UUID never appears in URL, params, or request body
-        # After /set-current is called, UUID is in httpOnly cookie for all requests
-        # ONLY resolve for customer-facing endpoints (admin endpoints don't need session UUID resolution)
-        from api_gateway.core.session_resolver import extract_session_uuid_from_cookie, resolve_session_uuid_to_numeric_id
-
-        # Only attempt session UUID resolution for customer-facing endpoints
-        # Admin endpoints authenticate via Firebase, not customer session UUID
-        # Also include customer-used endpoints under /admin/ path (feedback, request-agent, end-customer)
+        # 🔄 STEP 1: Extract session ID from httpOnly cookie for customer endpoints
+        # PG18: session_id IS the UUIDv7 PK — no resolution layer needed
         is_customer_endpoint = path.startswith('/api/v1/gateway/configuration/customer/') or \
                                path.startswith('/api/v1/gateway/chatbot/sessions/') or \
                                path in [
@@ -108,18 +101,11 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
                                ]
 
         if is_customer_endpoint:
-            session_uuid = extract_session_uuid_from_cookie(request)
-
-            if session_uuid:
-                # Resolve UUID to numeric ID
-                numeric_session_id = await resolve_session_uuid_to_numeric_id(session_uuid)
-                if numeric_session_id:
-                    # Store both UUID and numeric ID in request state for internal services to use
-                    request.state.session_uuid = session_uuid
-                    request.state.session_numeric_id = numeric_session_id
-                    logger.debug(f"🔄 Resolved session UUID {session_uuid} → numeric ID {numeric_session_id}")
-                else:
-                    logger.debug(f"⚠️ Could not resolve session UUID {session_uuid} to numeric ID")
+            session_id = request.cookies.get('chatbot_session_id')
+            if session_id:
+                # PG18: session_id IS the database PK — store directly, no resolution needed
+                request.state.session_id = session_id
+                logger.debug(f"🔄 Session ID from cookie: {session_id}")
 
         # Skip authentication for excluded paths (anonymous customers, public endpoints)
         is_excluded = self.is_excluded_path(path)

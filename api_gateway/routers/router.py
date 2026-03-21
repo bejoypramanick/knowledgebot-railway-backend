@@ -91,9 +91,6 @@ async def validate_chat_window_load(request: Request):
     try:
         from shared.redis_widget_config_cache import get_display_chatbot, set_display_chatbot
         from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
-        import time
-        import random
-        import string
         import uuid
 
         correlation_id = str(uuid.uuid4())
@@ -147,17 +144,12 @@ async def validate_chat_window_load(request: Request):
                 "reason": "Chat is currently disabled"
             }
 
-        # Step 3: Create session
+        # Step 3: Create session with PG18 database-generated UUIDv7
         try:
-            # Generate session UUID: session_{timestamp}_{random10char}
-            timestamp = str(int(time.time() * 1000))
-            random_suffix = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
-            session_uuid = f"session_{timestamp}_{random_suffix}"
-
             session_dao = SessionPersistenceDAO()
-            session_id = await session_dao.get_or_create_session(session_uuid)
+            session_uuid = await session_dao.create_session()
 
-            logger.info(f"[{correlation_id}] ✅ Session created: uuid={session_uuid}, db_id={session_id}")
+            logger.info(f"[{correlation_id}] ✅ Session created with PG18 UUIDv7: {session_uuid}")
 
             return {
                 "ready": True,
@@ -388,31 +380,14 @@ async def proxy_agent_message(request: Request):
         body = await request.json()
         logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Request body: {body}")
         
-        session_uuid = body.get("session_id")  # UUID from frontend
-        
-        if not session_uuid:
+        session_id = body.get("session_id")
+
+        if not session_id:
             logger.error(f"❌ [AGENT_MESSAGE_PROXY] session_id missing in request body")
             raise HTTPException(status_code=400, detail="session_id is required")
-        
-        logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Received agent message for session UUID: {session_uuid}")
-        
-        # Convert UUID to numeric ID
-        from sqlalchemy import text
-        from shared.sqlalchemy_db import get_db_session
-        
-        async with get_db_session() as db_session:
-            query = text("SELECT id FROM chat_sessions WHERE session_id = :session_uuid")
-            result = await db_session.execute(query, {"session_uuid": session_uuid})
-            row = result.mappings().first()
-            
-            if not row:
-                raise HTTPException(status_code=404, detail=f"Session not found: {session_uuid}")
-            
-            numeric_session_id = row['id']
-            logger.info(f"✅ [AGENT_MESSAGE_PROXY] Converted UUID {session_uuid} to numeric ID {numeric_session_id}")
-        
-        # Update body with numeric ID
-        body["session_id"] = numeric_session_id
+
+        # PG18: session_id IS the UUIDv7 PK — no conversion needed
+        logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Received agent message for session: {session_id}")
 
         # CRITICAL: Set agent_id from authenticated user (NOT from body)
         # Read from request.state (set by SessionAuthMiddleware after Firebase verification)
@@ -1091,70 +1066,13 @@ async def generic_proxy_handler(request: Request, path: str):
                     if "session_id" in body_data:
                         client_session_id = body_data["session_id"]
 
-                        # VALIDATION: Reject UUIDs for configuration service endpoints
-                        # Configuration service endpoints MUST receive numeric session_id only
-                        if isinstance(client_session_id, str) and client_session_id.startswith("session_"):
-                            # Client sent UUID - must convert to numeric
-                            # Two scenarios:
-                            # 1. Customer endpoints: UUID from cookie, middleware already resolved it
-                            # 2. Admin endpoints: UUID from request body, need to resolve it here
-                            numeric_id = None
-                            
-                            # First check if middleware already resolved it (customer endpoints)
-                            if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
-                                numeric_id = request.state.session_numeric_id
-                                logger.info(f"🔄 Using middleware-resolved numeric ID: {client_session_id} → {numeric_id}")
-                            else:
-                                # Middleware didn't resolve it (admin endpoints) - do it here
-                                logger.info(f"🔍 Resolving UUID from request body: {client_session_id}")
-                                from sqlalchemy import text
-                                from shared.sqlalchemy_db import get_db_session
-                                
-                                try:
-                                    async with get_db_session() as db_session:
-                                        query = text("SELECT id FROM chat_sessions WHERE session_id = :session_uuid")
-                                        logger.debug(f"🔍 Executing query: {query} with session_uuid={client_session_id}")
-                                        result = await db_session.execute(query, {"session_uuid": client_session_id})
-                                        row = result.mappings().first()
-                                        
-                                        if row:
-                                            numeric_id = row['id']
-                                            logger.info(f"✅ Resolved UUID to numeric ID: {client_session_id} → {numeric_id}")
-                                        else:
-                                            logger.warning(f"⚠️ Session UUID not found in database: {client_session_id}")
-                                            logger.warning(f"⚠️ Query returned no results for session_id = '{client_session_id}'")
-                                except Exception as e:
-                                    logger.error(f"❌ Error resolving UUID: {e}", exc_info=True)
-                            
-                            if numeric_id:
-                                # Conversion successful - use numeric ID
-                                body_data["session_id"] = numeric_id
-                                logger.info(f"🔄 Converted UUID to numeric in body: {client_session_id} → {numeric_id}")
-                            else:
-                                # Conversion failed - check if this is a session creation endpoint
-                                # For chatbot stream, allow UUID to pass through so backend can create session
-                                # This handles race conditions where backend generated UUID but session not yet in DB
-                                if "chatbot/chat/stream" in full_url:
-                                    logger.info(f"✅ Allowing UUID to pass through for chatbot stream: {client_session_id}")
-                                    # Keep the UUID in body - backend will create the session
-                                else:
-                                    # For other endpoints, reject if UUID not found
-                                    logger.error(f"❌ Failed to resolve session UUID {client_session_id} for {backend_path}")
-                                    raise HTTPException(
-                                        status_code=400,
-                                        detail=f"Invalid session: UUID could not be resolved. Session may not exist or may have expired."
-                                    )
-                        # else: already numeric or other format - assume it's valid
+                        # PG18: session_id IS the UUIDv7 PK — pass through directly, no resolution needed
+                        logger.debug(f"PG18: Passing session_id through: {client_session_id}")
                     else:
                         # No session_id in body - try to inject from cookie if available
-                        if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
-                            body_data["session_id"] = request.state.session_numeric_id
-                            logger.info(f"✅ Injected numeric session_id into body: {request.state.session_numeric_id}")
-
-                    # ALSO inject session_uuid for broadcasting (customer SSE channels use UUID)
-                    if hasattr(request.state, "session_uuid") and request.state.session_uuid:
-                        body_data["session_uuid"] = request.state.session_uuid
-                        logger.debug(f"✅ Injected session_uuid into body: {request.state.session_uuid}")
+                        if hasattr(request.state, "session_id") and request.state.session_id:
+                            body_data["session_id"] = request.state.session_id
+                            logger.info(f"✅ Injected session_id from cookie into body: {request.state.session_id}")
 
                     request_body = json.dumps(body_data).encode()
 

@@ -120,8 +120,9 @@ class ChatWriteThroughService:
         try:
             async with get_db_session() as db:
                 # Step 1: Ensure session row exists in PG
-                db_id = session_data.get("db_id")
-                if not db_id:
+                # PG18: session_uuid IS the UUIDv7 PK — always use it as db_id
+                db_id = session_uuid
+                if not session_data.get("pg_synced") or session_data.get("pg_synced") == "false":
                     # Parse ISO string timestamps back to datetime objects for asyncpg
                     started_at_str = session_data.get("started_at")
                     if isinstance(started_at_str, str):
@@ -141,26 +142,25 @@ class ChatWriteThroughService:
                     else:
                         last_activity_at = last_activity_str
 
-                    # INSERT with ON CONFLICT for idempotency
+                    # PG18: session_uuid IS the UUIDv7 PK — use for both id and session_id
                     result = await db.execute(
                         text("""
-                            INSERT INTO chat_sessions (session_id, is_active, archive_status, started_at, last_activity_at, message_count)
-                            VALUES (:session_uuid, true, 'active', :started_at, :last_activity_at, 0)
+                            INSERT INTO chat_sessions (id, session_id, is_active, archive_status, started_at, last_activity_at, message_count)
+                            VALUES (:id::uuid, :session_uuid, true, 'active', :started_at, :last_activity_at, 0)
                             ON CONFLICT (session_id) DO UPDATE SET last_activity_at = EXCLUDED.last_activity_at
                             RETURNING id
                         """),
                         {
+                            "id": session_uuid,
                             "session_uuid": session_uuid,
                             "started_at": started_at,
                             "last_activity_at": last_activity_at
                         }
                     )
-                    db_id = result.scalar()
+                    db_id = str(result.scalar())
                     await db.commit()
 
-                    # Cache the db_id back in Redis
-                    await self._store.set_session_db_id(session_uuid, db_id)
-                    logger.info(f"Write-through: PG session ensured {session_uuid} -> DB ID {db_id}")
+                    logger.info(f"Write-through: PG session ensured {session_uuid}")
 
                 # Step 2: Batch insert unsynced messages
                 if unsynced:

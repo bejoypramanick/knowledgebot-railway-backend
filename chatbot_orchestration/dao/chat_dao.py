@@ -101,48 +101,67 @@ class ChatDAO:
 
         return {"messages": messages}
 
-    async def ensure_db_id(self, session_id: str) -> Optional[str]:
+    async def create_session_pg(self) -> Optional[str]:
         """
-        Ensure session has a PG database ID. Creates PG row if needed.
-        This is the ONLY PG call in the hot path — happens once per new session.
+        Create a new chat session in PG18 using database-generated UUIDv7.
+        Returns the UUIDv7 id as the session identifier.
+        PG18: id IS the session identifier — no separate session_id/db_id.
         """
-        # Check if we already have a db_id cached in Redis
-        session = await self._store.get_session(session_id)
-        if session and session.get("db_id"):
-            return session["db_id"]
-
-        # Need to create PG row to get database ID
         try:
             async with get_db_session() as db_session:
                 result = await db_session.execute(
                     text("""
-                        INSERT INTO chat_sessions (session_id, is_active, archive_status, started_at, last_activity_at, message_count)
-                        VALUES (:session_id, true, 'active', NOW(), NOW(), 0)
+                        WITH new_uuid AS (SELECT uuidv7() AS sid)
+                        INSERT INTO chat_sessions (id, session_id, is_active, archive_status, started_at, last_activity_at, message_count)
+                        SELECT sid, sid::text, true, 'active', NOW(), NOW(), 0
+                        FROM new_uuid
+                        RETURNING id
+                    """)
+                )
+                session_id = str(result.scalar())
+                await db_session.commit()
+
+                logger.info(f"PG18 session created with UUIDv7: {session_id}")
+                return session_id
+
+        except Exception as e:
+            logger.error(f"Error creating PG18 session: {e}")
+            return None
+
+    async def ensure_session_exists(self, session_id: str) -> Optional[str]:
+        """
+        Ensure session exists in PG. Creates row if needed (idempotent).
+        PG18: session_id IS the UUIDv7 PK — used for both id and session_id columns.
+        """
+        try:
+            async with get_db_session() as db_session:
+                result = await db_session.execute(
+                    text("""
+                        INSERT INTO chat_sessions (id, session_id, is_active, archive_status, started_at, last_activity_at, message_count)
+                        VALUES (:id::uuid, :session_id, true, 'active', NOW(), NOW(), 0)
                         ON CONFLICT (session_id) DO UPDATE SET last_activity_at = NOW()
                         RETURNING id
                     """),
-                    {"session_id": session_id}
+                    {"id": session_id, "session_id": session_id}
                 )
-                db_id = result.scalar()
+                db_id = str(result.scalar())
                 await db_session.commit()
 
-                # Cache the db_id in Redis
-                await self._store.set_session_db_id(session_id, db_id)
-                logger.info(f"PG database ID created for {session_id}: {db_id}")
+                logger.info(f"PG18 session ensured: {session_id}")
                 return db_id
 
         except Exception as e:
-            logger.error(f"Error creating PG database ID for {session_id}: {e}")
+            logger.error(f"Error ensuring PG18 session {session_id}: {e}")
             return None
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete a chat session from both Redis and PG."""
         await self._store.delete_session(session_id)
 
-        query = "DELETE FROM chat_sessions WHERE session_id = :session_id"
+        query = "DELETE FROM chat_sessions WHERE id = :id::uuid"
         try:
             async with get_db_session() as session:
-                await session.execute(text(query), {"session_id": session_id})
+                await session.execute(text(query), {"id": session_id})
                 await session.commit()
                 logger.info(f"Session deleted from Redis + PG: {session_id}")
                 return True

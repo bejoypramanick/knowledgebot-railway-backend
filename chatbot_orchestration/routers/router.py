@@ -8,8 +8,6 @@ from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
 import logging
 from shared.otel_logger import get_otel_logger
-from shared.otel_logger import get_otel_logger
-import time
 
 from ..service.chat_service import ChatService
 from ..service.agent_service import PydanticAIGatewayService
@@ -44,30 +42,22 @@ async def chat_with_agent_stream(request: Request):
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
 
-        # If no session_id provided, create one in database on first message
+        # If no session_id provided, create one via PG18 UUIDv7
         is_new_session = not session_id
         if not session_id:
-            # Generate UUID for new session (same format as /set-current endpoint)
-            import time
-            import random
-            import string
-            timestamp = int(time.time() * 1000)
-            random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-            session_id = f"session_{timestamp}_{random_suffix}"
-
-            logger.info(f"✅ Generated new session UUID for first message: {session_id}")
-
-        # CRITICAL: Save session to database BEFORE returning response
-        # This ensures API Gateway can resolve UUID → numeric ID for subsequent requests
-        # Use get_or_create to handle both new and existing sessions
-        try:
             from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
             session_dao = SessionPersistenceDAO()
-            session_db_id = await session_dao.get_or_create_session(session_id)
-            logger.info(f"✅ Session {session_id} ready in database with ID {session_db_id}")
-        except Exception as e:
-            logger.error(f"⚠️ Failed to ensure session in database: {e}")
-            # Continue anyway - session will be created when first message is saved
+            session_id = await session_dao.create_session()
+            logger.info(f"✅ Created new PG18 UUIDv7 session: {session_id}")
+        else:
+            # Ensure existing session is in both Redis and PG
+            try:
+                from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
+                session_dao = SessionPersistenceDAO()
+                await session_dao.ensure_session(session_id)
+                logger.info(f"✅ Session {session_id} ensured in database")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to ensure session in database: {e}")
 
         # Build response headers
         response_headers = {
@@ -131,14 +121,16 @@ async def delete_chat_session(session_id: str):
 
 @router.post("/chat/session")
 async def create_chat_session(request: Request):
-    """Create a new chat session"""
+    """Create a new chat session with PG18 UUIDv7"""
     try:
         body = await request.json()
-        
+
         agent_id = body.get("agent_id", "default")
-        
-        session_id = f"session_{int(time.time())}"
-        
+
+        from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
+        session_dao = SessionPersistenceDAO()
+        session_id = await session_dao.create_session()
+
         return {
             "success": True,
             "session_id": session_id,

@@ -1,6 +1,8 @@
 """
 Session Persistence DAO for Chatbot Orchestration
 Redirects to Redis chat store (DB 6). PG is written asynchronously via write-through.
+
+PG18: session_id IS the UUIDv7 database PK — no separate db_id/numeric_id.
 """
 from typing import Optional, Dict, Any
 
@@ -16,90 +18,70 @@ class SessionPersistenceDAO:
     def __init__(self):
         self._store = get_chat_store()
 
-    async def get_or_create_session(self, session_id: str) -> int:
+    async def create_session(self) -> str:
         """
-        Get existing session or create new one in Redis.
-        Returns the PG numeric ID (creates PG row if needed for the serial ID).
+        Create a new session with PG18 database-generated UUIDv7.
+        Returns the UUIDv7 string which IS the session identifier and database PK.
         """
-        # Ensure session exists in Redis
-        session = await self._store.get_or_create_session(session_uuid=session_id)
-
-        # Check if we already have a db_id
-        if session and session.get("db_id"):
-            return session["db_id"]
-
-        # Need PG row for database ID (single PG call, first message only)
         from chatbot_orchestration.dao.chat_dao import ChatDAO
         chat_dao = ChatDAO()
-        db_id = await chat_dao.ensure_db_id(session_id)
-        if db_id:
-            return db_id
+        session_id = await chat_dao.create_session_pg()
+        if not session_id:
+            raise RuntimeError("Failed to create PG18 session")
 
-        # Should not happen, but raise if we can't get an ID
-        raise RuntimeError(f"Failed to get or create database ID for session {session_id}")
+        # Create Redis session with the PG-generated UUID
+        await self._store.get_or_create_session(session_uuid=session_id)
+        return session_id
 
-    async def save_user_message(self, session_db_id: str, content: str) -> int:
+    async def ensure_session(self, session_id: str) -> str:
         """
-        Save a user message to Redis.
-        Returns a synthetic message index (not a PG serial ID).
-        PG persistence happens via write-through.
+        Ensure session exists in both Redis and PG (idempotent).
+        PG18: session_id IS the UUIDv7 PK — no resolution needed.
         """
-        # We need the session_uuid to save to Redis — look it up from the store
-        # or use session_db_id as a reference
-        # The caller should pass session_uuid instead, but for backward compat
-        # we accept session_db_id and note that the actual save is done
-        # by session_manager.save_message() which has the UUID
-        logger.debug(f"save_user_message called for session {session_db_id} — delegating to Redis via session_manager")
-        # Return 0 as a placeholder — actual save happens in session_manager
+        # Ensure session exists in Redis
+        await self._store.get_or_create_session(session_uuid=session_id)
+
+        # Ensure session exists in PG
+        from chatbot_orchestration.dao.chat_dao import ChatDAO
+        chat_dao = ChatDAO()
+        await chat_dao.ensure_session_exists(session_id)
+
+        return session_id
+
+    async def save_user_message(self, session_id: str, content: str) -> int:
+        """Save a user message — delegated to session_manager via Redis."""
+        logger.debug(f"save_user_message called for session {session_id} — delegating to Redis via session_manager")
         return 0
 
-    async def save_bot_message(self, session_db_id: int, content: str, role: str = 'bot') -> int:
-        """
-        Save a bot/AI response message to Redis.
-        Returns a synthetic message index.
-        PG persistence happens via write-through.
-        """
-        logger.debug(f"save_bot_message called for session {session_db_id} — delegating to Redis via session_manager")
+    async def save_bot_message(self, session_id: str, content: str, role: str = 'bot') -> int:
+        """Save a bot/AI response message — delegated to session_manager via Redis."""
+        logger.debug(f"save_bot_message called for session {session_id} — delegating to Redis via session_manager")
         return 0
 
-    async def update_session_activity(self, session_db_id: int) -> bool:
+    async def update_session_activity(self, session_id: str) -> bool:
         """Update session activity — no-op, handled atomically by Redis save_message pipeline."""
         return True
 
-    async def get_session_message_count(self, session_db_id: int) -> int:
-        """Get message count — queries Redis if session_uuid is known."""
-        # This is rarely called directly; message_count is tracked in Redis hash
+    async def get_session_message_count(self, session_id: str) -> int:
+        """Get message count — tracked in Redis hash."""
         return 0
 
-    async def close_session(self, session_db_id: int) -> bool:
+    async def close_session(self, session_id: str) -> bool:
         """
         Mark a session as closed.
-        Closes in Redis and triggers immediate PG flush via write-through.
+        PG18: session_id IS the UUIDv7 PK — no lookup needed.
         """
-        # We need session_uuid — look it up from PG (cold path, rare)
         try:
             from shared.sqlalchemy_db import get_db_session
             from sqlalchemy import text
 
-            async with get_db_session() as db:
-                result = await db.execute(
-                    text("SELECT session_id FROM chat_sessions WHERE id = :id"),
-                    {"id": session_db_id}
-                )
-                row = result.fetchone()
-                if not row:
-                    logger.warning(f"Cannot close session {session_db_id}: not found in PG")
-                    return False
-
-                session_uuid = row[0]
-
             # Close in Redis
-            await self._store.close_session(session_uuid)
+            await self._store.close_session(session_id)
 
             # Trigger immediate PG flush
             from shared.redis_chat_writethrough import ChatWriteThroughService
             writethrough = ChatWriteThroughService.get_instance()
-            await writethrough.flush_now(session_uuid)
+            await writethrough.flush_now(session_id)
 
             # Also update PG directly for immediate consistency
             async with get_db_session() as db:
@@ -108,15 +90,15 @@ class SessionPersistenceDAO:
                         UPDATE chat_sessions
                         SET is_active = false, archive_status = 'closed',
                             ended_at = NOW(), updated_at = NOW()
-                        WHERE id = :id
+                        WHERE id = :id::uuid
                     """),
-                    {"id": session_db_id}
+                    {"id": session_id}
                 )
                 await db.commit()
 
-            logger.info(f"Session closed: {session_db_id} ({session_uuid})")
+            logger.info(f"Session closed: {session_id}")
             return True
 
         except Exception as e:
-            logger.error(f"Error closing session {session_db_id}: {e}", exc_info=True)
+            logger.error(f"Error closing session {session_id}: {e}", exc_info=True)
             return False

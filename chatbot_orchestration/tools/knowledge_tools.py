@@ -1087,19 +1087,15 @@ async def request_human_agent_connection(
     # Set workflow context for tracing human-agent-workflow through all logs
     set_workflow("human-agent-workflow")
 
-    # Get database session ID from ChatSessionDeps
-    # ctx.deps.session_id is the UUID from frontend/cookie
-    # ctx.deps.session_db_id is the database ID (created on first message)
-    session_db_id = ctx.deps.session_db_id
-    session_uuid = ctx.deps.session_id
+    # PG18: session_id IS the UUIDv7 database PK — no separate db_id
+    session_id = ctx.deps.session_id
 
-    if not session_db_id:
-        logger.error(f"❌ No database session ID available for session {session_uuid}")
+    if not session_id:
+        logger.error(f"❌ No session ID available")
         clear_workflow()
         return "I encountered an error: Session not properly initialized. Please try again."
 
-    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} (db_id: {session_db_id}) with reason: {reason}")
-    logger.info(f"📍 Tool execution starting - session_db_id={session_db_id}, session_uuid={session_uuid}")
+    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_id} with reason: {reason}")
 
     # Check if HIL is enabled before attempting to connect
     try:
@@ -1149,7 +1145,7 @@ async def request_human_agent_connection(
                 WHERE sa.session_id = :id AND sa.status = 'active'
                 LIMIT 1
             """
-            result = await db_session.execute(text(check_query), {"id": session_numeric_id})
+            result = await db_session.execute(text(check_query), {"id": session_id})
             row = result.mappings().first()
             
             if row and row.get('agent_email'):
@@ -1172,12 +1168,12 @@ async def request_human_agent_connection(
         )
 
         # Call the configuration service to assign a human agent
-        # Pass numeric session_id - internal services only accept numeric IDs
+        # PG18: session_id IS the UUIDv7 PK
         # This will:
         # 1. Find an available agent using load balancing
         # 2. Assign the session to that agent
         # 3. The agent will see ALL messages in chat_messages table (full history)
-        logger.info(f"📞 Calling configuration service to assign human agent for session {session_numeric_id}")
+        logger.info(f"📞 Calling configuration service to assign human agent for session {session_id}")
         logger.info(f"🔍 Configuration service URL: {config_service_url}")
 
         # Use internal service endpoint (direct path, no /api/v1/gateway prefix)
@@ -1187,7 +1183,7 @@ async def request_human_agent_connection(
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 endpoint_url,
-                json={"session_id": session_numeric_id},  # Send numeric session_id - internal services only accept numeric IDs
+                json={"session_id": session_id},
                 headers={}
             )
 
@@ -1199,13 +1195,13 @@ async def request_human_agent_connection(
                 result = response.json()
                 assigned_agent_email = result.get('agent_assigned', 'an agent')
                 assigned_agent_id = result.get('agent_id')  # Get user ID from response
-                logger.info(f"✅ Chat {session_numeric_id} assigned to human agent {assigned_agent_email} (ID: {assigned_agent_id})")
+                logger.info(f"✅ Chat {session_id} assigned to human agent {assigned_agent_email} (ID: {assigned_agent_id})")
                 logger.info(f"📚 Agent will see full chat history from chat_messages table")
 
                 # Broadcast session to agent in ChatSessionResponse format
                 # Agent's ChatLog UI will receive this and merge it seamlessly into their session list
                 try:
-                    logger.info(f"🔄 Starting broadcast to agent {assigned_agent_email} (ID: {assigned_agent_id}) for session {session_numeric_id}")
+                    logger.info(f"🔄 Starting broadcast to agent {assigned_agent_email} (ID: {assigned_agent_id}) for session {session_id}")
                     from shared.redis_pubsub_manager import broadcast_event_to_agent
                     from shared.sqlalchemy_db import get_db_session
                     from sqlalchemy import text
@@ -1216,8 +1212,8 @@ async def request_human_agent_connection(
                     async with get_db_session() as db_session:
                         # Get session details
                         session_query = "SELECT * FROM chat_sessions WHERE id = :id LIMIT 1"
-                        logger.info(f"🔄 Executing query: {session_query} with id={session_numeric_id}")
-                        session_result = await db_session.execute(text(session_query), {"id": session_numeric_id})
+                        logger.info(f"🔄 Executing query: {session_query} with id={session_id}")
+                        session_result = await db_session.execute(text(session_query), {"id": session_id})
                         session_row = session_result.mappings().first()
                         logger.info(f"🔄 Session query result: {session_row is not None}")
 
@@ -1225,10 +1221,10 @@ async def request_human_agent_connection(
                             session_dict = dict(session_row)
                             logger.info(f"🔄 Got session details, querying for latest message...")
 
-                            # Get latest message (using numeric session_id, not UUID)
+                            # Get latest message for session
                             msg_query = "SELECT id, content, role, created_at FROM chat_messages WHERE session_id = :session_id ORDER BY id DESC LIMIT 1"
-                            logger.info(f"🔄 Executing message query with numeric session_id={session_numeric_id}")
-                            msg_result = await db_session.execute(text(msg_query), {"session_id": session_numeric_id})
+                            logger.info(f"🔄 Executing message query with numeric session_id={session_id}")
+                            msg_result = await db_session.execute(text(msg_query), {"session_id": session_id})
                             msg_row = msg_result.mappings().first()
                             logger.info(f"🔄 Message query result: {msg_row is not None}")
 
@@ -1239,7 +1235,7 @@ async def request_human_agent_connection(
                                     "text": msg_row['content'],
                                     "sender": msg_row['role'],
                                     "timestamp": msg_row['created_at'].isoformat() if msg_row['created_at'] else datetime.utcnow().isoformat(),
-                                    "session_id": session_uuid
+                                    "session_id": session_id
                                 })
 
                             # Build ChatSessionResponse in exact same format as /admin/chat-sessions endpoint
@@ -1257,15 +1253,15 @@ async def request_human_agent_connection(
                                         metadata = {}
                                 customer_name = metadata.get('customer_name')
                             
-                            # If customer_name not set, use "User-<numeric_id>" format
+                            # If customer_name not set, use "User-<uuid8>" format
                             if not customer_name:
-                                customer_name = f"User-{session_numeric_id}"
+                                customer_name = f"User-{session_id[:8]}"
                             
                             session_event = {
                                 "type": "session_update",
                                 "data": {
                                     "id": str(session_dict.get('id')),
-                                    "session_uuid": session_uuid,
+                                    "session_id": session_id,
                                     "customer_name": customer_name,  # Use generated name if not in DB
                                     "customer_email": session_dict.get('customer_email'),
                                     "status": session_dict.get('archive_status', 'active'),
@@ -1286,9 +1282,9 @@ async def request_human_agent_connection(
                             logger.info(f"🔄 Session event data keys: {session_event.get('data', {}).keys() if session_event.get('data') else 'NO DATA'}")
                             result = await broadcast_event_to_agent(assigned_agent_id, session_event)
                             logger.info(f"🔄 Broadcast result: {result}, returned from broadcast_event_to_agent")
-                            logger.info(f"📤 Broadcasted session {session_uuid} to agent {assigned_agent_email} (ID: {assigned_agent_id})")
+                            logger.info(f"📤 Broadcasted session {session_id} to agent {assigned_agent_email} (ID: {assigned_agent_id})")
                         else:
-                            logger.warning(f"⚠️ Session query returned no results for id={session_numeric_id}")
+                            logger.warning(f"⚠️ Session query returned no results for id={session_id}")
                 except Exception as e:
                     logger.error(f"❌ Failed to broadcast session to agent: {e}", exc_info=True)
 

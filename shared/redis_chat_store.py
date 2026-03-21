@@ -7,7 +7,7 @@ The SSE streaming path touches zero PostgreSQL connections after first message.
 Env var: CHAT_STORE_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/6
 
 Redis Data Model:
-  Session (Hash):   chat:session:{session_uuid}  -> db_id, session_uuid, user_role_id, started_at, ...
+  Session (Hash):   chat:session:{session_uuid}  -> session_uuid, user_role_id, started_at, ...
   Messages (List):  chat:messages:{session_uuid}  -> JSON objects appended via RPUSH
   Dirty Set:        chat:dirty_sessions           -> SET of session_uuids needing PG flush
   Sync Index:       chat:sync_index:{session_uuid} -> index of last synced message
@@ -133,9 +133,9 @@ class RedisChatStore:
                 return self._deserialize_session(existing)
 
             # Create new session in Redis
+            # PG18: session_uuid IS the UUIDv7 PK — no separate db_id needed
             now = datetime.now(timezone.utc).isoformat()
             session_data = {
-                "db_id": "",  # Will be populated after PG INSERT
                 "session_uuid": session_uuid,
                 "user_role_id": user_role_id if user_role_id else "",
                 "started_at": now,
@@ -171,18 +171,6 @@ class RedisChatStore:
         except Exception as e:
             logger.warning(f"Redis get_session failed for {session_uuid}: {e}")
             return None
-
-    async def set_session_db_id(self, session_uuid: str, db_id: str) -> bool:
-        """Set the PG database ID on a Redis session after INSERT."""
-        try:
-            await self._ensure_client()
-            session_key = SESSION_KEY.format(session_uuid)
-            await self._client.hset(session_key, "db_id", db_id)
-            logger.debug(f"Redis session db_id SET: {session_uuid} -> {db_id}")
-            return True
-        except Exception as e:
-            logger.warning(f"Redis set_session_db_id failed: {e}")
-            return False
 
     async def update_session_activity(self, session_uuid: str) -> bool:
         """Update last_activity_at timestamp."""
@@ -409,7 +397,6 @@ class RedisChatStore:
     def _deserialize_session(self, data: Dict[str, str]) -> Dict[str, Any]:
         """Convert Redis hash string values to proper types."""
         return {
-            "db_id": data["db_id"] if data.get("db_id") else None,
             "session_uuid": data.get("session_uuid", ""),
             "user_role_id": data["user_role_id"] if data.get("user_role_id") else None,
             "started_at": data.get("started_at"),

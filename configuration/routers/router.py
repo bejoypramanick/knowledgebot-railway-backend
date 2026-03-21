@@ -1689,7 +1689,7 @@ async def end_customer_session(request: Request):
 
     Accepts session_id from multiple sources (in priority order):
     1. Request body (explicit passing)
-    2. request.state.session_numeric_id (injected by API Gateway middleware)
+    2. request.state.session_id (injected by API Gateway middleware)
     3. request.state.session_uuid (resolve to numeric if needed)
     """
     try:
@@ -1699,7 +1699,7 @@ async def end_customer_session(request: Request):
 
         # If session_id not in body, try to get from request.state (API Gateway injection)
         if not session_id:
-            session_id = getattr(request.state, 'session_numeric_id', None)
+            session_id = getattr(request.state, 'session_id', None)
 
         # If session_uuid not in body, try to get from request.state
         if not session_uuid:
@@ -1775,7 +1775,7 @@ async def submit_session_feedback(request: Request):
 
         # If session_id not in body, try to get from request.state (API Gateway injection)
         if not session_id:
-            session_id = getattr(request.state, 'session_numeric_id', None)
+            session_id = getattr(request.state, 'session_id', None)
 
         # If session_uuid not in body, try to get from request.state
         if not session_uuid:
@@ -1822,7 +1822,7 @@ async def request_human_agent(request: Request):
 
     Session numeric ID comes from multiple sources:
     1. Request body (session_id parameter)
-    2. request.state.session_numeric_id (injected by API Gateway from cookie)
+    2. request.state.session_id (injected by API Gateway from cookie)
 
     Can be called from:
     - Browser (via API Gateway which extracts UUID from cookie and converts to numeric ID)
@@ -1840,7 +1840,7 @@ async def request_human_agent(request: Request):
 
         # If session_id not in body, try to get from request.state (API Gateway injection)
         if not session_id:
-            session_id = getattr(request.state, 'session_numeric_id', None)
+            session_id = getattr(request.state, 'session_id', None)
 
         if not session_id:
             raise HTTPException(
