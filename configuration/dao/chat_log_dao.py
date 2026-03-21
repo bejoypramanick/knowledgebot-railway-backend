@@ -912,7 +912,7 @@ class ChatLogDAO:
                 row = result.fetchone()
                 if row:
                     logger.log_db_query(query, params, row)
-                    return row[0]
+                    return str(row[0])  # PG18: UUID object → string
                 else:
                     logger.log_db_query(query, params, None)
                     return None
