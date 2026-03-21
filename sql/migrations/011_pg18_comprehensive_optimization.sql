@@ -399,9 +399,7 @@ CREATE INDEX idx_api_usage_expensive_calls ON api_usage(created_at DESC)
   INCLUDE (api_provider, tokens_output, request_size_bytes)
   WHERE (tokens_input * 3 + tokens_output * 12) > 1000;
 
-CREATE INDEX idx_api_usage_recent_activity ON api_usage(api_provider, created_at DESC)
-  INCLUDE (tokens_input, tokens_output)
-  WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '7 days';
+DROP INDEX IF EXISTS idx_api_usage_recent_activity;
 
 -- token_usage_log table: High-value covering indexes
 DROP INDEX IF EXISTS idx_token_usage_log_session_id;
@@ -424,9 +422,7 @@ CREATE INDEX idx_token_usage_expensive ON token_usage_log(created_at DESC)
   INCLUDE (provider, model, cost_cents)
   WHERE ROUND((prompt_tokens * 0.003 + completion_tokens * 0.006)::numeric)::int > 1000;
 
-CREATE INDEX idx_token_usage_recent ON token_usage_log(provider, created_at DESC)
-  INCLUDE (model, total_tokens, cost_cents)
-  WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '7 days';
+DROP INDEX IF EXISTS idx_token_usage_recent;
 
 -- metrics table: Type and window indexes
 DROP INDEX IF EXISTS idx_metrics_type;
