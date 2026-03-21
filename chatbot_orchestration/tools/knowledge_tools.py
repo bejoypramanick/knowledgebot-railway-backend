@@ -124,161 +124,91 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
 
 async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict[str, str]:
     """
-    Batch lookup original source URLs from database using Gemini file names/titles.
-    Single query for all titles → returns {title: url} mapping.
+    Batch lookup original source URLs from database using Gemini retrieved_context.title values.
+    Returns {title: url} mapping.
 
-    Handles multiple title formats from Gemini retrieved_context.title:
-    1. Full gemini_file_name: "fileSearchStores/.../documents/page68871771998252-c5rsigc7mc1k"
-    2. Display name: "page_7127_1773651148" (set during upload)
-    3. Partial document name: "page68871771998252-c5rsigc7mc1k"
-
-    Lookup strategies (in order):
-    1. Direct match on gemini_file_name column
-    2. Match display_name in file_search_metadata JSONB
-    3. Pattern match: strip underscores from title, LIKE on gemini_file_name
-    4. Suffix match: extract last path segment from full path, match on gemini_file_name ending
+    How it works:
+    1. Single query fetches ALL active scraped_websites (gemini_file_name → original_url)
+    2. For each Gemini title, normalize both sides and compare
+       - Gemini title can be: display_name ("page_7127_1773651148") or full path
+       - DB stores: full document path ("fileSearchStores/.../documents/page71271773651148-xyz")
+    3. Normalization: strip path prefixes, remove underscores/hyphens/suffixes → compare core ID
     """
     if not doc_titles:
-        logger.info(f"📎 [DB_BATCH] Empty doc_titles list provided")
         return {}
 
     try:
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text
+        import re as _re
 
         async with get_db_session() as session:
-            logger.info(f"📎 [DB_BATCH] Starting batch lookup for {len(doc_titles)} titles")
-            logger.info(f"📎 [DB_BATCH] Doc titles: {doc_titles}")
+            logger.info(f"📎 [CITATION_LOOKUP] Looking up URLs for {len(doc_titles)} titles: {doc_titles}")
 
+            # Single query: fetch all active scraped website records
+            result = await session.execute(text("""
+                SELECT gemini_file_name, original_url FROM scraped_websites
+                WHERE processing_status != 'deleted'
+                AND original_url IS NOT NULL
+                AND gemini_file_name IS NOT NULL
+            """))
+            db_rows = result.fetchall()
+            logger.info(f"📎 [CITATION_LOOKUP] Fetched {len(db_rows)} scraped_websites records")
+
+            if not db_rows:
+                logger.warning(f"📎 [CITATION_LOOKUP] No scraped_websites records found in database")
+                return {}
+
+            def normalize(value: str) -> str:
+                """Extract core numeric ID by stripping paths, prefixes, underscores, hyphens, and random suffixes.
+                'page_7127_1773651148'                                      → 'page71271773651148'
+                'fileSearchStores/.../documents/page71271773651148-c5rsigc7' → 'page71271773651148'
+                """
+                # Take last path segment if it's a full path
+                if '/' in value:
+                    value = value.rsplit('/', 1)[-1]
+                # Strip random suffix after last hyphen (Gemini appends e.g. -c5rsigc7mc1k)
+                # But only if it looks like a random suffix (contains letters after hyphen)
+                parts = value.rsplit('-', 1)
+                if len(parts) == 2 and _re.search(r'[a-z]', parts[1]):
+                    value = parts[0]
+                # Remove underscores and hyphens to normalize
+                value = value.replace('_', '').replace('-', '')
+                return value.lower()
+
+            # Build normalized lookup index from DB: {normalized_key: original_url}
+            db_index = {}
+            for gemini_name, original_url in db_rows:
+                norm_key = normalize(gemini_name)
+                db_index[norm_key] = original_url
+                # Also index by exact gemini_file_name for direct matches
+                db_index[gemini_name] = original_url
+
+            # Match each Gemini title against the index
             url_map = {}
-
             for title in doc_titles:
-                logger.info(f"📎 [DB_BATCH] Processing title: {title}")
-
-                # Strategy 1: Direct match with gemini_file_name
-                query1 = """
-                    SELECT gemini_file_name, original_url FROM scraped_websites
-                    WHERE gemini_file_name = :title
-                    AND processing_status != 'deleted'
-                    AND original_url IS NOT NULL
-                    LIMIT 1
-                """
-                result1 = await session.execute(text(query1), {"title": title})
-                row1 = result1.fetchone()
-
-                if row1:
-                    url_map[title] = row1[1]
-                    logger.info(f"📎 [DB_BATCH] ✅ Strategy 1 (direct match): {title} → {row1[1]}")
+                # Try direct match first
+                if title in db_index:
+                    url_map[title] = db_index[title]
+                    logger.info(f"📎 [CITATION_LOOKUP] ✅ Direct match: {title} → {url_map[title]}")
                     continue
 
-                # Strategy 2: Match display_name in file_search_metadata JSONB
-                # The web worker stores display_name (e.g. "page_7127_1773651148") in
-                # file_search_metadata->>'document_name' won't help (it's the full path),
-                # but the upload config sets display_name which may match retrieved_context.title
-                query2 = """
-                    SELECT gemini_file_name, original_url FROM scraped_websites
-                    WHERE file_search_metadata->>'document_name' LIKE :suffix_pattern
-                    AND processing_status != 'deleted'
-                    AND original_url IS NOT NULL
-                    LIMIT 1
-                """
-                # For "page_7127_1773651148", search for documents ending with that pattern
-                suffix_pattern = f"%{title.replace('_', '')}%"
-                result2 = await session.execute(text(query2), {"suffix_pattern": suffix_pattern})
-                row2 = result2.fetchone()
-
-                if row2:
-                    url_map[title] = row2[1]
-                    logger.info(f"📎 [DB_BATCH] ✅ Strategy 2 (metadata match): {title} → {row2[1]}")
+                # Try normalized match
+                norm_title = normalize(title)
+                if norm_title in db_index:
+                    url_map[title] = db_index[norm_title]
+                    logger.info(f"📎 [CITATION_LOOKUP] ✅ Normalized match: {title} (norm={norm_title}) → {url_map[title]}")
                     continue
 
-                # Strategy 3: Pattern match on gemini_file_name column
-                if title.startswith('page_'):
-                    pattern = title.replace('_', '')
-                    pattern_like = f"%{pattern}%"
+                logger.warning(f"📎 [CITATION_LOOKUP] ❌ No match for title: {title} (norm={norm_title})")
+                # Log a few DB entries for debugging
+                sample_keys = list(db_index.keys())[:5]
+                logger.warning(f"📎 [CITATION_LOOKUP] Sample DB keys: {sample_keys}")
 
-                    query3 = """
-                        SELECT gemini_file_name, original_url FROM scraped_websites
-                        WHERE gemini_file_name LIKE :pattern
-                        AND processing_status != 'deleted'
-                        AND original_url IS NOT NULL
-                        LIMIT 1
-                    """
-                    result3 = await session.execute(text(query3), {"pattern": pattern_like})
-                    row3 = result3.fetchone()
-
-                    if row3:
-                        url_map[title] = row3[1]
-                        logger.info(f"📎 [DB_BATCH] ✅ Strategy 3 (pattern match): {title} → {row3[1]}")
-                        continue
-                    else:
-                        logger.info(f"📎 [DB_BATCH] ❌ Strategy 3 NO MATCH: pattern {pattern_like}")
-
-                # Strategy 4: Extract last path segment for full-path titles
-                # e.g. "fileSearchStores/.../documents/page123-abc" → match on "%page123-abc"
-                if '/' in title:
-                    last_segment = title.rsplit('/', 1)[-1]
-                    segment_pattern = f"%{last_segment}"
-
-                    query4 = """
-                        SELECT gemini_file_name, original_url FROM scraped_websites
-                        WHERE gemini_file_name LIKE :segment_pattern
-                        AND processing_status != 'deleted'
-                        AND original_url IS NOT NULL
-                        LIMIT 1
-                    """
-                    result4 = await session.execute(text(query4), {"segment_pattern": segment_pattern})
-                    row4 = result4.fetchone()
-
-                    if row4:
-                        url_map[title] = row4[1]
-                        logger.info(f"📎 [DB_BATCH] ✅ Strategy 4 (suffix match): {title} → {row4[1]}")
-                        continue
-
-                # Strategy 5: Fuzzy match - extract numeric parts from title and match
-                # e.g. title "page_7127_1773651148" → extract "7127" (website_id) and search
-                import re as _re
-                nums = _re.findall(r'\d+', title)
-                if len(nums) >= 2:
-                    # First number is likely website_id, second is timestamp
-                    website_id_pattern = f"%{nums[0]}%"
-
-                    query5 = """
-                        SELECT gemini_file_name, original_url FROM scraped_websites
-                        WHERE gemini_file_name LIKE :website_id_pattern
-                        AND processing_status != 'deleted'
-                        AND original_url IS NOT NULL
-                        ORDER BY created_at DESC
-                        LIMIT 1
-                    """
-                    result5 = await session.execute(text(query5), {"website_id_pattern": website_id_pattern})
-                    row5 = result5.fetchone()
-
-                    if row5:
-                        url_map[title] = row5[1]
-                        logger.info(f"📎 [DB_BATCH] ✅ Strategy 5 (numeric match): {title} → {row5[1]}")
-                        continue
-
-                # All strategies exhausted - log diagnostic info
-                logger.warning(f"📎 [DB_BATCH] ❌ ALL STRATEGIES FAILED for title: {title}")
-                query_debug = """
-                    SELECT gemini_file_name, original_url FROM scraped_websites
-                    WHERE processing_status != 'deleted'
-                    AND original_url IS NOT NULL
-                    ORDER BY created_at DESC
-                    LIMIT 5
-                """
-                result_debug = await session.execute(text(query_debug))
-                samples = result_debug.fetchall()
-                logger.warning(f"📎 [DB_BATCH] Recent gemini_file_names in database:")
-                for sample in samples:
-                    logger.warning(f"   - {sample[0]} → {sample[1]}")
-
-            logger.info(f"📎 [DB_BATCH] Final result: {len(url_map)}/{len(doc_titles)} URLs mapped")
-            logger.info(f"📎 [DB_BATCH] Final URL map: {url_map}")
+            logger.info(f"📎 [CITATION_LOOKUP] Result: {len(url_map)}/{len(doc_titles)} URLs mapped")
             return url_map
     except Exception as e:
-        logger.error(f"❌ [DB_BATCH] Error batch looking up URLs: {e}", exc_info=True)
+        logger.error(f"❌ [CITATION_LOOKUP] Error looking up URLs: {e}", exc_info=True)
         return {}
 
 
