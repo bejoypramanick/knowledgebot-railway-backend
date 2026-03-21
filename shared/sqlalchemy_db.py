@@ -125,6 +125,23 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
     logger.info(f"📊 Pool: size={pool_size}, overflow={pool_max_overflow}, recycle={pool_recycle}s")
     logger.info(f"⏱️  Timeouts: connect={connect_timeout}s, command={command_timeout}s, statement={statement_timeout}ms")
 
+    # SSL configuration for Railway
+    # Internal URLs (railway.internal) don't need SSL — they're on a private network.
+    # Disabling SSL for internal connections eliminates "SSL error: unexpected eof"
+    # log spam from unclean connection teardowns during pool recycling.
+    # External/public URLs should use SSL for security.
+    ssl_mode = os.getenv("DB_SSL_MODE", "auto")
+    if ssl_mode == "auto":
+        # Auto-detect: disable SSL for internal Railway network, require for external
+        if "railway.internal" in db_url:
+            ssl_setting = "disable"
+        else:
+            ssl_setting = "require"
+    else:
+        ssl_setting = ssl_mode  # Allow explicit override: disable, require, prefer, etc.
+
+    logger.info(f"🔒 SSL mode: {ssl_setting} (configured: {ssl_mode})")
+
     last_error = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -135,6 +152,35 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
             attempt_timeout = connect_timeout + 10  # 70s total timeout
 
             async with asyncio.timeout(attempt_timeout):
+                # Build connect_args with SSL configuration
+                connect_args = {
+                    "timeout": connect_timeout,
+                    "command_timeout": command_timeout,
+                    "server_settings": {
+                        "application_name": "knowledgebot_service",
+                        "statement_timeout": statement_timeout,
+                        # PG18: JIT for complex analytics queries
+                        "jit": "on",
+                        # PG18: SSD-optimized cost model
+                        "random_page_cost": "1.1",
+                        # PG18: Async I/O prefetch for sequential scans (io_uring backend)
+                        "effective_io_concurrency": "200",
+                        # PG18: Maintenance operations async prefetch
+                        "maintenance_io_concurrency": "100",
+                    },
+                }
+
+                # Configure SSL: disable for internal Railway network to avoid
+                # "SSL error: unexpected eof while reading" on connection recycling
+                if ssl_setting == "disable":
+                    connect_args["ssl"] = False
+                elif ssl_setting == "require":
+                    import ssl as ssl_module
+                    ssl_ctx = ssl_module.create_default_context()
+                    ssl_ctx.check_hostname = False
+                    ssl_ctx.verify_mode = ssl_module.CERT_NONE
+                    connect_args["ssl"] = ssl_ctx
+
                 # Create async engine with AsyncAdaptedQueuePool
                 # PG18: asyncpg natively uses async I/O; server-side io_method='worker'
                 # is configured via ALTER SYSTEM in the migration script.
@@ -147,22 +193,7 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
                     pool_recycle=pool_recycle,
                     pool_pre_ping=True,  # Health check before using connections
                     echo_pool=False,
-                    connect_args={
-                        "timeout": connect_timeout,
-                        "command_timeout": command_timeout,
-                        "server_settings": {
-                            "application_name": "knowledgebot_service",
-                            "statement_timeout": statement_timeout,
-                            # PG18: JIT for complex analytics queries
-                            "jit": "on",
-                            # PG18: SSD-optimized cost model
-                            "random_page_cost": "1.1",
-                            # PG18: Async I/O prefetch for sequential scans (io_uring backend)
-                            "effective_io_concurrency": "200",
-                            # PG18: Maintenance operations async prefetch
-                            "maintenance_io_concurrency": "100",
-                        },
-                    },
+                    connect_args=connect_args,
                 )
 
                 # NOTE: PG18 skip scan is automatic — the planner uses it via
