@@ -668,12 +668,11 @@ class ProcessingService:
             )
             logger.info(f"🔍 [DEBUG] process_with_docling returned: json_content={bool(json_content)}, metadata_keys={list(docling_metadata.keys()) if docling_metadata else 'None'}")
 
-            logger.info(f"✅ [DOCLING_RESPONSE] Received docling JSON: {len(json_content)} chars")
-
-            # Validate json_content is not empty
-            if not json_content or len(json_content) == 0:
-                logger.error(f"❌ [DOCLING_ERROR] json_content is empty!")
-                raise Exception("Docling returned empty JSON")
+            # Validate json_content is not empty/None
+            if not json_content:
+                error_detail = docling_metadata.get('error', 'unknown') if docling_metadata else 'unknown'
+                logger.error(f"❌ [DOCLING_ERROR] Docling processing failed: {error_detail}")
+                raise Exception(f"Docling processing failed for {url}: {error_detail}")
 
             # Log comprehensive docling JSON structure (same as file worker)
             try:

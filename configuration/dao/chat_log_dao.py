@@ -1269,7 +1269,7 @@ class ChatLogDAO:
                     row_dict = dict(row._mapping)
                     # Merge pre-fetched User-N display ID
                     sid = str(row_dict['id'])
-                    row_dict['user_display_id'] = id_map.get(sid, f"User-{sid[:8]}")
+                    row_dict['user_display_id'] = id_map.get(sid, f"User-{row_count}")
                     yield row_dict
 
                 logger.info(f"⏱️ [STREAM-DAO] Streamed {row_count} rows in {time.time() - start_time:.2f}s")

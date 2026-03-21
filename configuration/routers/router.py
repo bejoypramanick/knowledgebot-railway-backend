@@ -1753,7 +1753,7 @@ async def submit_session_feedback(request: Request):
         if not success:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        logger.info(f"✅ Customer feedback '{feedback_type}' submitted for session {session_db_id}")
+        logger.info(f"✅ Customer feedback '{feedback_type}' submitted for session {session_id}")
 
         return {
             "success": True,

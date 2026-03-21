@@ -389,7 +389,7 @@ class ChatLogService:
         logger.info(f"⏱️ [CHATLOG] Step 3: Batch loaded messages and feedback in {step_duration:.2f}s")
 
         formatted_sessions = []
-        for session_row in sessions_data:
+        for session_count, session_row in enumerate(sessions_data, 1):
             # PG18: session_id column is removed/deprecated - id IS the new UUIDv7
             session_id = str(session_row['id'])
             session_db_id = session_id  # String UUID is the same as the DB ID now
@@ -465,7 +465,7 @@ class ChatLogService:
             if meta_name and not re.match(r'^User-\d+$', meta_name):
                 customer_name = meta_name
             else:
-                customer_name = user_display_id
+                customer_name = user_display_id or f"User-{session_count}"
 
             # Get agent_id from SQL join (already cast to text in DAO)
             assigned_agent_id = session_row.get('agent_id')
@@ -475,9 +475,9 @@ class ChatLogService:
             formatted_sessions.append(ChatSessionResponse(
                 id=str(session_db_id),
                 session_uuid=session_id,  # Include the UUID for frontend to use in mark-read/unread calls
-                user_display_id=user_display_id, # SEQUENTIAL Rank: User-1, User-2, etc.
+                user_display_id=user_display_id or customer_name, # SEQUENTIAL Rank: User-1, User-2, etc.
                 customer_name=customer_name,  # Use generated name if not in metadata
-                customer_email=metadata.get('customer_email') or user_display_id,
+                customer_email=metadata.get('customer_email') or user_display_id or customer_name,
                 status=status,
                 last_message_at=session_row['last_activity_at'].isoformat() if session_row['last_activity_at'] else datetime.utcnow().isoformat(),
                 created_at=session_row['created_at'].isoformat() if session_row['created_at'] else None,
@@ -611,7 +611,7 @@ class ChatLogService:
             if meta_name and not re.match(r'^User-\d+$', meta_name):
                 customer_name = meta_name
             else:
-                customer_name = user_display_id
+                customer_name = user_display_id or f"User-{session_count}"
 
             # Assignment check
             # agent_id already cast to text in DAO
@@ -621,9 +621,9 @@ class ChatLogService:
             session_obj = ChatSessionResponse(
                 id=str(session_db_id),
                 session_uuid=session_id,
-                user_display_id=user_display_id,
+                user_display_id=user_display_id or customer_name,
                 customer_name=customer_name,
-                customer_email=metadata.get('customer_email') or user_display_id,
+                customer_email=metadata.get('customer_email') or user_display_id or customer_name,
                 status=status,
                 last_message_at=session_row['last_activity_at'].isoformat() if session_row.get('last_activity_at') else datetime.utcnow().isoformat(),
                 created_at=session_row['created_at'].isoformat() if session_row.get('created_at') else None,
