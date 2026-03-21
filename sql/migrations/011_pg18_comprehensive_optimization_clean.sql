@@ -34,7 +34,6 @@ ALTER TABLE chat_sessions ADD COLUMN sentiment_score int
     ELSE 0 END
   ) VIRTUAL;
 
-
 ALTER TABLE chat_messages ADD COLUMN quality_score int
   GENERATED ALWAYS AS (
     CASE WHEN used_rag THEN 10 + (confidence_score*10)::int
@@ -44,7 +43,6 @@ ALTER TABLE chat_messages ADD COLUMN quality_score int
 
 ALTER TABLE chat_messages ADD COLUMN source_count int
   GENERATED ALWAYS AS (jsonb_array_length(sources)) VIRTUAL;
-
 
 ALTER TABLE file_uploads ADD COLUMN file_category varchar(50)
   GENERATED ALWAYS AS (
@@ -82,7 +80,6 @@ ALTER TABLE token_usage_log ADD COLUMN model_provider_key varchar(200)
 ALTER TABLE token_usage_log ADD COLUMN calculated_cost_cents int
   GENERATED ALWAYS AS (ROUND((prompt_tokens * 0.003 + completion_tokens * 0.006)::numeric)::int) VIRTUAL;
 
-
 DROP INDEX IF EXISTS idx_users_email;
 CREATE INDEX idx_users_email_covering ON users(email)
   INCLUDE (is_active, last_login_at, created_at);
@@ -113,7 +110,6 @@ CREATE INDEX idx_chat_sessions_archive_status_covering ON chat_sessions(archive_
 CREATE INDEX idx_chat_sessions_active_recent ON chat_sessions(created_at DESC)
   WHERE is_active = true AND archive_status = 'active';
 CREATE INDEX idx_chat_sessions_sentiment_analysis ON chat_sessions(sentiment, created_at DESC)
-  INCLUDE (sentiment_score, user_role_id)
   WHERE sentiment IS NOT NULL;
 CREATE INDEX idx_chat_sessions_feedback_analysis ON chat_sessions(user_role_id, feedback_type, feedback_provided_at DESC)
   INCLUDE (feedback_type, created_at)
@@ -132,9 +128,9 @@ CREATE INDEX idx_chat_messages_unread_covering ON chat_messages(session_id, is_m
   INCLUDE (role, created_at, content)
   WHERE is_message_read = false;
 CREATE INDEX idx_chat_messages_session_ordered ON chat_messages(session_id, created_at DESC)
-  INCLUDE (role, used_rag, confidence_score, source_count);
+  INCLUDE (role, used_rag, confidence_score);
 CREATE INDEX idx_chat_messages_rag_analysis ON chat_messages(session_id, used_rag, created_at DESC)
-  INCLUDE (confidence_score, quality_score);
+  INCLUDE (confidence_score);
 CREATE INDEX idx_chat_messages_low_confidence ON chat_messages(session_id, confidence_score)
   WHERE confidence_score < 0.75 AND used_rag = true;
 CREATE INDEX idx_chat_messages_role_session ON chat_messages(role, created_at DESC)
@@ -182,10 +178,10 @@ CREATE INDEX idx_scraped_websites_parent_hierarchy ON scraped_websites(parent_id
   WHERE parent_id IS NOT NULL;
 DROP INDEX IF EXISTS idx_scraped_websites_processing_pending;
 CREATE INDEX idx_scraped_websites_processing_active ON scraped_websites(processing_status, created_at DESC)
-  INCLUDE (domain, pages_scraped, file_size, url_domain)
+  INCLUDE (domain, pages_scraped, file_size)
   WHERE processing_status IN ('pending', 'processing');
 CREATE INDEX idx_scraped_websites_domain_processed ON scraped_websites(domain, processing_status, created_at DESC)
-  INCLUDE (pages_scraped, file_size, url_domain);
+  INCLUDE (pages_scraped, file_size);
 CREATE INDEX idx_scraped_websites_domain_content ON scraped_websites(domain)
   INCLUDE (title, pages_scraped, char_count)
   WHERE processing_status = 'completed';
@@ -198,7 +194,7 @@ CREATE INDEX idx_scraped_websites_metadata_source ON scraped_websites((metadata-
   INCLUDE (domain, created_at)
   WHERE metadata->>'source_type' IS NOT NULL;
 CREATE INDEX idx_scraped_websites_url_lookup ON scraped_websites(original_url, processing_status, created_at DESC)
-  INCLUDE (title, domain, url_domain)
+  INCLUDE (title, domain)
   WHERE processing_status != 'deleted';
 CREATE INDEX idx_scraped_websites_failed_analysis ON scraped_websites(created_at DESC)
   INCLUDE (error_message, celery_task_id, domain, processing_status)
@@ -239,44 +235,36 @@ CREATE INDEX idx_security_settings_lookup ON security_settings(setting_name)
 DROP INDEX IF EXISTS idx_llm_providers_provider_name;
 CREATE INDEX idx_llm_providers_lookup ON llm_providers(provider_name)
   INCLUDE (is_active, token_limit, token_used, token_remaining);
-CREATE INDEX idx_llm_providers_capacity_alert ON llm_providers(token_utilization_percent DESC, provider_name)
-  WHERE token_utilization_percent >= 80 AND is_active = true;
 CREATE INDEX idx_llm_providers_critical ON llm_providers(provider_name)
   WHERE token_remaining < 100000 AND is_active = true;
 
 DROP INDEX IF EXISTS idx_api_usage_provider;
 CREATE INDEX idx_api_usage_provider_activity ON api_usage(api_provider, created_at DESC)
-  INCLUDE (http_method, tokens_input, tokens_output, user_email, token_cost_cents);
+  INCLUDE (http_method, tokens_input, tokens_output, user_email);
 DROP INDEX IF EXISTS idx_api_usage_endpoint;
 CREATE INDEX idx_api_usage_endpoint_perf ON api_usage(api_endpoint, http_method, created_at DESC)
-  INCLUDE (response_size_bytes, tokens_output, token_cost_cents);
+  INCLUDE (response_size_bytes, tokens_output);
 DROP INDEX IF EXISTS idx_api_usage_user_email;
 CREATE INDEX idx_api_usage_user_activity ON api_usage(user_email, created_at DESC)
-  INCLUDE (api_provider, api_endpoint, tokens_input, tokens_output, token_cost_cents);
-CREATE INDEX idx_api_usage_expensive_calls ON api_usage(created_at DESC)
-  INCLUDE (api_provider, tokens_output, request_size_bytes, token_cost_cents)
-  WHERE token_cost_cents > 1000;
+  INCLUDE (api_provider, api_endpoint, tokens_input, tokens_output);
 CREATE INDEX idx_api_usage_recent_activity ON api_usage(api_provider, created_at DESC)
-  INCLUDE (tokens_input, tokens_output, token_cost_cents)
+  INCLUDE (tokens_input, tokens_output)
   WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '7 days';
 
 DROP INDEX IF EXISTS idx_token_usage_log_session_id;
 CREATE INDEX idx_token_usage_session_spend ON token_usage_log(session_id, created_at DESC)
-  INCLUDE (total_tokens, cost_cents, provider, model, calculated_cost_cents)
+  INCLUDE (total_tokens, cost_cents, provider, model)
   WHERE session_id IS NOT NULL;
 DROP INDEX IF EXISTS idx_token_usage_log_provider;
 CREATE INDEX idx_token_usage_provider_metrics ON token_usage_log(provider, created_at DESC)
-  INCLUDE (model, prompt_tokens, completion_tokens, cost_cents, api_call_type, calculated_cost_cents);
+  INCLUDE (model, prompt_tokens, completion_tokens, cost_cents, api_call_type);
 CREATE INDEX idx_token_usage_model_analysis ON token_usage_log(provider, model, created_at DESC)
-  INCLUDE (prompt_tokens, completion_tokens, cost_cents, total_tokens, calculated_cost_cents);
+  INCLUDE (prompt_tokens, completion_tokens, cost_cents, total_tokens);
 CREATE INDEX idx_token_usage_message_tracking ON token_usage_log(message_id, created_at DESC)
   INCLUDE (provider, total_tokens, cost_cents, api_call_type)
   WHERE message_id IS NOT NULL;
-CREATE INDEX idx_token_usage_expensive ON token_usage_log(created_at DESC)
-  INCLUDE (provider, model, cost_cents, calculated_cost_cents)
-  WHERE calculated_cost_cents > 1000;
 CREATE INDEX idx_token_usage_recent ON token_usage_log(provider, created_at DESC)
-  INCLUDE (model, total_tokens, cost_cents, calculated_cost_cents)
+  INCLUDE (model, total_tokens, cost_cents)
   WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '7 days';
 
 DROP INDEX IF EXISTS idx_metrics_type;
