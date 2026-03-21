@@ -34,8 +34,6 @@ ALTER TABLE chat_sessions ADD COLUMN sentiment_score int
     ELSE 0 END
   ) VIRTUAL;
 
-ALTER TABLE chat_sessions ADD COLUMN session_timespan tstzrange
-  GENERATED ALWAYS AS (tstzrange(started_at, COALESCE(ended_at, last_activity_at))) VIRTUAL;
 
 ALTER TABLE chat_messages ADD COLUMN quality_score int
   GENERATED ALWAYS AS (
@@ -47,10 +45,6 @@ ALTER TABLE chat_messages ADD COLUMN quality_score int
 ALTER TABLE chat_messages ADD COLUMN source_count int
   GENERATED ALWAYS AS (jsonb_array_length(sources)) VIRTUAL;
 
-ALTER TABLE session_assignments ADD COLUMN assignment_duration_minutes numeric
-  GENERATED ALWAYS AS (
-    ROUND(EXTRACT(EPOCH FROM (COALESCE(ended_at, CURRENT_TIMESTAMP) - assigned_at)) / 60.0, 2)
-  ) VIRTUAL;
 
 ALTER TABLE file_uploads ADD COLUMN file_category varchar(50)
   GENERATED ALWAYS AS (
@@ -88,8 +82,6 @@ ALTER TABLE token_usage_log ADD COLUMN model_provider_key varchar(200)
 ALTER TABLE token_usage_log ADD COLUMN calculated_cost_cents int
   GENERATED ALWAYS AS (ROUND((prompt_tokens * 0.003 + completion_tokens * 0.006)::numeric)::int) VIRTUAL;
 
-ALTER TABLE metrics ADD COLUMN metric_window tstzrange
-  GENERATED ALWAYS AS (tstzrange(created_at, updated_at)) VIRTUAL;
 
 DROP INDEX IF EXISTS idx_users_email;
 CREATE INDEX idx_users_email_covering ON users(email)
