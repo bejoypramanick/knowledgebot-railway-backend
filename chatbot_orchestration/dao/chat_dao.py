@@ -135,7 +135,7 @@ class ChatDAO:
                 result = await db_session.execute(
                     text("""
                         INSERT INTO chat_sessions (id, is_active, archive_status, started_at, last_activity_at, message_count)
-                        VALUES (:id::uuid, true, 'active', NOW(), NOW(), 0)
+                        VALUES (CAST(:id AS UUID), true, 'active', NOW(), NOW(), 0)
                         ON CONFLICT (id) DO UPDATE SET last_activity_at = NOW()
                         RETURNING id
                     """),
@@ -155,7 +155,7 @@ class ChatDAO:
         """Delete a chat session from both Redis and PG."""
         await self._store.delete_session(session_id)
 
-        query = "DELETE FROM chat_sessions WHERE id = :id::uuid"
+        query = "DELETE FROM chat_sessions WHERE id = CAST(:id AS UUID)"
         try:
             async with get_db_session() as session:
                 await session.execute(text(query), {"id": session_id})

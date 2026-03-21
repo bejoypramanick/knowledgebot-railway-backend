@@ -148,7 +148,7 @@ class ChatWriteThroughService:
                     result = await db.execute(
                         text("""
                             MERGE INTO chat_sessions AS target
-                            USING (VALUES (:id::uuid, :started_at, :last_activity_at))
+                            USING (VALUES (CAST(:id AS UUID), :started_at, :last_activity_at))
                                   AS source(id, started_at, last_activity_at)
                             ON target.id = source.id
                             WHEN MATCHED THEN

@@ -47,7 +47,7 @@ class ChatAgentConfigDAO:
         """
         query = text("""
             MERGE INTO security_settings AS target
-            USING (VALUES (:name::varchar, :value::text, :setting_type::varchar))
+            USING (VALUES (CAST(:name AS VARCHAR), CAST(:value AS TEXT), CAST(:setting_type AS VARCHAR)))
                   AS source(setting_name, setting_value, setting_type)
             ON target.setting_name = source.setting_name
             WHEN MATCHED THEN
@@ -281,7 +281,7 @@ class ChatAgentConfigDAO:
         try:
             query = text("""
                 DELETE FROM user_role_mapping
-                WHERE user_id = :user_id::uuid
+                WHERE user_id = CAST(:user_id AS UUID)
                 AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')
             """)
             params = {"user_id": user_id}
@@ -373,7 +373,7 @@ class ChatAgentConfigDAO:
         try:
             query = text("""
                 DELETE FROM user_role_mapping
-                WHERE user_id = :user_id::uuid
+                WHERE user_id = CAST(:user_id AS UUID)
                 AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')
             """)
             params = {"user_id": user_id}

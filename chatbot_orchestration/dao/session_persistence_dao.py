@@ -90,7 +90,7 @@ class SessionPersistenceDAO:
                         UPDATE chat_sessions
                         SET is_active = false, archive_status = 'closed',
                             ended_at = NOW(), updated_at = NOW()
-                        WHERE id = :id::uuid
+                        WHERE id = CAST(:id AS UUID)
                     """),
                     {"id": session_id}
                 )

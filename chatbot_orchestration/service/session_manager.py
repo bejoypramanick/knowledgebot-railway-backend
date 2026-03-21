@@ -120,7 +120,7 @@ class SessionStateManager:
                     async with get_db_session() as db_session:
                         # PG18: id IS the UUIDv7 PK — no separate session_id column
                         session_result = await db_session.execute(
-                            text("SELECT id FROM chat_sessions WHERE id = :session_id::uuid"),
+                            text("SELECT id FROM chat_sessions WHERE id = CAST(:session_id AS UUID)"),
                             {"session_id": session_id}
                         )
                         session_row = session_result.mappings().first()
@@ -131,7 +131,7 @@ class SessionStateManager:
                                 FROM session_assignments sa
                                 LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                                 LEFT JOIN users u ON urm.user_id = u.id
-                                WHERE sa.session_id = :session_id::uuid AND sa.status = 'active'
+                                WHERE sa.session_id = CAST(:session_id AS UUID) AND sa.status = 'active'
                             """
                             assignment_result = await db_session.execute(
                                 text(assignment_query),

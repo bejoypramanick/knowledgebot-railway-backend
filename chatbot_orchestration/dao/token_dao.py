@@ -32,7 +32,7 @@ class TokenDAO:
         logger.info(f"🔍 update_llm_usage called - provider: {provider}, total_tokens: {total_tokens}")
         query = """
             MERGE INTO llm_providers AS target
-            USING (VALUES (:provider::varchar, :total_tokens::bigint, :default_limit::bigint))
+            USING (VALUES (CAST(:provider AS VARCHAR), CAST(:total_tokens AS BIGINT), CAST(:default_limit AS BIGINT)))
                   AS source(provider_name, token_used, token_limit)
             ON target.provider_name = source.provider_name
             WHEN MATCHED THEN
@@ -72,7 +72,7 @@ class TokenDAO:
         logger.info(f"[PARAM] request_metadata type: {type(request_metadata)}, value: {request_metadata}")
         
         # PG18: id IS the UUIDv7 PK — verify session exists
-        session_query = "SELECT id FROM chat_sessions WHERE id = :session_id::uuid"
+        session_query = "SELECT id FROM chat_sessions WHERE id = CAST(:session_id AS UUID)"
         try:
             async with get_db_session() as session:
                 logger.log_db_operation(session_query, session_id)
@@ -125,7 +125,7 @@ class TokenDAO:
     async def get_token_usage(self, session_id: str) -> List[Dict[str, Any]]:
         """Get token usage for a session"""
         # PG18: id IS the UUIDv7 PK — verify session exists
-        session_query = "SELECT id FROM chat_sessions WHERE id = :session_id::uuid"
+        session_query = "SELECT id FROM chat_sessions WHERE id = CAST(:session_id AS UUID)"
         try:
             async with get_db_session() as session:
                 logger.log_db_operation(session_query, session_id)

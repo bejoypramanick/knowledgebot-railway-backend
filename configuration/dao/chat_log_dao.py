@@ -206,7 +206,7 @@ class ChatLogDAO:
         """Get database ID for a session by UUID.
         PG18: id IS the UUIDv7 PK — same as get_session_db_id."""
         try:
-            query = "SELECT id FROM chat_sessions WHERE id = :session_id::uuid"
+            query = "SELECT id FROM chat_sessions WHERE id = CAST(:session_id AS UUID)"
             params = {"session_id": session_uuid}
 
             logger.log_db_operation(query, params)
@@ -228,7 +228,7 @@ class ChatLogDAO:
                        metadata->>'customer_email' as customer_email,
                        metadata->>'customer_name' as customer_name
                 FROM chat_sessions
-                WHERE id = :session_id::uuid
+                WHERE id = CAST(:session_id AS UUID)
             """
             params = {"session_id": session_uuid}
 
@@ -246,7 +246,7 @@ class ChatLogDAO:
         """Create a new chat session. PG18: id IS the UUIDv7 PK."""
         query = """
             INSERT INTO chat_sessions (id, metadata, created_at, last_activity_at, is_active)
-            VALUES (:session_id::uuid, :metadata, NOW(), NOW(), true)
+            VALUES (CAST(:session_id AS UUID), :metadata, NOW(), NOW(), true)
             RETURNING id
         """
         try:
@@ -945,7 +945,7 @@ class ChatLogDAO:
 
     async def get_session_uuid(self, session_db_id: str) -> Optional[str]:
         """Get session UUID from session database ID. PG18: id IS the UUID."""
-        query = "SELECT id FROM chat_sessions WHERE id = :id::uuid"
+        query = "SELECT id FROM chat_sessions WHERE id = CAST(:id AS UUID)"
         try:
             params = {"id": session_db_id}
             logger.log_db_operation(query, params)
@@ -966,7 +966,7 @@ class ChatLogDAO:
 
     async def get_session_numeric_id(self, session_uuid: str) -> Optional[str]:
         """Get session database ID from session UUID. PG18: id IS the UUID — same lookup."""
-        query = "SELECT id FROM chat_sessions WHERE id = :uuid::uuid"
+        query = "SELECT id FROM chat_sessions WHERE id = CAST(:uuid AS UUID)"
         try:
             params = {"uuid": session_uuid}
             logger.log_db_operation(query, params)
@@ -1012,7 +1012,7 @@ class ChatLogDAO:
             SELECT
                 feedback_type
             FROM chat_sessions
-            WHERE id = :session_id::uuid
+            WHERE id = CAST(:session_id AS UUID)
         """
         params = {"session_id": session_id}
 

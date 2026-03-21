@@ -29,7 +29,7 @@ class FeedbackDAO:
         query = """
             UPDATE chat_sessions
             SET feedback_type = :feedback_type, feedback_provided_at = NOW()
-            WHERE id = :session_id::uuid
+            WHERE id = CAST(:session_id AS UUID)
         """
         params = {"feedback_type": feedback_type, "session_id": session_id}
 

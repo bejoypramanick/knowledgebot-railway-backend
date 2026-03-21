@@ -449,7 +449,7 @@ class StreamingService:
                                 SELECT u.id as agent_id, u.email as agent_email FROM session_assignments sa
                                 JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                                 JOIN users u ON urm.user_id = u.id
-                                WHERE sa.session_id = :session_id::uuid
+                                WHERE sa.session_id = CAST(:session_id AS UUID)
                                 AND sa.status = 'active'
                                 AND u.is_active = true
                                 LIMIT 1
