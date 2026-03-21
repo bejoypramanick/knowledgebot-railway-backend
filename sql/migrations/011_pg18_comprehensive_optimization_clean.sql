@@ -325,7 +325,7 @@ CREATE INDEX idx_file_uploads_failed ON file_uploads(created_at DESC)
   WHERE processing_status = 'failed';
 DROP INDEX IF EXISTS idx_file_uploads_s3_processed;
 CREATE INDEX idx_file_uploads_s3_processed ON file_uploads(processed_content_s3_key)
-  INCLUDE (display_name, created_at, char_count)
+  INCLUDE (display_name, created_at, file_size)
   WHERE processed_content_s3_key IS NOT NULL;
 
 DROP INDEX IF EXISTS idx_scraped_websites_parent_id;
@@ -336,14 +336,14 @@ CREATE INDEX idx_scraped_websites_parent_hierarchy ON scraped_websites(parent_id
 DROP INDEX IF EXISTS idx_scraped_websites_processing_pending;
 DROP INDEX IF EXISTS idx_scraped_websites_processing_active;
 CREATE INDEX idx_scraped_websites_processing_active ON scraped_websites(processing_status, created_at DESC)
-  INCLUDE (domain, pages_scraped, file_size, url_domain)
+  INCLUDE (domain, pages_scraped, content_length, url_domain)
   WHERE processing_status IN ('pending', 'processing');
 DROP INDEX IF EXISTS idx_scraped_websites_domain_processed;
 CREATE INDEX idx_scraped_websites_domain_processed ON scraped_websites(domain, processing_status, created_at DESC)
-  INCLUDE (pages_scraped, file_size, url_domain);
+  INCLUDE (pages_scraped, content_length, url_domain);
 DROP INDEX IF EXISTS idx_scraped_websites_domain_content;
 CREATE INDEX idx_scraped_websites_domain_content ON scraped_websites(domain)
-  INCLUDE (title, pages_scraped, char_count)
+  INCLUDE (title, pages_scraped, content_length)
   WHERE processing_status = 'completed';
 DROP INDEX IF EXISTS idx_scraped_websites_session_hierarchy;
 CREATE INDEX idx_scraped_websites_session_hierarchy ON scraped_websites(crawl_session_id, parent_id, created_at DESC)
@@ -365,8 +365,8 @@ CREATE INDEX idx_scraped_websites_failed_analysis ON scraped_websites(created_at
   INCLUDE (error_message, celery_task_id, domain, processing_status)
   WHERE processing_status = 'failed';
 DROP INDEX IF EXISTS idx_scraped_websites_large_content;
-CREATE INDEX idx_scraped_websites_large_content ON scraped_websites(file_size DESC, created_at)
-  WHERE file_size > 1000000;
+CREATE INDEX idx_scraped_websites_large_content ON scraped_websites(content_length DESC, created_at)
+  WHERE content_length > 1000000;
 
 DROP INDEX IF EXISTS idx_persona_description_fts;
 CREATE INDEX idx_persona_description_fts ON persona_configurations
@@ -468,7 +468,7 @@ CREATE INDEX idx_metrics_name_covering ON metrics(metric_name, created_at DESC)
 DROP INDEX IF EXISTS idx_notifications_user_email;
 DROP INDEX IF EXISTS idx_notifications_user_covering;
 CREATE INDEX idx_notifications_user_covering ON notifications(user_email, created_at DESC)
-  INCLUDE (is_read, notification_type, message);
+  INCLUDE (is_read, type, message);
 DROP INDEX IF EXISTS idx_notifications_is_read;
 DROP INDEX IF EXISTS idx_notifications_unread;
 CREATE INDEX idx_notifications_unread ON notifications(user_email)
