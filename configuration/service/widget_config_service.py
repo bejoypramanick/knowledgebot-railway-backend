@@ -37,13 +37,13 @@ class WidgetConfigService:
 
             logger.info(f"✅ Widget config + {len(suggested_messages)} suggested messages fetched (parallel)")
             
-            # Resolve S3 keys to fresh presigned URLs
+            # Resolve S3 keys to base64 data URLs (no presigned URL expiry concerns)
             profile_url = widget_config.get("profile_picture_url", "")
             chat_icon_url = widget_config.get("chat_icon_url", "")
             if profile_url and not profile_url.startswith(("http", "data:")):
-                profile_url = railway_storage.get_public_url(profile_url)
+                profile_url = railway_storage.get_image_as_data_url(profile_url)
             if chat_icon_url and not chat_icon_url.startswith(("http", "data:")):
-                chat_icon_url = railway_storage.get_public_url(chat_icon_url)
+                chat_icon_url = railway_storage.get_image_as_data_url(chat_icon_url)
 
             # Transform configuration for frontend
             transformed_config = {

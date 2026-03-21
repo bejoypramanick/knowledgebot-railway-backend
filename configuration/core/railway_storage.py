@@ -170,6 +170,39 @@ class RailwayStorageService:
             logger.error(f"❌ Unexpected error deleting image: {e}")
             return False
     
+    def get_image_as_data_url(self, storage_filename: str) -> str:
+        """
+        Download image from S3 and return as base64 data URL.
+
+        Args:
+            storage_filename: S3 key for the image
+
+        Returns:
+            Base64 data URL string (data:image/...;base64,...)
+            Empty string if download fails
+        """
+        if not self.is_available():
+            logger.warning("⚠️ Railway storage not available, cannot download image")
+            return ""
+
+        try:
+            import base64
+            response = self._s3_client.get_object(
+                Bucket=self.bucket_name,
+                Key=storage_filename
+            )
+            image_bytes = response['Body'].read()
+            content_type = response.get('ContentType', 'image/png')
+            base64_data = base64.b64encode(image_bytes).decode('utf-8')
+            logger.info(f"✅ Image downloaded as data URL: {storage_filename} ({len(image_bytes)} bytes)")
+            return f"data:{content_type};base64,{base64_data}"
+        except ClientError as e:
+            logger.error(f"❌ Failed to download image from S3: {e}")
+            return ""
+        except Exception as e:
+            logger.error(f"❌ Unexpected error downloading image: {e}")
+            return ""
+
     def get_public_url(self, storage_filename: str) -> str:
         """
         Get public URL for stored image
