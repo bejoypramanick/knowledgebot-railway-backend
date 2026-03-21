@@ -122,6 +122,7 @@ GRANT ALL ON TABLE public.user_role_mapping TO pg_database_owner;
 
 -- Chat sessions (conversations)
 -- NOTE: The `id uuid` column IS the session identifier (no separate session_id column).
+-- Feedback is stored inline (feedback_type, feedback_provided_at) — no separate chat_feedback table.
 CREATE TABLE IF NOT EXISTS public.chat_sessions (
 	id uuid DEFAULT uuidv7() NOT NULL,
 	user_role_id uuid NULL,
@@ -132,6 +133,8 @@ CREATE TABLE IF NOT EXISTS public.chat_sessions (
 	message_count int4 DEFAULT 0 NULL,
 	sentiment varchar(20) NULL,
 	metadata jsonb DEFAULT '{}'::jsonb NULL,
+	feedback_type varchar(20) NULL,
+	feedback_provided_at timestamptz NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	archive_status varchar(20) DEFAULT 'active'::character varying NULL,
@@ -141,7 +144,8 @@ CREATE TABLE IF NOT EXISTS public.chat_sessions (
 	CONSTRAINT chat_sessions_pkey PRIMARY KEY (id),
 	CONSTRAINT chat_sessions_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
 	CONSTRAINT chat_sessions_archive_status_check CHECK (((archive_status)::text = ANY (ARRAY[('active'::character varying)::text, ('closed'::character varying)::text, ('archived'::character varying)::text, ('transferred'::character varying)::text]))),
-	CONSTRAINT valid_sentiment CHECK (((sentiment)::text = ANY (ARRAY[('positive'::character varying)::text, ('negative'::character varying)::text, ('neutral'::character varying)::text])))
+	CONSTRAINT valid_sentiment CHECK (((sentiment)::text = ANY (ARRAY[('positive'::character varying)::text, ('negative'::character varying)::text, ('neutral'::character varying)::text]))),
+	CONSTRAINT chat_sessions_feedback_type_check CHECK ((feedback_type IS NULL OR feedback_type IN ('positive', 'negative')))
 );
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_role_id ON public.chat_sessions USING btree (user_role_id);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_is_active ON public.chat_sessions USING btree (is_active);
@@ -149,6 +153,8 @@ CREATE INDEX IF NOT EXISTS idx_chat_sessions_archive_status ON public.chat_sessi
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_archive_status_updated ON public.chat_sessions USING btree (archive_status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_last_activity ON public.chat_sessions USING btree (last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_sentiment ON public.chat_sessions USING btree (sentiment);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_feedback_type ON public.chat_sessions USING btree (feedback_type);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_has_feedback ON public.chat_sessions(id) WHERE feedback_type IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_file_search_store_id ON public.chat_sessions USING btree (file_search_store_id);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_cached_content_id ON public.chat_sessions USING btree (cached_content_id);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_conversation_summary ON public.chat_sessions USING gin (to_tsvector('english'::regconfig, conversation_summary));
@@ -188,31 +194,6 @@ COMMENT ON TABLE public.chat_messages IS 'Individual chat messages within sessio
 ALTER TABLE public.chat_messages OWNER TO postgres;
 GRANT ALL ON TABLE public.chat_messages TO postgres;
 GRANT ALL ON TABLE public.chat_messages TO pg_database_owner;
-
--- Chat feedback/ratings
-CREATE TABLE IF NOT EXISTS public.chat_feedback (
-	id uuid DEFAULT uuidv7() NOT NULL,
-	message_id uuid NOT NULL,
-	session_id uuid NOT NULL,
-	feedback_type varchar(20) NOT NULL,
-	user_role_id uuid NULL,
-	created_at timestamp DEFAULT now() NULL,
-	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
-	CONSTRAINT chat_feedback_pkey PRIMARY KEY (id),
-	CONSTRAINT chat_feedback_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.chat_sessions(id) ON DELETE CASCADE,
-	CONSTRAINT chat_feedback_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.chat_messages(id) ON DELETE CASCADE,
-	CONSTRAINT chat_feedback_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
-	CONSTRAINT valid_feedback_type CHECK (((feedback_type)::text = ANY (ARRAY[('positive'::character varying)::text, ('negative'::character varying)::text])))
-);
-CREATE INDEX IF NOT EXISTS idx_chat_feedback_session ON public.chat_feedback USING btree (session_id);
-CREATE INDEX IF NOT EXISTS idx_chat_feedback_message ON public.chat_feedback USING btree (message_id);
-CREATE INDEX IF NOT EXISTS idx_chat_feedback_type ON public.chat_feedback USING btree (feedback_type);
-CREATE INDEX IF NOT EXISTS idx_chat_feedback_user_role_id ON public.chat_feedback USING btree (user_role_id);
-CREATE INDEX IF NOT EXISTS idx_chat_feedback_created_at ON public.chat_feedback USING btree (created_at DESC);
-COMMENT ON TABLE public.chat_feedback IS 'User feedback on chat messages with user role reference';
-ALTER TABLE public.chat_feedback OWNER TO postgres;
-GRANT ALL ON TABLE public.chat_feedback TO postgres;
-GRANT ALL ON TABLE public.chat_feedback TO pg_database_owner;
 
 -- Session assignments to human agents
 CREATE TABLE IF NOT EXISTS public.session_assignments (
@@ -649,9 +630,6 @@ CREATE TRIGGER chat_sessions_updated_at_trigger BEFORE UPDATE ON public.chat_ses
 
 DROP TRIGGER IF EXISTS chat_messages_updated_at_trigger ON public.chat_messages;
 CREATE TRIGGER chat_messages_updated_at_trigger BEFORE UPDATE ON public.chat_messages FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
-DROP TRIGGER IF EXISTS chat_feedback_updated_at_trigger ON public.chat_feedback;
-CREATE TRIGGER chat_feedback_updated_at_trigger BEFORE UPDATE ON public.chat_feedback FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 DROP TRIGGER IF EXISTS session_assignments_updated_at_trigger ON public.session_assignments;
 CREATE TRIGGER session_assignments_updated_at_trigger BEFORE UPDATE ON public.session_assignments FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
