@@ -266,15 +266,15 @@ CREATE INDEX idx_session_assignments_transferred ON session_assignments(user_rol
 DROP INDEX IF EXISTS idx_file_uploads_processing_pending;
 DROP INDEX IF EXISTS idx_file_uploads_processing_active;
 CREATE INDEX idx_file_uploads_processing_active ON file_uploads(processing_status, created_at DESC)
-  INCLUDE (display_name, user_role_id, file_category)
+  INCLUDE (display_name, user_role_id)
   WHERE processing_status IN ('pending', 'processing');
 DROP INDEX IF EXISTS idx_file_uploads_completed_lookup;
 CREATE INDEX idx_file_uploads_completed_lookup ON file_uploads(gemini_file_name)
-  INCLUDE (display_name, processed_content_s3_key, file_size, file_category)
+  INCLUDE (display_name, processed_content_s3_key, file_size)
   WHERE processing_status = 'completed';
 DROP INDEX IF EXISTS idx_file_uploads_user_files;
 CREATE INDEX idx_file_uploads_user_files ON file_uploads(user_role_id, processing_status, created_at DESC)
-  INCLUDE (display_name, file_size, file_category);
+  INCLUDE (display_name, file_size);
 DROP INDEX IF EXISTS idx_file_uploads_docling_perf;
 CREATE INDEX idx_file_uploads_docling_perf ON file_uploads(docling_processing_time_ms DESC)
   INCLUDE (docling_images_extracted, docling_images_with_ocr, processed_by_docling)
@@ -295,7 +295,7 @@ CREATE INDEX idx_file_uploads_s3_processed ON file_uploads(processed_content_s3_
 DROP INDEX IF EXISTS idx_scraped_websites_parent_id;
 DROP INDEX IF EXISTS idx_scraped_websites_parent_hierarchy;
 CREATE INDEX idx_scraped_websites_parent_hierarchy ON scraped_websites(parent_id, created_at DESC)
-  INCLUDE (processing_status, depth, pages_scraped, is_root_page)
+  INCLUDE (processing_status, depth, pages_scraped)
   WHERE parent_id IS NOT NULL;
 DROP INDEX IF EXISTS idx_scraped_websites_processing_pending;
 DROP INDEX IF EXISTS idx_scraped_websites_processing_active;
