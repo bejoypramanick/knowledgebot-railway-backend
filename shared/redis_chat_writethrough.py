@@ -148,7 +148,7 @@ class ChatWriteThroughService:
                     result = await db.execute(
                         text("""
                             MERGE INTO chat_sessions AS target
-                            USING (VALUES (CAST(:id AS UUID), :started_at, :last_activity_at))
+                            USING (VALUES (CAST(:id AS UUID), CAST(:started_at AS TIMESTAMPTZ), CAST(:last_activity_at AS TIMESTAMPTZ)))
                                   AS source(id, started_at, last_activity_at)
                             ON target.id = source.id
                             WHEN MATCHED THEN
@@ -216,7 +216,7 @@ class ChatWriteThroughService:
                         text("""
                             UPDATE chat_sessions
                             SET message_count = (SELECT COUNT(*) FROM chat_messages WHERE session_id = :db_id),
-                                last_activity_at = :last_activity,
+                                last_activity_at = CAST(:last_activity AS TIMESTAMPTZ),
                                 updated_at = NOW()
                             WHERE id = :db_id
                         """),
@@ -252,7 +252,7 @@ class ChatWriteThroughService:
                     await db.execute(
                         text("""
                             UPDATE chat_sessions
-                            SET last_activity_at = :last_activity, updated_at = NOW()
+                            SET last_activity_at = CAST(:last_activity AS TIMESTAMPTZ), updated_at = NOW()
                             WHERE id = :db_id
                         """),
                         {
