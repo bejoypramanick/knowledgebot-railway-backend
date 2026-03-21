@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
 )
-from sqlalchemy import text, event
+from sqlalchemy import text
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from shared.otel_logger import get_otel_logger
@@ -165,18 +165,9 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
                     },
                 )
 
-                # PG17+: Set skip_scan after connection (not in server_settings)
-                # This avoids "unrecognized configuration parameter" errors if parameter isn't available
-                @event.listens_for(_engine.sync_engine, "connect")
-                def receive_connect(dbapi_conn, connection_record):
-                    """Set PG17+ skip_scan optimization after connection."""
-                    try:
-                        cursor = dbapi_conn.cursor()
-                        cursor.execute("SET enable_skip_scan = on")
-                        cursor.close()
-                    except Exception as e:
-                        # Silently ignore if parameter not available (older PG versions)
-                        logger.debug(f"Skip_scan not available: {e}")
+                # NOTE: PG18 skip scan is automatic — the planner uses it via
+                # cost-based optimization when a B-tree multicolumn index has
+                # low-cardinality leading columns. No GUC parameter exists.
 
                 # Create async session factory
                 _async_session_maker = async_sessionmaker(
