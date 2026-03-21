@@ -147,7 +147,8 @@ class ChatLogService:
                 raise HTTPException(status_code=404, detail=f"Session {session_db_id} not found")
             
             # Get session UUID for caching and broadcasting
-            session_uuid = session.get('session_id')  # UUID format
+            # PG18 migration: The UUID PK is now 'id'
+            session_uuid = session.get('id') or session.get('session_id')  # UUID format
             
             # Get agent user ID for broadcasting
             agent_id = await self.dao.get_user_id_by_email(agent_email)
@@ -391,8 +392,8 @@ class ChatLogService:
         step_duration = time.time() - step_start
         logger.info(f"⏱️ [CHATLOG] Step 2: Loaded latest messages for {len(latest_messages)} sessions in {step_duration:.2f}s")
 
-        # Get all session IDs for batch feedback query (uses session_id UUID)
-        session_ids = [s['session_id'] for s in sessions_data]
+        # Get all session IDs for batch feedback query (uses new UUID PK 'id')
+        session_ids = [str(s['id']) for s in sessions_data]
         logger.info(f"⚡ [CHATLOG] Fetching feedback for {len(session_ids)} sessions")
         
         # OPTIMIZATION: Fetch feedback counts for all sessions in one query
@@ -403,8 +404,9 @@ class ChatLogService:
 
         formatted_sessions = []
         for session_row in sessions_data:
-            session_id = session_row['session_id']
-            session_db_id = str(session_row['id'])
+            # PG18: session_id column is removed/deprecated - id IS the new UUIDv7
+            session_id = str(session_row['id'])
+            session_db_id = session_id  # String UUID is the same as the DB ID now
 
             raw_metadata = session_row['metadata']
             if raw_metadata is None:
@@ -532,8 +534,8 @@ class ChatLogService:
         if not session_data:
             raise HTTPException(status_code=404, detail="Chat session not found")
         
-        # Get session UUID for cache clearing
-        session_uuid = session_data.get('session_id')  # UUID format
+        # PG18: The UUID PK is now 'id'
+        session_uuid = session_data.get('id') or session_data.get('session_id')  # UUID format
 
         metadata = session_data['metadata'] or {}
         if isinstance(metadata, str):
@@ -587,8 +589,8 @@ class ChatLogService:
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # Get session UUID for cache clearing
-        session_uuid = session.get('session_id')  # UUID format
+        # PG18: The UUID PK is now 'id'
+        session_uuid = session.get('id') or session.get('session_id')  # UUID format
 
         await self.dao.archive_session(session_id, 'closed')
         
