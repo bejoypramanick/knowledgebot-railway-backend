@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel
 
@@ -25,7 +25,7 @@ class ChatSessionResponse(BaseModel):
     last_message_at: str
     created_at: Optional[str] = None
     assigned_agent: Optional[str] = None
-    assigned_agent_id: Optional[str] = None  # User ID for comparison (not masked)
+    assigned_agent_id: Optional[Any] = None  # User ID for comparison (UUID from PG18)
     is_assigned_to_me: Optional[bool] = False
     feedback: Optional[str] = None
     customer_feedback: Optional[str] = None
