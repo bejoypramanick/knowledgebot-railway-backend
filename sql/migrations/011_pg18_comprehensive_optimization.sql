@@ -211,7 +211,7 @@ CREATE INDEX idx_chat_sessions_active_recent ON chat_sessions(created_at DESC)
   WHERE is_active = true AND archive_status = 'active';
 
 CREATE INDEX idx_chat_sessions_sentiment_analysis ON chat_sessions(sentiment, created_at DESC)
-  INCLUDE (sentiment_score, user_role_id)
+  INCLUDE (user_role_id)
   WHERE sentiment IS NOT NULL;
 
 CREATE INDEX idx_chat_sessions_feedback_analysis ON chat_sessions(user_role_id, feedback_type, feedback_provided_at DESC)
@@ -236,10 +236,10 @@ CREATE INDEX idx_chat_messages_unread_covering ON chat_messages(session_id, is_m
   WHERE is_message_read = false;
 
 CREATE INDEX idx_chat_messages_session_ordered ON chat_messages(session_id, created_at DESC)
-  INCLUDE (role, used_rag, confidence_score, source_count);
+  INCLUDE (role, used_rag, confidence_score);
 
 CREATE INDEX idx_chat_messages_rag_analysis ON chat_messages(session_id, used_rag, created_at DESC)
-  INCLUDE (confidence_score, quality_score);
+  INCLUDE (confidence_score);
 
 CREATE INDEX idx_chat_messages_low_confidence ON chat_messages(session_id, confidence_score)
   WHERE confidence_score < 0.75 AND used_rag = true;
@@ -379,11 +379,8 @@ DROP INDEX IF EXISTS idx_llm_providers_provider_name;
 CREATE INDEX idx_llm_providers_lookup ON llm_providers(provider_name)
   INCLUDE (is_active, token_limit, token_used, token_remaining);
 
-CREATE INDEX idx_llm_providers_capacity_alert ON llm_providers(token_utilization_percent DESC, provider_name)
-  WHERE token_utilization_percent >= 80 AND is_active = true;
-
 CREATE INDEX idx_llm_providers_critical ON llm_providers(provider_name)
-  WHERE token_remaining < 100000 AND is_active = true;
+  WHERE tokens_remaining < 100000 AND is_active = true;
 
 -- api_usage table: Covering indexes for analytics
 DROP INDEX IF EXISTS idx_api_usage_provider;
