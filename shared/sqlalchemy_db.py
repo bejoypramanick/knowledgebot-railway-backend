@@ -157,8 +157,12 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
                             "jit": "on",
                             # PG18: SSD-optimized cost model
                             "random_page_cost": "1.1",
-                            # PG18: Prefetch for sequential scans
+                            # PG18: Async I/O prefetch for sequential scans (io_uring backend)
                             "effective_io_concurrency": "200",
+                            # PG18: Maintenance operations async prefetch
+                            "maintenance_io_concurrency": "100",
+                            # PG17+: B-tree skip scans - enable multi-column index use without binding first column
+                            "enable_skip_scan": "on",
                         },
                     },
                 )

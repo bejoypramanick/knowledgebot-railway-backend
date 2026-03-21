@@ -142,13 +142,21 @@ class ChatWriteThroughService:
                     else:
                         last_activity_at = last_activity_str
 
-                    # PG18: id IS the UUIDv7 PK — no separate session_id column
+                    # PG18: id IS the UUIDv7 PK — use MERGE with RETURNING to track action
+                    # MERGE provides better semantics: returns merge_action() ('INSERT' or 'UPDATE')
+                    # Enables diagnostics: log "session created vs re-used" for write-through performance tracking
                     result = await db.execute(
                         text("""
-                            INSERT INTO chat_sessions (id, is_active, archive_status, started_at, last_activity_at, message_count)
-                            VALUES (:id::uuid, true, 'active', :started_at, :last_activity_at, 0)
-                            ON CONFLICT (id) DO UPDATE SET last_activity_at = EXCLUDED.last_activity_at
-                            RETURNING id
+                            MERGE INTO chat_sessions AS target
+                            USING (VALUES (:id::uuid, :started_at, :last_activity_at))
+                                  AS source(id, started_at, last_activity_at)
+                            ON target.id = source.id
+                            WHEN MATCHED THEN
+                                UPDATE SET last_activity_at = source.last_activity_at, updated_at = NOW()
+                            WHEN NOT MATCHED THEN
+                                INSERT (id, is_active, archive_status, started_at, last_activity_at, message_count)
+                                VALUES (source.id, true, 'active', source.started_at, source.last_activity_at, 0)
+                            RETURNING merge_action() AS action, target.id
                         """),
                         {
                             "id": session_uuid,
@@ -156,10 +164,12 @@ class ChatWriteThroughService:
                             "last_activity_at": last_activity_at
                         }
                     )
-                    db_id = str(result.scalar())
+                    row = result.fetchone()
+                    db_id = str(row.id)
+                    action = row.action
                     await db.commit()
 
-                    logger.info(f"Write-through: PG session ensured {session_uuid}")
+                    logger.info(f"Write-through: PG session {action} {session_uuid}")
 
                 # Step 2: Batch insert unsynced messages
                 if unsynced:

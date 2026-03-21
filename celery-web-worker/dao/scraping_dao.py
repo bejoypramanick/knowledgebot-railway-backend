@@ -621,3 +621,45 @@ class ScrapingDAO:
             import traceback
             logger.error(f"   Traceback: {traceback.format_exc()}")
             return False
+
+    async def get_websites_by_source_type(self, source_type: str) -> List[Dict[str, Any]]:
+        """
+        Get websites filtered by scraping source type using PG18 JSON_TABLE.
+
+        Extracts source type from scraped_websites.metadata.scraping_config JSON.
+        JSON_TABLE filters at database level instead of fetching all rows and parsing in Python.
+
+        Uses SQL/JSON standard which enables:
+        - DB-level filtering on JSON fields (faster than Python)
+        - No full table scans when expression index exists
+        - Aggregation and joins without extracting JSONB
+
+        Args:
+            source_type: The source type to filter by (e.g., 'single', 'recursive', 'sitemap')
+
+        Returns:
+            List of website records matching the source type
+        """
+        query = """
+            SELECT sw.*, jt.source_type
+            FROM scraped_websites sw
+            CROSS JOIN JSON_TABLE(
+                sw.metadata,
+                '$.scraping_config' COLUMNS(
+                    source_type varchar PATH '$.source' DEFAULT 'single' ON EMPTY
+                )
+            ) AS jt
+            WHERE jt.source_type = :source_type
+            ORDER BY sw.created_at DESC
+        """
+        params = {"source_type": source_type}
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = (await session.execute(text(query), params)).fetchall()
+                logger.log_db_query(query, params, f"Found {len(result)} websites")
+                return [dict(row._mapping) for row in result]
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            logger.warning(f"Error getting websites by source type: {e}")
+            return []

@@ -17,23 +17,48 @@ class TokenDAO:
         pass  # No connection parameter - DAO manages its own connection
 
     async def update_llm_usage(self, provider: str, total_tokens: int, default_limit: int = 20000):
-        """Update LLM token usage for a provider."""
+        """
+        Update LLM token usage for a provider using PG17+ MERGE with RETURNING.
+
+        MERGE provides better semantics than ON CONFLICT:
+        - Returns merge_action() to distinguish INSERT vs UPDATE
+        - Clearer intent when modifying multiple conditions
+        - Enables audit trail logging of actual action taken
+
+        Example log output:
+        - "Provider gpt-4: first use (INSERT)"
+        - "Provider gpt-4: +150 tokens (UPDATE)"
+        """
         logger.info(f"🔍 update_llm_usage called - provider: {provider}, total_tokens: {total_tokens}")
         query = """
-            INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
-            VALUES (:provider, :total_tokens, :default_limit, true)
-            ON CONFLICT (provider_name) DO UPDATE SET
-            token_used = llm_providers.token_used + EXCLUDED.token_used,
-            updated_at = NOW()
+            MERGE INTO llm_providers AS target
+            USING (VALUES (:provider::varchar, :total_tokens::bigint, :default_limit::bigint))
+                  AS source(provider_name, token_used, token_limit)
+            ON target.provider_name = source.provider_name
+            WHEN MATCHED THEN
+                UPDATE SET token_used = target.token_used + source.token_used, updated_at = NOW()
+            WHEN NOT MATCHED THEN
+                INSERT (provider_name, token_used, token_limit, is_active)
+                VALUES (source.provider_name, source.token_used, source.token_limit, true)
+            RETURNING merge_action() AS action, target.provider_name, target.token_used
         """
         params = {"provider": provider, "total_tokens": total_tokens, "default_limit": default_limit}
         try:
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
-                await session.execute(text(query), params)
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
                 await session.commit()
-                logger.log_db_query(query, params, None)
-                logger.info(f"✅ update_llm_usage completed - provider: {provider}, total_tokens: {total_tokens}")
+
+                # Log the actual action taken (INSERT or UPDATE)
+                if row:
+                    action = row.action
+                    logger.log_db_query(query, params, f"MERGE {action}")
+                    logger.info(f"✅ update_llm_usage completed - provider: {provider}, "
+                               f"action: {action}, tokens: {row.token_used}")
+                else:
+                    logger.log_db_query(query, params, "MERGE")
+                    logger.info(f"✅ update_llm_usage completed - provider: {provider}, total_tokens: {total_tokens}")
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise

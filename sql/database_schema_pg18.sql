@@ -141,6 +141,11 @@ CREATE TABLE IF NOT EXISTS public.chat_sessions (
 	conversation_summary text NULL,
 	file_search_store_id varchar(255) NULL,
 	cached_content_id varchar(255) NULL,
+	duration_minutes numeric GENERATED ALWAYS AS (
+		ROUND(EXTRACT(EPOCH FROM (
+			COALESCE(ended_at, last_activity_at) - started_at
+		)) / 60.0, 2)
+	) VIRTUAL,
 	CONSTRAINT chat_sessions_pkey PRIMARY KEY (id),
 	CONSTRAINT chat_sessions_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
 	CONSTRAINT chat_sessions_archive_status_check CHECK (((archive_status)::text = ANY (ARRAY[('active'::character varying)::text, ('closed'::character varying)::text, ('archived'::character varying)::text, ('transferred'::character varying)::text]))),
@@ -251,6 +256,7 @@ CREATE TABLE IF NOT EXISTS public.file_uploads (
 	gemini_processed_at timestamptz NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+	is_processing boolean GENERATED ALWAYS AS (processing_status IN ('pending', 'processing')) VIRTUAL,
 	CONSTRAINT file_uploads_pkey PRIMARY KEY (id),
 	CONSTRAINT file_uploads_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
 	CONSTRAINT valid_processing_status CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('cancelled'::character varying)::text])))
@@ -296,6 +302,7 @@ CREATE TABLE IF NOT EXISTS public.scraped_websites (
 	gemini_processed_at timestamptz NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+	is_root_page boolean GENERATED ALWAYS AS (parent_id IS NULL) VIRTUAL,
 	CONSTRAINT scraped_websites_pkey PRIMARY KEY (id),
 	CONSTRAINT scraped_websites_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
 	CONSTRAINT scraped_websites_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.scraped_websites(id) ON DELETE CASCADE,
@@ -313,6 +320,7 @@ CREATE INDEX IF NOT EXISTS idx_scraped_websites_depth ON public.scraped_websites
 CREATE INDEX IF NOT EXISTS idx_scraped_websites_crawl_session_id ON public.scraped_websites USING btree (crawl_session_id);
 CREATE INDEX IF NOT EXISTS idx_scraped_websites_session_parent ON public.scraped_websites(crawl_session_id, parent_id);
 CREATE INDEX IF NOT EXISTS idx_scraped_websites_processed_content_s3_key ON public.scraped_websites USING btree (processed_content_s3_key);
+CREATE INDEX IF NOT EXISTS idx_scraped_websites_metadata_source ON public.scraped_websites ((metadata->'scraping_config'->>'source'));
 COMMENT ON TABLE public.scraped_websites IS 'Scraped website content for knowledge base';
 ALTER TABLE public.scraped_websites OWNER TO postgres;
 GRANT ALL ON TABLE public.scraped_websites TO postgres;
@@ -429,6 +437,7 @@ CREATE TABLE IF NOT EXISTS public.llm_providers (
 	is_active bool DEFAULT true NULL,
 	created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
+	tokens_remaining bigint GENERATED ALWAYS AS (token_limit - token_used) VIRTUAL,
 	CONSTRAINT llm_providers_pkey PRIMARY KEY (id),
 	CONSTRAINT llm_providers_provider_name_key UNIQUE (provider_name)
 );
@@ -489,6 +498,7 @@ CREATE INDEX IF NOT EXISTS idx_token_usage_log_session_id ON public.token_usage_
 CREATE INDEX IF NOT EXISTS idx_token_usage_log_message_id ON public.token_usage_log USING btree (message_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_log_provider ON public.token_usage_log USING btree (provider);
 CREATE INDEX IF NOT EXISTS idx_token_usage_log_created_at ON public.token_usage_log USING btree (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_token_usage_log_provider_created ON public.token_usage_log USING btree (provider, created_at DESC);
 COMMENT ON TABLE public.token_usage_log IS 'Detailed token usage tracking for API calls';
 ALTER TABLE public.token_usage_log OWNER TO postgres;
 GRANT ALL ON TABLE public.token_usage_log TO postgres;

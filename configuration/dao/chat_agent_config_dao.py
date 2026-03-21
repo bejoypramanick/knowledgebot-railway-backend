@@ -33,19 +33,37 @@ class ChatAgentConfigDAO:
             raise  # ← Raise exception instead of silently returning []
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'string'):
-        """Upsert security setting."""
+        """
+        Upsert security setting using PG17+ MERGE with RETURNING.
+
+        MERGE provides better semantics than ON CONFLICT:
+        - Returns merge_action() to distinguish INSERT vs UPDATE
+        - Enables audit trail: log "setting created vs updated" for compliance
+        - Clearer intent when updating multiple columns
+
+        Example log:
+        - "Security setting max_agents: INSERT (first time set)"
+        - "Security setting max_agents: UPDATE (value changed)"
+        """
         query = text("""
-            INSERT INTO security_settings (setting_name, setting_value, setting_type)
-            VALUES (:name, :value, :setting_type)
-            ON CONFLICT (setting_name) DO UPDATE SET
-            setting_value = EXCLUDED.setting_value, updated_at = NOW()
+            MERGE INTO security_settings AS target
+            USING (VALUES (:name::varchar, :value::text, :setting_type::varchar))
+                  AS source(setting_name, setting_value, setting_type)
+            ON target.setting_name = source.setting_name
+            WHEN MATCHED THEN
+                UPDATE SET setting_value = source.setting_value, updated_at = NOW()
+            WHEN NOT MATCHED THEN
+                INSERT (setting_name, setting_value, setting_type)
+                VALUES (source.setting_name, source.setting_value, source.setting_type)
+            RETURNING merge_action() AS action, setting_name
         """)
         params = {'name': name, 'value': value, 'setting_type': setting_type}
         try:
             logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                await session.execute(query, params)
-                logger.log_db_query(str(query), params, "UPSERT 1")
+                result = await session.execute(query, params)
+                row = result.fetchone()
+                logger.log_db_query(str(query), params, f"MERGE {row.action if row else 'UNKNOWN'}")
                 await session.commit()
         except Exception as e:
             logger.log_db_query(str(query), params, error=e)
