@@ -527,6 +527,26 @@ class StreamingService:
             except Exception as db_error:
                 logger.error(f"❌ Failed to save user message: {db_error}")
 
+            # 📤 BROADCAST USER MESSAGE TO ADMIN CHANNEL (so admins see user messages in real-time)
+            try:
+                from shared.redis_pubsub_manager import broadcast_event_to_all_agents
+                from datetime import datetime
+
+                user_message_event = {
+                    "type": "user_message",
+                    "message_id": f"user-{session_id}-{int(time.time() * 1000)}",
+                    "session_id": session_id,
+                    "text": message,
+                    "sender": "user",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_email": user_email
+                }
+
+                await broadcast_event_to_all_agents(user_message_event)
+                logger.info(f"📤 Broadcasted user message to admins on agent:events:broadcast")
+            except Exception as broadcast_error:
+                logger.error(f"❌ Failed to broadcast user message to admins: {broadcast_error}")
+
             pipeline_timer.mark("pre_agent_checks")
 
             # Start streaming response
