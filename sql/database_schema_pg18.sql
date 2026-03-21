@@ -253,6 +253,9 @@ CREATE TABLE IF NOT EXISTS public.file_uploads (
 	gemini_state varchar(50) DEFAULT 'pending'::character varying NULL,
 	sha256_hash varchar(64) NULL,
 	file_size int8 NULL,
+	char_count int4 DEFAULT 0 NULL,
+	s3_key text NULL,
+	processed_content_s3_key text NULL,
 	mime_type varchar(100) NULL,
 	metadata jsonb DEFAULT '{}'::jsonb NULL,
 	"version" int4 DEFAULT 1 NULL,
@@ -264,6 +267,7 @@ CREATE TABLE IF NOT EXISTS public.file_uploads (
 	docling_images_with_ocr int4 DEFAULT 0,
 	processing_status varchar(20) DEFAULT 'pending'::character varying NULL,
 	error_message text NULL,
+	gemini_processed_at timestamptz NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT file_uploads_pkey PRIMARY KEY (id),
@@ -277,6 +281,8 @@ CREATE INDEX IF NOT EXISTS idx_file_uploads_processing_status ON public.file_upl
 CREATE INDEX IF NOT EXISTS idx_file_uploads_processing_pending ON public.file_uploads(processing_status) WHERE processing_status IN ('pending', 'processing');
 CREATE INDEX IF NOT EXISTS idx_file_uploads_processed_by_docling ON public.file_uploads(processed_by_docling) WHERE processed_by_docling = true;
 CREATE INDEX IF NOT EXISTS idx_file_uploads_docling_processing_time ON public.file_uploads(docling_processing_time_ms) WHERE processed_by_docling = true;
+CREATE INDEX IF NOT EXISTS idx_file_uploads_s3_key ON public.file_uploads USING btree (s3_key);
+CREATE INDEX IF NOT EXISTS idx_file_uploads_processed_content_s3_key ON public.file_uploads USING btree (processed_content_s3_key);
 CREATE INDEX IF NOT EXISTS idx_file_uploads_created_at ON public.file_uploads USING btree (created_at DESC);
 COMMENT ON TABLE public.file_uploads IS 'Uploaded files with Gemini FileSearch integration and Docling processing';
 ALTER TABLE public.file_uploads OWNER TO postgres;
@@ -292,7 +298,8 @@ CREATE TABLE IF NOT EXISTS public.scraped_websites (
 	title varchar(500) NULL,
 	description text NULL,
 	pages_scraped int4 DEFAULT 0 NULL,
-	content_length int4 DEFAULT 0 NULL,
+	file_size int4 DEFAULT 0 NULL,
+	char_count int4 DEFAULT 0 NULL,
 	gemini_state varchar(50) DEFAULT 'pending'::character varying NULL,
 	gemini_file_name varchar(500) NULL,
 	gemini_file_uri text NULL,
@@ -305,6 +312,7 @@ CREATE TABLE IF NOT EXISTS public.scraped_websites (
 	parent_id uuid NULL,
 	crawl_session_id int4 NULL,
 	processed_content_s3_key text NULL,
+	gemini_processed_at timestamptz NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT scraped_websites_pkey PRIMARY KEY (id),
@@ -323,6 +331,7 @@ CREATE INDEX IF NOT EXISTS idx_scraped_websites_parent_id ON public.scraped_webs
 CREATE INDEX IF NOT EXISTS idx_scraped_websites_depth ON public.scraped_websites USING btree (depth);
 CREATE INDEX IF NOT EXISTS idx_scraped_websites_crawl_session_id ON public.scraped_websites USING btree (crawl_session_id);
 CREATE INDEX IF NOT EXISTS idx_scraped_websites_session_parent ON public.scraped_websites(crawl_session_id, parent_id);
+CREATE INDEX IF NOT EXISTS idx_scraped_websites_processed_content_s3_key ON public.scraped_websites USING btree (processed_content_s3_key);
 COMMENT ON TABLE public.scraped_websites IS 'Scraped website content for knowledge base';
 ALTER TABLE public.scraped_websites OWNER TO postgres;
 GRANT ALL ON TABLE public.scraped_websites TO postgres;
