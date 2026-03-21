@@ -1253,9 +1253,10 @@ async def request_human_agent_connection(
                                         metadata = {}
                                 customer_name = metadata.get('customer_name')
                             
-                            # If customer_name not set, use "User-<uuid8>" format
-                            if not customer_name:
-                                customer_name = f"User-{session_id[:8]}"
+                            # Skip auto-generated User-{id} names — frontend keeps the correct ROW_NUMBER-based User-N
+                            import re
+                            if customer_name and re.match(r'^User-\d+$', customer_name):
+                                customer_name = None
                             
                             session_event = {
                                 "type": "session_update",

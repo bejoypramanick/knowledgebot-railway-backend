@@ -355,12 +355,14 @@ class StreamingService:
                                                 "session_id": session_id
                                             })
 
-                                        # Get customer_name from Redis session metadata
+                                        # Get customer_name from Redis session metadata (only real names, not auto-generated)
                                         session_metadata = redis_session.get('metadata', {})
                                         customer_name = session_metadata.get('customer_name') if isinstance(session_metadata, dict) else None
 
-                                        if not customer_name:
-                                            customer_name = f"User-{session_id[:8]}"
+                                        # Skip auto-generated User-{id} names — frontend already has the correct ROW_NUMBER-based User-N
+                                        import re
+                                        if customer_name and re.match(r'^User-\d+$', customer_name):
+                                            customer_name = None
 
                                         # Build session event
                                         session_event = {
