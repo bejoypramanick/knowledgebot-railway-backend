@@ -459,11 +459,11 @@ DROP INDEX IF EXISTS idx_token_usage_recent;
 DROP INDEX IF EXISTS idx_metrics_type;
 DROP INDEX IF EXISTS idx_metrics_type_covering;
 CREATE INDEX idx_metrics_type_covering ON metrics(metric_type, created_at DESC)
-  INCLUDE (metric_name, metric_value);
+  INCLUDE (metric_name, value);
 DROP INDEX IF EXISTS idx_metrics_name;
 DROP INDEX IF EXISTS idx_metrics_name_covering;
 CREATE INDEX idx_metrics_name_covering ON metrics(metric_name, created_at DESC)
-  INCLUDE (metric_type, metric_value);
+  INCLUDE (metric_type, value);
 
 DROP INDEX IF EXISTS idx_notifications_user_email;
 DROP INDEX IF EXISTS idx_notifications_user_covering;
