@@ -98,7 +98,7 @@ class FileUploadDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:
+    async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file record by ID."""
         query = """
             SELECT id, original_filename, processing_status, error_message,
@@ -206,7 +206,7 @@ class FileUploadDAO:
             logger.log_db_query(query, error=e)
             return []
 
-    async def update_file_status(self, file_id: int, status: str, error_message: str = None) -> bool:
+    async def update_file_status(self, file_id: str, status: str, error_message: str = None) -> bool:
         """Update file processing status."""
         logger.info(f"💾 [FILE_DAO_UPDATE] Updating file status for ID: {file_id}")
 
@@ -243,7 +243,7 @@ class FileUploadDAO:
             logger.log_db_query(query, params, error=e)
             return False
 
-    async def update_celery_task_id(self, file_id: int, celery_task_id: str) -> bool:
+    async def update_celery_task_id(self, file_id: str, celery_task_id: str) -> bool:
         """Update file record with real Celery task ID."""
         logger.info(f"💾 [FILE_DAO_UPDATE_TASK_ID] Updating Celery task ID for file ID: {file_id}")
 

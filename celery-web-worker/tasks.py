@@ -15,7 +15,7 @@ logger = get_otel_logger("celery_tasks", "celery-web-worker")
 @celery_app.task(bind=True, max_retries=2)
 def scrape_website_task(
     self,
-    website_id: int,
+    website_id: str,
     url: str,
     options: Dict[str, Any]
 ):

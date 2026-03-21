@@ -13,11 +13,11 @@ class WebsiteService:
     def __init__(self):
         self.scraping_dao = ScrapingDAO()
 
-    async def get_website_by_id(self, website_id: int) -> Optional[Dict[str, Any]]:
+    async def get_website_by_id(self, website_id: str) -> Optional[Dict[str, Any]]:
         """Get website by ID."""
         return await self.scraping_dao.get_website_by_id(website_id)
 
-    async def update_website_status(self, website_id: int, status: str, error_message: str = None):
+    async def update_website_status(self, website_id: str, status: str, error_message: str = None):
         """Update website processing status."""
         try:
             await self.scraping_dao.update_website_status(website_id, status, error_message)
@@ -41,7 +41,7 @@ class WebsiteService:
             logger.error(f"❌ Failed to delete website record for {url}: {e}")
             return False
 
-    async def create_website_record(self, website_data: Dict[str, Any]) -> Optional[int]:
+    async def create_website_record(self, website_data: Dict[str, Any]) -> Optional[str]:
         """Create new website record."""
         try:
             website_id = await self.scraping_dao.record_scraped_metadata(website_data)
@@ -55,7 +55,7 @@ class WebsiteService:
             logger.error(f"❌ Error creating website record: {e}")
             return None
 
-    async def process_website_async(self, website_id: int, url: str, options: Dict[str, Any],
+    async def process_website_async(self, website_id: str, url: str, options: Dict[str, Any],
                               celery_task_id: str = None):
         """Process website content - delegates to processing service"""
         try:

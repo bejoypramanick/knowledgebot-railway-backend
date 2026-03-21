@@ -190,12 +190,12 @@ class StreamingService:
                 logger.info("📁 Agent S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
 
             # STEP 1: Ensure session exists in Redis (DB 6) — zero PG connections
-            # PG row created lazily by write-through or ensure_numeric_id() on first message
+            # PG row created lazily by write-through or ensure_db_id() on first message
             try:
                 from shared.redis_chat_store import get_chat_store
 
                 chat_store = get_chat_store()
-                numeric_session_id = None
+                session_db_id = None
 
                 # Get or create session in Redis
                 redis_session = await chat_store.get_or_create_session(
@@ -204,13 +204,13 @@ class StreamingService:
                 )
 
                 if redis_session:
-                    numeric_session_id = redis_session.get("db_id")
-                    if numeric_session_id:
-                        logger.info(f"Found existing session in Redis: {session_id} (numeric ID: {numeric_session_id})")
+                    session_db_id = redis_session.get("db_id")
+                    if session_db_id:
+                        logger.info(f"Found existing session in Redis: {session_id} (db ID: {session_db_id})")
                     else:
-                        # Need PG numeric ID (single PG call, first message only)
-                        numeric_session_id = await self.chat_dao.ensure_numeric_id(session_id)
-                        logger.info(f"Created PG numeric ID for session: {session_id} -> {numeric_session_id}")
+                        # Need PG database ID (single PG call, first message only)
+                        session_db_id = await self.chat_dao.ensure_db_id(session_id)
+                        logger.info(f"Created PG database ID for session: {session_id} -> {session_db_id}")
                 else:
                     logger.warning(f"Redis session creation returned None for {session_id}")
 
@@ -221,9 +221,9 @@ class StreamingService:
             session_state_manager.update_session_activity(session_id)
             session_state_manager.set_streaming_state(session_id, True)
 
-            # Create session dependencies with both UUID and numeric ID
-            session_deps = ChatSessionDeps(session_id=session_id, numeric_session_id=numeric_session_id)
-            logger.info(f"✅ Session dependencies created (UUID: {session_id}, numeric ID: {numeric_session_id})")
+            # Create session dependencies with both UUID and database ID
+            session_deps = ChatSessionDeps(session_id=session_id, session_db_id=session_db_id)
+            logger.info(f"✅ Session dependencies created (UUID: {session_id}, db ID: {session_db_id})")
 
             # Get chat history for context
             chat_history = await session_state_manager.get_chat_history(session_id)
@@ -310,13 +310,13 @@ class StreamingService:
                     endpoint_url = f"{config_service_url}/api/v1/configuration/admin/chat-sessions/request-agent"
                     
                     # Get numeric session ID from Redis/PG
-                    numeric_session_id = await self.chat_dao.ensure_numeric_id(session_id)
-                    if numeric_session_id:
+                    session_db_id = await self.chat_dao.ensure_db_id(session_id)
+                    if session_db_id:
                             # Call configuration service to assign agent
                             async with httpx.AsyncClient(timeout=10.0) as client:
                                 response = await client.post(
                                     endpoint_url,
-                                    json={"session_id": numeric_session_id}
+                                    json={"session_id": session_db_id}
                                 )
                                 
                                 if response.status_code == 200:
@@ -339,12 +339,12 @@ class StreamingService:
                                             LEFT JOIN users u ON urm.user_id = u.id
                                             WHERE sa.session_id = :session_id AND sa.status = 'active'
                                         """
-                                        verify_result = await verify_db.execute(sql_text(verify_query), {"session_id": numeric_session_id})
+                                        verify_result = await verify_db.execute(sql_text(verify_query), {"session_id": session_db_id})
                                         verify_row = verify_result.mappings().first()
                                         if verify_row:
                                             logger.info(f"Verified agent assignment in database: {verify_row['agent_email']} (ID: {verify_row['agent_id']})")
                                         else:
-                                            logger.warning(f"Agent assignment not found in database yet for session {numeric_session_id}")
+                                            logger.warning(f"Agent assignment not found in database yet for session {session_db_id}")
                                     
                                     # Cache the agent assignment in Redis DB 4
                                     from shared.redis_agent_cache import set_assigned_agent
@@ -384,13 +384,13 @@ class StreamingService:
                                         customer_name = session_metadata.get('customer_name') if isinstance(session_metadata, dict) else None
 
                                         if not customer_name:
-                                            customer_name = f"User-{numeric_session_id}"
+                                            customer_name = f"User-{session_db_id}"
 
                                         # Build session event
                                         session_event = {
                                             "type": "session_update",
                                             "data": {
-                                                "id": str(redis_session.get('db_id', numeric_session_id)),
+                                                "id": str(redis_session.get('db_id', session_db_id)),
                                                 "session_uuid": session_id,
                                                 "customer_name": customer_name,
                                                 "customer_email": None,
@@ -490,7 +490,7 @@ class StreamingService:
                         logger.warning(f"Database lookup failed: {db_error}")
 
                 if assigned_agent_id:
-                    assigned_agent_id = int(assigned_agent_id) if isinstance(assigned_agent_id, (str, bytes)) else assigned_agent_id
+                    assigned_agent_id = str(assigned_agent_id) if isinstance(assigned_agent_id, bytes) else assigned_agent_id
                     logger.info(f"👤 Human agent (ID: {assigned_agent_id}) is assigned to session {session_id}")
                     logger.info(f"📧 Saving customer message and notifying agent...")
 

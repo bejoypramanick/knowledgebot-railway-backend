@@ -82,7 +82,7 @@ class FileService:
             logger.debug(f"ℹ️ Skipping cancellation check: {e}")
             return False
 
-    async def handle_duplicate_check(self, original_filename: str, replace_existing: bool = False, exclude_file_id: int = None) -> Dict[str, Any]:
+    async def handle_duplicate_check(self, original_filename: str, replace_existing: bool = False, exclude_file_id: str = None) -> Dict[str, Any]:
         """
         Check for duplicate files by filename.
         Returns: {"allow": bool, "reason": str, "detail": str}
@@ -109,7 +109,7 @@ class FileService:
             logger.error(f"❌ Error checking duplicates: {e}")
             raise
 
-    async def check_duplicate_file(self, original_filename: str, exclude_file_id: int = None) -> Optional[Dict[str, Any]]:
+    async def check_duplicate_file(self, original_filename: str, exclude_file_id: str = None) -> Optional[Dict[str, Any]]:
         """Check if file with same name exists in database (only active files)."""
         from dao.fileupload_dao import FileUploadDAO
         dao = FileUploadDAO()
@@ -145,8 +145,8 @@ class FileService:
         mime_type: str,
         file_search_metadata: Optional[Dict[str, Any]] = None,
         char_count: int = 0,
-        user_role_id: int = None
-    ) -> Optional[int]:
+        user_role_id: str = None
+    ) -> Optional[str]:
         """Record file metadata to database. Returns: file_id or None on failure"""
         from dao.fileupload_dao import FileUploadDAO
         dao = FileUploadDAO()

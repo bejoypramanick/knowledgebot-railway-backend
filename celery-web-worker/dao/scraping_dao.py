@@ -14,7 +14,7 @@ class ScrapingDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def get_website_by_id(self, website_id: int) -> Optional[Dict[str, Any]]:
+    async def get_website_by_id(self, website_id: str) -> Optional[Dict[str, Any]]:
         """Get website record by ID."""
         query = "SELECT * FROM scraped_websites WHERE id = :website_id"
         params = {"website_id": website_id}
@@ -28,7 +28,7 @@ class ScrapingDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def update_website_status(self, website_id: int, status: str, error_message: str = None):
+    async def update_website_status(self, website_id: str, status: str, error_message: str = None):
         """Update website processing status."""
         logger.info(f"💾 [WEB_UPDATE_START] Updating website status")
         logger.info(f"   Website ID: {website_id}")
@@ -79,7 +79,7 @@ class ScrapingDAO:
             logger.log_db_query(query, {}, error=e)
             return []
 
-    async def record_scraped_metadata(self, record_data: Dict[str, Any]) -> Optional[int]:
+    async def record_scraped_metadata(self, record_data: Dict[str, Any]) -> Optional[str]:
         """
         Record scraped website metadata.
         Stores scraping_config in metadata JSONB for UI tree detection.
@@ -157,7 +157,7 @@ class ScrapingDAO:
                 logger.info(f"✅ [WEB_INSERT_SUCCESS] Website record created with ID: {result}")
                 logger.log_db_query(query, params, result)
                 await session.commit()
-                return int(result) if result else None
+                return str(result) if result else None
         except Exception as e:
             logger.error(f"❌ [WEB_INSERT_ERROR] Failed to record website metadata: {e}")
             logger.error(f"   Query: {query}")
@@ -232,7 +232,7 @@ class ScrapingDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def get_admin_user_role_id(self, user_email: str = None) -> Optional[int]:
+    async def get_admin_user_role_id(self, user_email: str = None) -> Optional[str]:
         """Get admin user role ID from database."""
         try:
             async with get_db_session() as session:
@@ -261,19 +261,19 @@ class ScrapingDAO:
 
     async def record_child_page(
         self,
-        parent_id: int,
+        parent_id: str,
         page_url: str,
         gemini_file_name: str = None,
         gemini_file_uri: str = None,
         file_search_metadata: Dict[str, Any] = None,
-        user_role_id: int = None,
+        user_role_id: str = None,
         file_size: int = 0,
         char_count: int = 0,
         title: str = None,
         description: str = None,
         crawl_session_id: str = None,
         processed_content_s3_key: str = None
-    ) -> Optional[int]:
+    ) -> Optional[str]:
         """
         Record a child page immediately after it's uploaded to Gemini.
         This creates a new record in scraped_websites with parent_id set to the website.
@@ -359,7 +359,7 @@ class ScrapingDAO:
                 await session.commit()
                 logger.info(f"✅ [CHILD_PAGE_SUCCESS] Recorded child page with ID: {result}")
                 logger.log_db_query(query, params, result)
-                return int(result) if result else None
+                return str(result) if result else None
         except Exception as e:
             # Check if it's a foreign key constraint error
             if "foreign key constraint" in str(e) and "parent_id" in str(e):
@@ -377,7 +377,7 @@ class ScrapingDAO:
 
     async def finalize_website_metadata(
         self,
-        website_id: int,
+        website_id: str,
         page_count: int,
         total_size_bytes: int,
         total_char_count: int,
@@ -431,7 +431,7 @@ class ScrapingDAO:
 
     async def update_website_with_page_data(
         self,
-        website_id: int,
+        website_id: str,
         gemini_file_name: str,
         gemini_file_uri: str,
         file_size: int,
@@ -541,7 +541,7 @@ class ScrapingDAO:
             logger.log_db_query(query, params, error=e)
             return False
 
-    async def check_and_update_parent_completion(self, parent_id: int) -> bool:
+    async def check_and_update_parent_completion(self, parent_id: str) -> bool:
         """
         Check if all child pages of a parent website/sitemap are completed.
         If all children are completed, update parent status to 'completed'.

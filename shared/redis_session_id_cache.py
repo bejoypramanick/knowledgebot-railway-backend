@@ -1,6 +1,6 @@
 """
-Redis Session UUID -> Numeric ID Cache (DB 5)
-Dedicated Redis database for caching session UUID to numeric ID mappings.
+Redis Session UUID -> Database ID Cache (DB 5)
+Dedicated Redis database for caching session UUID to database ID mappings.
 Used by API Gateway to avoid repeated database lookups.
 
 Env var: SESSION_ID_CACHE_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/5
@@ -80,37 +80,37 @@ async def get_session_id_cache_redis() -> redis.Redis:
     return _session_id_cache_client
 
 
-async def get_numeric_id(session_uuid: str) -> Optional[int]:
+async def get_session_db_id(session_uuid: str) -> Optional[str]:
     """
-    Get the numeric database ID for a session UUID from Redis cache.
+    Get the database ID for a session UUID from Redis cache.
 
     Args:
         session_uuid: Session UUID
 
     Returns:
-        Numeric session ID or None if not cached
+        Database session ID or None if not cached
     """
     try:
         client = await get_session_id_cache_redis()
         cache_key = f"{CACHE_KEY_PREFIX}{session_uuid}"
         cached_id = await client.get(cache_key)
         if cached_id:
-            numeric_id = int(cached_id)
-            logger.debug(f"Session ID cache HIT: {session_uuid} -> {numeric_id}")
-            return numeric_id
+            db_id = cached_id
+            logger.debug(f"Session ID cache HIT: {session_uuid} -> {db_id}")
+            return db_id
         return None
     except Exception as e:
         logger.warning(f"Session ID cache GET failed for {session_uuid}: {e}")
         return None
 
 
-async def set_numeric_id(session_uuid: str, numeric_id: int, ttl: int = DEFAULT_TTL) -> bool:
+async def set_session_db_id(session_uuid: str, db_id: str, ttl: int = DEFAULT_TTL) -> bool:
     """
-    Cache the numeric ID for a session UUID.
+    Cache the database ID for a session UUID.
 
     Args:
         session_uuid: Session UUID
-        numeric_id: Numeric database ID
+        db_id: Database ID
         ttl: Cache TTL in seconds (default 1 hour)
 
     Returns:
@@ -119,8 +119,8 @@ async def set_numeric_id(session_uuid: str, numeric_id: int, ttl: int = DEFAULT_
     try:
         client = await get_session_id_cache_redis()
         cache_key = f"{CACHE_KEY_PREFIX}{session_uuid}"
-        await client.setex(cache_key, ttl, str(numeric_id))
-        logger.debug(f"Session ID cache SET: {session_uuid} -> {numeric_id} (TTL: {ttl}s)")
+        await client.setex(cache_key, ttl, db_id)
+        logger.debug(f"Session ID cache SET: {session_uuid} -> {db_id} (TTL: {ttl}s)")
         return True
     except Exception as e:
         logger.warning(f"Session ID cache SET failed for {session_uuid}: {e}")

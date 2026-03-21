@@ -26,7 +26,7 @@ def get_webcrawl_dao() -> WebCrawlDAO:
     return _webcrawl_dao
 
 
-async def create_website_record(url: str, user_role_id: int = None, task_id: str = None) -> Optional[int]:
+async def create_website_record(url: str, user_role_id: str = None, task_id: str = None) -> Optional[str]:
     """
     Create website record with Queued status.
     Delegates to DAO layer for database operations.
@@ -54,7 +54,7 @@ async def get_pending_websites() -> List[Dict[str, Any]]:
         return []
 
 
-async def get_website_by_id(website_id: int) -> Optional[Dict[str, Any]]:
+async def get_website_by_id(website_id: str) -> Optional[Dict[str, Any]]:
     """Get website record by ID."""
     try:
         dao = get_webcrawl_dao()
@@ -74,7 +74,7 @@ async def cancel_websites() -> int:
         return 0
 
 
-async def update_website_status(website_id: int, status: str, error_message: str = None) -> bool:
+async def update_website_status(website_id: str, status: str, error_message: str = None) -> bool:
     """Update website processing status."""
     try:
         dao = get_webcrawl_dao()
@@ -86,7 +86,7 @@ async def update_website_status(website_id: int, status: str, error_message: str
 
 async def queue_website_for_scraping(
     url: str,
-    user_role_id: int = None,
+    user_role_id: str = None,
     max_depth: int = 2,
     max_pages: int = 100,
     max_concurrent: int = 10,
@@ -369,7 +369,7 @@ async def check_redis_queue() -> Dict[str, Any]:
         }
 
 
-async def delete_website(website_id: int) -> Dict[str, Any]:
+async def delete_website(website_id: str) -> Dict[str, Any]:
     """
     Delete website atomically with complete cleanup
     """

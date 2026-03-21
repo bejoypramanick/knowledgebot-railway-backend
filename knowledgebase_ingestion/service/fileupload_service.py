@@ -79,7 +79,7 @@ async def get_pending_files() -> List[Dict[str, Any]]:
         return []
 
 
-async def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
+async def get_file_by_id(file_id: str) -> Optional[Dict[str, Any]]:
     """Get file record by ID."""
     try:
         dao = get_fileupload_dao()
@@ -118,7 +118,7 @@ async def cancel_files() -> int:
         return 0
 
 
-async def update_file_status(file_id: int, status: str, error_message: str = None) -> bool:
+async def update_file_status(file_id: str, status: str, error_message: str = None) -> bool:
     """Update file processing status."""
     try:
         dao = get_fileupload_dao()
@@ -128,7 +128,7 @@ async def update_file_status(file_id: int, status: str, error_message: str = Non
         return False
 
 
-async def queue_file_for_processing(file_id: int, celery_task_id: str) -> bool:
+async def queue_file_for_processing(file_id: str, celery_task_id: str) -> bool:
     """
     Queue file for processing via Redis.
     """
@@ -147,7 +147,7 @@ async def queue_file_for_processing(file_id: int, celery_task_id: str) -> bool:
         return False
 
 
-async def delete_file(file_id: int) -> Dict[str, Any]:
+async def delete_file(file_id: str) -> Dict[str, Any]:
     """
     Delete file atomically with complete cleanup
     """

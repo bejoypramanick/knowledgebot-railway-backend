@@ -16,7 +16,7 @@ class FileUploadDAO:
     def __init__(self):
         pass
 
-    async def update_file_status(self, file_id: int, status: str, error_message: str = None) -> bool:
+    async def update_file_status(self, file_id: str, status: str, error_message: str = None) -> bool:
         """Update file processing status."""
         logger.info(f"💾 [FILE_UPDATE_STATUS] Updating file {file_id} status to: {status}")
 
@@ -47,7 +47,7 @@ class FileUploadDAO:
 
     async def update_file_with_processing_data(
         self,
-        file_id: int,
+        file_id: str,
         gemini_file_name: str,
         gemini_file_uri: str,
         gemini_state: str,
@@ -155,7 +155,7 @@ class FileUploadDAO:
             logger.log_db_query(query, {"celery_task_id": celery_task_id}, error=e)
             return None
 
-    async def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:
+    async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file record by file ID."""
         query = """
             SELECT id, user_role_id, original_filename, display_name,
@@ -182,7 +182,7 @@ class FileUploadDAO:
             logger.log_db_query(query, {"file_id": file_id}, error=e)
             return None
 
-    async def check_duplicate_file(self, original_filename: str, exclude_file_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    async def check_duplicate_file(self, original_filename: str, exclude_file_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Check if file with same name exists in database (only active files)."""
         try:
             async with get_db_session() as session:
@@ -248,8 +248,8 @@ class FileUploadDAO:
         mime_type: str,
         file_search_metadata: Optional[Dict[str, Any]] = None,
         char_count: int = 0,
-        user_role_id: Optional[int] = None
-    ) -> Optional[int]:
+        user_role_id: Optional[str] = None
+    ) -> Optional[str]:
         """Record file metadata to database. Returns: file_id or None on failure"""
         try:
             # Use provided user_role_id or look it up from database
@@ -289,7 +289,7 @@ class FileUploadDAO:
             logger.error(f"❌ Error recording metadata: {e}")
             raise
 
-    async def get_file_metadata_for_deletion(self, file_id: int) -> Optional[Dict[str, Any]]:
+    async def get_file_metadata_for_deletion(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file metadata for deletion operations (from file_uploads table)."""
         query = "SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = :file_id"
         try:

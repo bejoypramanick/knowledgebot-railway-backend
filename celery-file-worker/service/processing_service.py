@@ -222,7 +222,7 @@ async def query_gemini_file_existence(
 
 
 async def process_file_content(
-    file_id: int,
+    file_id: str,
     user_email: str = "admin",
     celery_task_id: str = None
 ) -> Dict[str, Any]:
@@ -735,7 +735,7 @@ async def process_file_content(
                 dao = FileUploadDAO()
                 
                 # First update status to processing
-                await dao.update_file_status(int(file_id), 'processing')
+                await dao.update_file_status(file_id, 'processing')
                 
                 # Extract document URI if available
                 document_uri = None
@@ -744,7 +744,7 @@ async def process_file_content(
                 
                 # Update with all processing data
                 success = await dao.update_file_with_processing_data(
-                    file_id=int(file_id),
+                    file_id=file_id,
                     gemini_file_name=document_name,
                     gemini_file_uri=document_uri,
                     gemini_state=final_state,
@@ -854,7 +854,7 @@ async def process_file_content(
                     try:
                         from dao.fileupload_dao import FileUploadDAO
                         dao = FileUploadDAO()
-                        await dao.update_file_status(int(file_id), 'failed', error_message=str(e))
+                        await dao.update_file_status(file_id, 'failed', error_message=str(e))
                         logger.info(f"✅ [DB_UPDATE] Updated file status to 'failed'")
                     except Exception as db_error:
                         logger.error(f"❌ [DB_ERROR] Failed to update status to 'failed': {db_error}")
@@ -922,14 +922,9 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
     if not file_id.startswith("files/"):
         # Look up in DB
         try:
-            try:
-                numeric_id = int(file_id)
-            except ValueError:
-                numeric_id = file_id
-
             from dao.fileupload_dao import FileUploadDAO
             dao = FileUploadDAO()
-            record = await dao.get_file_metadata_for_deletion(numeric_id)
+            record = await dao.get_file_metadata_for_deletion(file_id)
 
             if record:
                 gemini_file_name = record['gemini_file_name']

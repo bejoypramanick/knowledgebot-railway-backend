@@ -72,10 +72,10 @@ class SessionStateManager:
             # Ensure session exists in Redis (lazy creation)
             session_data = await store.get_or_create_session(session_uuid=session_id)
 
-            # If session has no PG db_id yet, create one (single PG call for numeric ID)
+            # If session has no PG db_id yet, create one (single PG call for database ID)
             db_id = session_data.get("db_id") if session_data else None
             if not db_id:
-                db_id = await self.chat_dao.ensure_numeric_id(session_id)
+                db_id = await self.chat_dao.ensure_db_id(session_id)
 
             # Save message to Redis (atomic pipeline: RPUSH + HINCRBY + HSET + SADD)
             result = await store.save_message(session_id, role, content, metadata)

@@ -258,7 +258,7 @@ class ChatAgentConfigDAO:
             logger.log_db_query("remove_human_agent", {"email": email}, error=e)
             raise
 
-    async def remove_human_agent_by_id(self, user_id: int) -> bool:
+    async def remove_human_agent_by_id(self, user_id: str) -> bool:
         """Remove human_agent role from a user by user ID."""
         try:
             query = text("""
@@ -350,7 +350,7 @@ class ChatAgentConfigDAO:
             logger.log_db_query("remove_admin", {"email": email}, error=e)
             raise
 
-    async def remove_admin_by_id(self, user_id: int) -> bool:
+    async def remove_admin_by_id(self, user_id: str) -> bool:
         """Remove admin role from a user by user ID."""
         try:
             query = text("""
@@ -394,7 +394,7 @@ class ChatAgentConfigDAO:
             logger.error(f"Error syncing admin emails: {e}")
             raise
 
-    async def sync_admins(self, desired_ids: List[int], new_emails: List[str]) -> None:
+    async def sync_admins(self, desired_ids: List[str], new_emails: List[str]) -> None:
         """
         Sync admins using IDs for existing users and emails for new users.
         - desired_ids: user IDs of existing admins to keep
@@ -448,7 +448,7 @@ class ChatAgentConfigDAO:
             logger.error(f"Error syncing human agent emails: {e}")
             raise
 
-    async def sync_human_agents(self, desired_ids: List[int], new_emails: List[str]) -> None:
+    async def sync_human_agents(self, desired_ids: List[str], new_emails: List[str]) -> None:
         """
         Sync human agents using IDs for existing users and emails for new users.
         - desired_ids: user IDs of existing agents to keep

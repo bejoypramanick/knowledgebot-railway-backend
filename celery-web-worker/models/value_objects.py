@@ -24,11 +24,11 @@ class CrawlConfig:
 @dataclass(frozen=True)
 class JobContext:
     """Job-level context shared across all operations"""
-    website_id: int
+    website_id: str
     root_url: str
     celery_task_id: str
     store_name: str
-    user_role_id: Optional[int]
+    user_role_id: Optional[str]
 
     def __repr__(self) -> str:
         return f"JobContext(website_id={self.website_id}, task_id={self.celery_task_id[:8]}...)"
@@ -100,7 +100,7 @@ class AggregateMetrics:
 class ProcessingResult:
     """Final result of processing a website"""
     success: bool
-    website_id: int
+    website_id: str
     message: str
     page_count: int
     total_size_bytes: int
@@ -131,11 +131,11 @@ class ProcessingResult:
 @dataclass(frozen=True)
 class ProcessingRequest:
     """Complete request to process a website - groups all orchestrator parameters"""
-    website_id: int
+    website_id: str
     url: str
     crawl_config: CrawlConfig
     user_email: str = "admin"
-    user_role_id: Optional[int] = None
+    user_role_id: Optional[str] = None
     celery_task_id: Optional[str] = None
     replace_existing: bool = False
     options: Optional[Dict[str, Any]] = None
@@ -147,7 +147,7 @@ class ProcessingRequest:
 @dataclass(frozen=True)
 class FinalizeRequest:
     """Request to finalize a website record"""
-    website_id: int
+    website_id: str
     page_count: int
     total_size_bytes: int
     total_char_count: int

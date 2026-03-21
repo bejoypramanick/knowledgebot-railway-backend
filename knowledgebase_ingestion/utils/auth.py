@@ -35,7 +35,7 @@ def extract_user_from_request(request: Request) -> Tuple[str, Optional[str]]:
         raise HTTPException(status_code=401, detail="Authentication failed")
 
 
-async def get_user_role_id_from_email(user_email: str) -> Optional[int]:
+async def get_user_role_id_from_email(user_email: str) -> Optional[str]:
     """
     Look up user_role_id from user_role_mapping table using email.
     Joins with users table to match email to user_id.

@@ -66,7 +66,7 @@ class ChatLogDAO:
             logger.log_db_query(query, None, error=e)
             return []
 
-    async def get_all_admin_ids(self) -> List[int]:
+    async def get_all_admin_ids(self) -> List[str]:
         """Get all admin user IDs."""
         query = """
             SELECT DISTINCT u.id
@@ -139,7 +139,7 @@ class ChatLogDAO:
             logger.log_db_query(query, {"email": email}, error=e)
             return {"is_agent": False, "is_admin": False}
 
-    async def get_user_role_id(self, email: str) -> Optional[int]:
+    async def get_user_role_id(self, email: str) -> Optional[str]:
         """Get user_role_id for a given email."""
         query = """
             SELECT urm.user_role_id
@@ -181,8 +181,8 @@ class ChatLogDAO:
             logger.log_db_query(query, {"user_role_id": user_role_id}, error=e)
             return 0
 
-    async def get_session_db_id(self, session_id: int) -> Optional[int]:
-        """Get database ID for a session (numeric ID only)."""
+    async def get_session_db_id(self, session_id: str) -> Optional[str]:
+        """Get database ID for a session."""
         try:
             query = "SELECT id FROM chat_sessions WHERE id = :id"
             params = {"id": session_id}
@@ -202,7 +202,7 @@ class ChatLogDAO:
             logger.log_db_query("get_session_db_id", {"session_id": session_id}, error=e)
             return None
 
-    async def get_session_db_id_by_uuid(self, session_uuid: str) -> Optional[int]:
+    async def get_session_db_id_by_uuid(self, session_uuid: str) -> Optional[str]:
         """Get database ID for a session by its session_id (UUID) column.
         Used for special cases like heartbeat sessions that use string UUIDs."""
         try:
@@ -240,7 +240,7 @@ class ChatLogDAO:
             logger.log_db_query("get_session_by_uuid", {"session_uuid": session_uuid}, error=e)
             return None
 
-    async def create_chat_session(self, session_id: str, metadata: Dict[str, Any]) -> int:
+    async def create_chat_session(self, session_id: str, metadata: Dict[str, Any]) -> str:
         """Create a new chat session."""
         query = """
             INSERT INTO chat_sessions (session_id, metadata, created_at, last_activity_at, is_active)
@@ -267,8 +267,8 @@ class ChatLogDAO:
         if roles['is_admin']: return 'admin'
         return 'system'
 
-    async def get_session_assignment(self, session_id: int) -> Optional[Dict[str, Any]]:
-        """Get assignment for a session (numeric ID only)."""
+    async def get_session_assignment(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get assignment for a session."""
         query = "SELECT * FROM session_assignments WHERE session_id = :session_id"
         try:
             params = {"session_id": session_id}
@@ -282,7 +282,7 @@ class ChatLogDAO:
             logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
 
-    async def update_session_assignment(self, session_id: int, email: str, type: str, status: str):
+    async def update_session_assignment(self, session_id: str, email: str, type: str, status: str):
         """Update session assignment."""
         user_role_id = await self.get_user_role_id(email)
         if not user_role_id:
@@ -304,7 +304,7 @@ class ChatLogDAO:
             logger.log_db_query(query, {"session_id": session_id, "user_role_id": user_role_id, "status": status}, error=e)
             raise
 
-    async def create_session_assignment(self, session_db_id: int, email: str, type: str, status: str):
+    async def create_session_assignment(self, session_db_id: str, email: str, type: str, status: str):
         """Create session assignment."""
         user_role_id = await self.get_user_role_id(email)
         if not user_role_id:
@@ -582,7 +582,7 @@ class ChatLogDAO:
             logger.log_db_query(query, params, error=e)
             return 0
 
-    async def get_messages_for_sessions(self, session_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+    async def get_messages_for_sessions(self, session_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
         """Get messages for multiple sessions using single LEFT JOIN query."""
         if not session_ids: return {}
 
@@ -620,7 +620,7 @@ class ChatLogDAO:
             logger.error(f"Error fetching messages: {e}")
             return {}
 
-    async def get_latest_message_for_session(self, session_id: int) -> Optional[Dict[str, Any]]:
+    async def get_latest_message_for_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get the latest message for a single session."""
         query = """
             SELECT * FROM chat_messages
@@ -639,7 +639,7 @@ class ChatLogDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def get_latest_messages_batch(self, session_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    async def get_latest_messages_batch(self, session_ids: List[str]) -> Dict[str, Dict[str, Any]]:
         """Get the latest message for multiple sessions in a single query (OPTIMIZED)."""
         import time
         start_time = time.time()
@@ -727,7 +727,7 @@ class ChatLogDAO:
             return {}
 
 
-    async def get_session_messages(self, session_id: int) -> List[Dict[str, Any]]:
+    async def get_session_messages(self, session_id: str) -> List[Dict[str, Any]]:
         """Get all messages for a single session (full conversation)."""
         query = """
             SELECT * FROM chat_messages
@@ -745,7 +745,7 @@ class ChatLogDAO:
             logger.log_db_query(query, params, error=e)
             return []
 
-    async def create_message(self, session_db_id: int, role: str, content: str) -> int:
+    async def create_message(self, session_db_id: str, role: str, content: str) -> str:
         query = """
             INSERT INTO chat_messages (session_id, role, content, created_at, updated_at)
             VALUES (:session_db_id, :role, :content, NOW(), NOW())
@@ -764,12 +764,12 @@ class ChatLogDAO:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def increment_message_count(self, session_db_id: int):
+    async def increment_message_count(self, session_db_id: str):
         # Optional: if you have a message_count column in chat_sessions
         pass 
 
-    async def archive_session(self, session_id: int, status: str) -> bool:
-        """Archive a session using numeric ID only."""
+    async def archive_session(self, session_id: str, status: str) -> bool:
+        """Archive a session."""
         try:
             query = """
                 UPDATE chat_sessions SET archive_status = :status
@@ -787,12 +787,12 @@ class ChatLogDAO:
             return False
 
 
-    async def update_session_feedback(self, session_id: int, feedback_type: str) -> bool:
+    async def update_session_feedback(self, session_id: str, feedback_type: str) -> bool:
         """
         Update session feedback (thumbs up/down).
 
         Args:
-            session_id: Session ID (numeric only)
+            session_id: Session ID (UUID)
             feedback_type: 'positive' or 'negative'
 
         Returns:
@@ -819,8 +819,8 @@ class ChatLogDAO:
             return False
 
 
-    async def get_session_by_id(self, session_id: int) -> Optional[Dict[str, Any]]:
-        """Get session by numeric ID only."""
+    async def get_session_by_id(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get session by ID."""
         try:
             query = "SELECT * FROM chat_sessions WHERE id = :id"
             params = {"id": session_id}
@@ -842,10 +842,10 @@ class ChatLogDAO:
             return None
 
     # Alias for backward compatibility
-    async def get_session_by_id_with_messages(self, session_id: int) -> Optional[Dict[str, Any]]:
+    async def get_session_by_id_with_messages(self, session_id: str) -> Optional[Dict[str, Any]]:
         return await self.get_session_by_id(session_id)
 
-    async def get_assigned_agent_email(self, session_id: int) -> Optional[str]:
+    async def get_assigned_agent_email(self, session_id: str) -> Optional[str]:
         """Get the assigned agent's email for a session from session_assignments table."""
         query = """
             SELECT u.email
@@ -873,7 +873,7 @@ class ChatLogDAO:
             logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
 
-    async def get_assigned_agent_id(self, session_id: int) -> Optional[int]:
+    async def get_assigned_agent_id(self, session_id: str) -> Optional[str]:
         """Get the assigned agent's user ID for a session from session_assignments table."""
         query = """
             SELECT u.id
@@ -901,7 +901,7 @@ class ChatLogDAO:
             logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
 
-    async def get_user_id_by_email(self, email: str) -> Optional[int]:
+    async def get_user_id_by_email(self, email: str) -> Optional[str]:
         """Get user ID from email address."""
         query = "SELECT id FROM users WHERE email = :email"
         try:
@@ -921,7 +921,7 @@ class ChatLogDAO:
             logger.log_db_query(query, {"email": email}, error=e)
             return None
 
-    async def get_email_by_user_id(self, user_id: int) -> Optional[str]:
+    async def get_email_by_user_id(self, user_id: str) -> Optional[str]:
         """Get email from user ID."""
         query = "SELECT email FROM users WHERE id = :id"
         try:
@@ -941,11 +941,11 @@ class ChatLogDAO:
             logger.log_db_query(query, {"id": user_id}, error=e)
             return None
 
-    async def get_session_uuid(self, numeric_session_id: int) -> Optional[str]:
-        """Get session UUID from numeric session ID."""
+    async def get_session_uuid(self, session_db_id: str) -> Optional[str]:
+        """Get session UUID from session database ID."""
         query = "SELECT session_id FROM chat_sessions WHERE id = :id"
         try:
-            params = {"id": numeric_session_id}
+            params = {"id": session_db_id}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
@@ -957,13 +957,13 @@ class ChatLogDAO:
                     logger.log_db_query(query, params, None)
                     return None
         except Exception as e:
-            logger.error(f"❌ Error fetching UUID for session {numeric_session_id}: {e}", exc_info=True)
-            logger.log_db_query(query, {"id": numeric_session_id}, error=e)
+            logger.error(f"❌ Error fetching UUID for session {session_db_id}: {e}", exc_info=True)
+            logger.log_db_query(query, {"id": session_db_id}, error=e)
             return None
 
 
-    async def get_session_numeric_id(self, session_uuid: str) -> Optional[int]:
-        """Get numeric session ID from session UUID."""
+    async def get_session_numeric_id(self, session_uuid: str) -> Optional[str]:
+        """Get session database ID from session UUID."""
         query = "SELECT id FROM chat_sessions WHERE session_id = :uuid"
         try:
             params = {"uuid": session_uuid}
@@ -978,7 +978,7 @@ class ChatLogDAO:
                     logger.log_db_query(query, params, None)
                     return None
         except Exception as e:
-            logger.error(f"❌ Error fetching numeric ID for UUID {session_uuid}: {e}", exc_info=True)
+            logger.error(f"❌ Error fetching database ID for UUID {session_uuid}: {e}", exc_info=True)
             logger.log_db_query(query, {"uuid": session_uuid}, error=e)
             return None
 
@@ -1170,7 +1170,7 @@ class ChatLogDAO:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def mark_session_as_read(self, session_id: int) -> bool:
+    async def mark_session_as_read(self, session_id: str) -> bool:
         """Mark entire session as read (session-level, not per-message)."""
         query = "UPDATE chat_sessions SET is_session_read = true, updated_at = NOW() WHERE id = :session_id"
         try:
@@ -1193,7 +1193,7 @@ class ChatLogDAO:
             logger.error(f"❌ Failed to mark session {session_id} as read: {e}")
             return False
 
-    async def mark_session_as_unread(self, session_id: int) -> bool:
+    async def mark_session_as_unread(self, session_id: str) -> bool:
         """Mark entire session as unread (session-level)."""
         query = "UPDATE chat_sessions SET is_session_read = false, updated_at = NOW() WHERE id = :session_id"
         try:
@@ -1216,7 +1216,7 @@ class ChatLogDAO:
             logger.error(f"❌ Failed to mark session {session_id} as unread: {e}")
             return False
 
-    async def is_session_read(self, session_id: int) -> bool:
+    async def is_session_read(self, session_id: str) -> bool:
         """Check if session is read."""
         query = "SELECT is_session_read FROM chat_sessions WHERE id = :session_id"
         try:

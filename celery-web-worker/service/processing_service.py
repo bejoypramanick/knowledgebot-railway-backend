@@ -892,7 +892,7 @@ class ProcessingService:
         logger.info(f"✅ Resolved FileSearch store: {store}")
         return store
 
-    async def _resolveUserRoleID(self, user_email: str, user_role_id: int = None) -> Optional[int]:
+    async def _resolveUserRoleID(self, user_email: str, user_role_id: str = None) -> Optional[str]:
         """Resolve user_role_id (allow NULL if not found)"""
         if user_role_id:
             logger.info(f"✅ Using provided user_role_id: {user_role_id}")
@@ -954,7 +954,7 @@ class ProcessingService:
                 pass
             await self._deleteTemporaryFile(temp_file)
 
-    async def _buildGeminiUploadConfig(self, doc_name: str, website_id: int, page_url: str) -> Dict:
+    async def _buildGeminiUploadConfig(self, doc_name: str, website_id: str, page_url: str) -> Dict:
         """Build Gemini upload configuration for markdown content"""
         return {
             'display_name': doc_name,
@@ -1056,7 +1056,7 @@ class ProcessingService:
             job_context: JobContext,
             crawl_config: CrawlConfig,
             processed_content_s3_key: str = None
-        ) -> Optional[int]:
+        ) -> Optional[str]:
             """Record single page in database"""
             metrics = calculate_metrics(page_data.markdown)
 
@@ -1144,7 +1144,7 @@ class ProcessingService:
 
     async def _updateWebsiteWithPageData(
         self,
-        website_id: int,
+        website_id: str,
         page_data: PageData,
         upload_result: UploadResult,
         file_size: int,

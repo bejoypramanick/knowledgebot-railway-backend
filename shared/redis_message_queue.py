@@ -102,7 +102,7 @@ class RedisMessageQueue:
     def publish_file_task(
         self,
         celery_task_id: str,
-        file_id: Optional[int] = None
+        file_id: Optional[str] = None
     ) -> bool:
         """
         Publish file processing task to queue
@@ -207,7 +207,7 @@ class RedisMessageQueue:
     def publish_web_task(
         self,
         celery_task_id: str,
-        website_id: int = None,
+        website_id: str = None,
         url: str = None,
         max_depth: int = 2,
         max_pages: int = 100,
@@ -273,7 +273,7 @@ class RedisMessageQueue:
 
     def publish_web_result(
         self,
-        website_id: int,
+        website_id: str,
         celery_task_id: str,
         status: str,  # 'completed', 'failed', 'cancelled'
         result: Dict[str, Any] = None,

@@ -1087,19 +1087,19 @@ async def request_human_agent_connection(
     # Set workflow context for tracing human-agent-workflow through all logs
     set_workflow("human-agent-workflow")
 
-    # Get numeric session ID from ChatSessionDeps
+    # Get database session ID from ChatSessionDeps
     # ctx.deps.session_id is the UUID from frontend/cookie
-    # ctx.deps.numeric_session_id is the numeric ID from database (created on first message)
-    session_numeric_id = ctx.deps.numeric_session_id
+    # ctx.deps.session_db_id is the database ID (created on first message)
+    session_db_id = ctx.deps.session_db_id
     session_uuid = ctx.deps.session_id
 
-    if not session_numeric_id:
-        logger.error(f"❌ No numeric session ID available for session {session_uuid}")
+    if not session_db_id:
+        logger.error(f"❌ No database session ID available for session {session_uuid}")
         clear_workflow()
         return "I encountered an error: Session not properly initialized. Please try again."
 
-    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} (numeric: {session_numeric_id}) with reason: {reason}")
-    logger.info(f"📍 Tool execution starting - session_numeric_id={session_numeric_id}, session_uuid={session_uuid}")
+    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} (db_id: {session_db_id}) with reason: {reason}")
+    logger.info(f"📍 Tool execution starting - session_db_id={session_db_id}, session_uuid={session_uuid}")
 
     # Check if HIL is enabled before attempting to connect
     try:

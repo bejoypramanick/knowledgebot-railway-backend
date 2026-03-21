@@ -133,17 +133,11 @@ class FileService:
             from sqlalchemy import text
             from knowledgebase_ingestion.core.ai import get_genai_client
 
-            # Convert db_id to integer if it's a numeric string
-            try:
-                numeric_id = int(db_id)
-            except ValueError:
-                numeric_id = db_id
-
             async with get_db_session() as session:
                 # First, get the gemini_file_name before deleting
                 result = await session.execute(
                     text("SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = :id"),
-                    {"id": numeric_id}
+                    {"id": db_id}
                 )
                 record = result.mappings().first()
 
@@ -161,7 +155,7 @@ class FileService:
                 # This preserves audit trail and prevents orphaned references
                 await session.execute(
                     text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
-                    {"id": numeric_id}
+                    {"id": db_id}
                 )
                 await session.commit()
                 logger.info(f"✅ Marked old file record as deleted in database: {db_id}")
@@ -170,7 +164,7 @@ class FileService:
             logger.error(f"❌ Error deleting existing file record: {e}")
             return False
 
-    async def get_admin_user_role_id(self, user_email: str) -> Optional[int]:
+    async def get_admin_user_role_id(self, user_email: str) -> Optional[str]:
         """Get user_role_id for admin role only - only admins can upload files
 
         Args:
@@ -256,18 +250,11 @@ class FileService:
 
             logger.info(f"🔍 Looking for file record with ID: {file_id}")
 
-            # Convert file_id to integer if it's a numeric string
-            try:
-                numeric_id = int(file_id)
-            except ValueError:
-                # If not a number, use as-is (might be a Gemini file name)
-                numeric_id = file_id
-
             async with get_db_session() as session:
                 # Look up in file_uploads table
                 result = await session.execute(
                     text("SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = :id"),
-                    {"id": numeric_id}
+                    {"id": file_id}
                 )
                 record = result.mappings().first()
                 if record:
@@ -282,7 +269,7 @@ class FileService:
                 # Look up in scraped_websites table
                 result = await session.execute(
                     text("SELECT gemini_file_name, original_url, metadata FROM scraped_websites WHERE id = :id"),
-                    {"id": numeric_id}
+                    {"id": file_id}
                 )
                 record = result.mappings().first()
                 if record:
@@ -306,15 +293,8 @@ class FileService:
             from shared.sqlalchemy_db import get_db_session
             from sqlalchemy import text
 
-            # Convert file_id to integer if it's a numeric string
-            try:
-                numeric_id = int(file_id)
-            except ValueError:
-                # If not a number, use as-is
-                numeric_id = file_id
-
             async with get_db_session() as session:
-                await session.execute(text(f"DELETE FROM {table_name} WHERE id = :id"), {"id": numeric_id})
+                await session.execute(text(f"DELETE FROM {table_name} WHERE id = :id"), {"id": file_id})
                 await session.commit()
         except Exception as e:
             logger.error(f"Error deleting file record: {e}")
@@ -524,7 +504,7 @@ class FileService:
                              file_size, sha256_hash, gemini_state, created_at, version
                              FROM file_uploads
                              WHERE id = :id"""),
-                    {"id": int(file_id)}  # Convert string to integer for database query
+                    {"id": file_id}
                 )
                 file_record = result.mappings().first()
 
@@ -565,7 +545,7 @@ class FileService:
                     return False
 
                 # Delete from database
-                await session.execute(text("DELETE FROM file_uploads WHERE id = :id"), {"id": int(file_id)})
+                await session.execute(text("DELETE FROM file_uploads WHERE id = :id"), {"id": file_id})
                 await session.commit()
 
                 logger.info(f"File deleted from database: {file_id}")
@@ -606,7 +586,7 @@ class FileService:
             async with get_db_session() as session:
                 result = await session.execute(
                     text("SELECT id, original_filename, gemini_file_name, metadata, celery_task_id FROM file_uploads WHERE id = :id"),
-                    {"id": int(file_id)}
+                    {"id": file_id}
                 )
                 file_record = result.mappings().first()
 
@@ -733,7 +713,7 @@ class FileService:
                 async with get_db_session() as session:
                     await session.execute(
                         text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
-                        {"id": int(file_id)}
+                        {"id": file_id}
                     )
                     await session.commit()
                 logger.info(f"✅ File marked as deleted in database (record retained for audit trail)")
@@ -811,7 +791,7 @@ class FileService:
             async with get_db_session() as session:
                 result = await session.execute(
                     text("SELECT id, original_url, metadata, celery_task_id, parent_id FROM scraped_websites WHERE id = :id"),
-                    {"id": int(website_id)}
+                    {"id": website_id}
                 )
                 website_record = result.mappings().first()
 
@@ -828,7 +808,7 @@ class FileService:
                 if website_record['parent_id'] is None:
                     result = await session.execute(
                         text("SELECT id, original_url, metadata, celery_task_id FROM scraped_websites WHERE parent_id = :parent_id"),
-                        {"parent_id": int(website_id)}
+                        {"parent_id": website_id}
                     )
                     child_pages = result.mappings().all()
 
@@ -1006,14 +986,14 @@ class FileService:
                         # Mark the website/page as deleted
                         await conn.execute(
                             "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
-                            int(website_id)
+                            website_id
                         )
 
                         # Mark all child pages as deleted (only if this is a parent)
                         if child_pages:
                             await conn.execute(
                                 "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE parent_id = $1",
-                                int(website_id)
+                                website_id
                             )
 
                 logger.info(f"✅ {'Website and all child pages' if child_pages else 'Page'} marked as deleted")

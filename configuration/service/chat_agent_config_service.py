@@ -316,7 +316,7 @@ class ChatAgentConfigService:
             logger.error(f"Error getting admin emails: {e}")
             raise
 
-    async def remove_admin(self, user_id: int) -> bool:
+    async def remove_admin(self, user_id: str) -> bool:
         """Remove an admin user by user ID"""
         try:
             result = await self._chatAgent_dao.remove_admin_by_id(user_id)
@@ -326,7 +326,7 @@ class ChatAgentConfigService:
             logger.error(f"Error removing admin user {user_id}: {e}")
             raise
 
-    async def remove_human_agent(self, user_id: int) -> bool:
+    async def remove_human_agent(self, user_id: str) -> bool:
         """Remove a human agent by user ID"""
         try:
             result = await self._chatAgent_dao.remove_human_agent_by_id(user_id)

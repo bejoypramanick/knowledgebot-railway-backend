@@ -111,7 +111,7 @@ class RedisChatStore:
     async def get_or_create_session(
         self,
         session_uuid: str,
-        user_role_id: int = None,
+        user_role_id: str = None,
         metadata: Dict[str, Any] = None
     ) -> Optional[Dict[str, Any]]:
         """
@@ -137,7 +137,7 @@ class RedisChatStore:
             session_data = {
                 "db_id": "",  # Will be populated after PG INSERT
                 "session_uuid": session_uuid,
-                "user_role_id": str(user_role_id) if user_role_id else "",
+                "user_role_id": user_role_id if user_role_id else "",
                 "started_at": now,
                 "last_activity_at": now,
                 "is_active": "true",
@@ -172,12 +172,12 @@ class RedisChatStore:
             logger.warning(f"Redis get_session failed for {session_uuid}: {e}")
             return None
 
-    async def set_session_db_id(self, session_uuid: str, db_id: int) -> bool:
-        """Set the PG numeric ID on a Redis session after INSERT."""
+    async def set_session_db_id(self, session_uuid: str, db_id: str) -> bool:
+        """Set the PG database ID on a Redis session after INSERT."""
         try:
             await self._ensure_client()
             session_key = SESSION_KEY.format(session_uuid)
-            await self._client.hset(session_key, "db_id", str(db_id))
+            await self._client.hset(session_key, "db_id", db_id)
             logger.debug(f"Redis session db_id SET: {session_uuid} -> {db_id}")
             return True
         except Exception as e:
@@ -409,9 +409,9 @@ class RedisChatStore:
     def _deserialize_session(self, data: Dict[str, str]) -> Dict[str, Any]:
         """Convert Redis hash string values to proper types."""
         return {
-            "db_id": int(data["db_id"]) if data.get("db_id") else None,
+            "db_id": data["db_id"] if data.get("db_id") else None,
             "session_uuid": data.get("session_uuid", ""),
-            "user_role_id": int(data["user_role_id"]) if data.get("user_role_id") else None,
+            "user_role_id": data["user_role_id"] if data.get("user_role_id") else None,
             "started_at": data.get("started_at"),
             "last_activity_at": data.get("last_activity_at"),
             "is_active": data.get("is_active", "true") == "true",

@@ -75,7 +75,7 @@ class AdminAccount(BaseModel):
 
 class UserEntry(BaseModel):
     """User entry with either ID (existing user) or email (new user)"""
-    id: Optional[int] = None
+    id: Optional[str] = None
     email: Optional[str] = None
     
     class Config:

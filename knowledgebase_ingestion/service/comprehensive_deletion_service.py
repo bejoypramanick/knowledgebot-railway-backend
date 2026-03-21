@@ -55,7 +55,7 @@ class ComprehensiveDeletionService:
 
     async def delete_item(
         self,
-        item_id: int,
+        item_id: str,
         item_type: ItemType,
         hard_delete: bool = False
     ) -> Dict[str, Any]:
@@ -123,7 +123,7 @@ class ComprehensiveDeletionService:
 
     async def _delete_file_comprehensive(
         self,
-        file_id: int,
+        file_id: str,
         hard_delete: bool,
         deletion_report: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -243,7 +243,7 @@ class ComprehensiveDeletionService:
 
     async def _delete_website_comprehensive(
         self,
-        website_id: int,
+        website_id: str,
         hard_delete: bool,
         deletion_report: Dict[str, Any]
     ) -> Dict[str, Any]:

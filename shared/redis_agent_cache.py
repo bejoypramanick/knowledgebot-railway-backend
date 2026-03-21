@@ -17,8 +17,8 @@ logger = get_otel_logger(__name__, "shared")
 _agent_cache_client: Optional[redis.Redis] = None
 
 CACHE_KEY_PREFIX = "session:assigned_agent:"
-USER_EMAIL_PREFIX = "user:email:"      # email → numeric ID
-USER_ID_PREFIX = "user:id:"            # numeric ID → email
+USER_EMAIL_PREFIX = "user:email:"      # email → user database ID
+USER_ID_PREFIX = "user:id:"            # user database ID → email
 ADMIN_IDS_KEY = "cache:admin_ids"      # cached list of admin IDs
 DEFAULT_TTL = 3600  # 1 hour
 USER_CACHE_TTL = 600  # 10 minutes for user lookups
@@ -114,7 +114,7 @@ async def set_assigned_agent(session_uuid: str, agent_value, ttl: int = DEFAULT_
 
     Args:
         session_uuid: Session UUID
-        agent_value: Agent ID (int) or email (str) to cache
+        agent_value: Agent ID (str) or email (str) to cache
         ttl: Cache TTL in seconds (default 1 hour)
 
     Returns:
@@ -154,29 +154,29 @@ async def clear_assigned_agent(session_uuid: str) -> bool:
 
 # --- User identity cache (email ↔ ID) ---
 
-async def get_cached_user_id(email: str) -> Optional[int]:
-    """Get cached numeric user ID from email."""
+async def get_cached_user_id(email: str) -> Optional[str]:
+    """Get cached database user ID from email."""
     try:
         client = await get_agent_cache_redis()
         value = await client.get(f"{USER_EMAIL_PREFIX}{email}")
-        return int(value) if value else None
+        return value if value else None
     except Exception as e:
         logger.warning(f"User ID cache GET failed for {email}: {e}")
         return None
 
 
-async def set_cached_user_id(email: str, user_id: int) -> None:
-    """Cache email → numeric ID and ID → email bidirectionally."""
+async def set_cached_user_id(email: str, user_id: str) -> None:
+    """Cache email → database ID and ID → email bidirectionally."""
     try:
         client = await get_agent_cache_redis()
-        await client.set(f"{USER_EMAIL_PREFIX}{email}", str(user_id), ex=USER_CACHE_TTL)
+        await client.set(f"{USER_EMAIL_PREFIX}{email}", user_id, ex=USER_CACHE_TTL)
         await client.set(f"{USER_ID_PREFIX}{user_id}", email, ex=USER_CACHE_TTL)
     except Exception as e:
         logger.warning(f"User ID cache SET failed for {email}: {e}")
 
 
-async def get_cached_user_email(user_id: int) -> Optional[str]:
-    """Get cached email from numeric user ID."""
+async def get_cached_user_email(user_id: str) -> Optional[str]:
+    """Get cached email from database user ID."""
     try:
         client = await get_agent_cache_redis()
         return await client.get(f"{USER_ID_PREFIX}{user_id}")

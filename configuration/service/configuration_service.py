@@ -326,7 +326,7 @@ class ConfigurationService:
             logger.error(f"Error adding human agent: {e}")
             raise
 
-    async def remove_human_agent(self, user_id: int) -> bool:
+    async def remove_human_agent(self, user_id: str) -> bool:
         """Remove a human agent by user ID"""
         try:
             return await self._chat_agent_dao.remove_human_agent_by_id(user_id)
@@ -342,7 +342,7 @@ class ConfigurationService:
             logger.error(f"Error adding admin: {e}")
             raise
 
-    async def remove_admin(self, user_id: int) -> bool:
+    async def remove_admin(self, user_id: str) -> bool:
         """Remove an admin by user ID"""
         try:
             return await self._chat_agent_dao.remove_admin_by_id(user_id)

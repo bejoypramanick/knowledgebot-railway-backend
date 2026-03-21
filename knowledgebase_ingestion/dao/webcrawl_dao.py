@@ -15,7 +15,7 @@ class WebCrawlDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def create_website_record(self, url: str, user_role_id: int = None, task_id: str = None) -> Optional[int]:
+    async def create_website_record(self, url: str, user_role_id: str = None, task_id: str = None) -> Optional[str]:
         """Create website record with pending status."""
         import json
         from urllib.parse import urlparse
@@ -89,7 +89,7 @@ class WebCrawlDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def get_website_by_id(self, website_id: int) -> Optional[Dict[str, Any]]:
+    async def get_website_by_id(self, website_id: str) -> Optional[Dict[str, Any]]:
         """Get website record by ID."""
         query = """
             SELECT id, original_url, processing_status, error_message, created_at, updated_at
@@ -153,7 +153,7 @@ class WebCrawlDAO:
             logger.log_db_query(query, error=e)
             return []
 
-    async def update_website_status(self, website_id: int, status: str, error_message: str = None) -> bool:
+    async def update_website_status(self, website_id: str, status: str, error_message: str = None) -> bool:
         """Update website processing status."""
         query = """
             UPDATE scraped_websites
@@ -191,7 +191,7 @@ class WebCrawlDAO:
             logger.log_db_query(query, error=e)
             return 0
 
-    async def delete_website_by_id(self, website_id: int) -> bool:
+    async def delete_website_by_id(self, website_id: str) -> bool:
         """Delete website record by ID."""
         query = "DELETE FROM scraped_websites WHERE id = :website_id"
         params = {"website_id": website_id}
@@ -206,7 +206,7 @@ class WebCrawlDAO:
             logger.log_db_query(query, params, error=e)
             return False
 
-    async def update_celery_task_id(self, website_id: int, task_id: str) -> bool:
+    async def update_celery_task_id(self, website_id: str, task_id: str) -> bool:
         """Update celery_task_id for a website record."""
         query = """
             UPDATE scraped_websites
@@ -365,7 +365,7 @@ class WebCrawlDAO:
             logger.log_db_query(query, error=e)
             return []
 
-    async def _get_website_children(self, session, parent_id: int, level: int = 0, include_inactive: bool = False) -> List[Dict[str, Any]]:
+    async def _get_website_children(self, session, parent_id: str, level: int = 0, include_inactive: bool = False) -> List[Dict[str, Any]]:
         """
         Recursively fetch all children of a website.
 

@@ -90,7 +90,7 @@ class AgentEventBroadcaster:
         if self.redis_client is None:
             self.redis_client = await get_pubsub_redis()
     
-    def _get_agent_channel(self, agent_id: int) -> str:
+    def _get_agent_channel(self, agent_id: str) -> str:
         """Get Redis channel name for specific agent (uses user ID, not email)"""
         return f"agent:events:{agent_id}"
     
@@ -102,7 +102,7 @@ class AgentEventBroadcaster:
         """Get Redis channel name for specific session (customer + agent)"""
         return f"session:events:{session_id}"
     
-    async def publish_to_agent(self, agent_id: int, event_data: Dict[str, Any]) -> bool:
+    async def publish_to_agent(self, agent_id: str, event_data: Dict[str, Any]) -> bool:
         """
         Publish event to specific agent's channel.
         
@@ -187,7 +187,7 @@ class AgentEventBroadcaster:
             logger.error(f"❌ Error publishing to session {session_id}: {e}")
             return False
     
-    async def publish_for_session(self, session_id: str, event_data: Dict[str, Any], assigned_agent_id: Optional[int] = None) -> bool:
+    async def publish_for_session(self, session_id: str, event_data: Dict[str, Any], assigned_agent_id: Optional[str] = None) -> bool:
         """
         Publish event to all relevant channels for a session.
         
@@ -327,7 +327,7 @@ class AgentEventSubscriber:
     Uses user IDs instead of emails for channel names.
     """
     
-    def __init__(self, agent_id: int, agent_email: str = None, role: str = 'human_agent'):
+    def __init__(self, agent_id: str, agent_email: str = None, role: str = 'human_agent'):
         self.agent_id = agent_id
         self.agent_email = agent_email  # For logging only
         self.role = role
@@ -436,7 +436,7 @@ def get_broadcaster() -> AgentEventBroadcaster:
 
 
 # Convenience functions
-async def broadcast_event_to_agent(agent_id: int, event_data: Dict[str, Any]) -> bool:
+async def broadcast_event_to_agent(agent_id: str, event_data: Dict[str, Any]) -> bool:
     """Broadcast event to specific agent (uses user ID)"""
     broadcaster = get_broadcaster()
     return await broadcaster.publish_to_agent(agent_id, event_data)
@@ -454,7 +454,7 @@ async def broadcast_event_to_session(session_id: str, event_data: Dict[str, Any]
     return await broadcaster.publish_to_session(session_id, event_data)
 
 
-async def broadcast_event_for_session(session_id: str, event_data: Dict[str, Any], assigned_agent_id: Optional[int] = None) -> bool:
+async def broadcast_event_for_session(session_id: str, event_data: Dict[str, Any], assigned_agent_id: Optional[str] = None) -> bool:
     """Broadcast event for specific session (all channels, uses user ID for agent)"""
     broadcaster = get_broadcaster()
     return await broadcaster.publish_for_session(session_id, event_data, assigned_agent_id)

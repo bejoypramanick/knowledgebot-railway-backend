@@ -108,7 +108,7 @@ class AuthDAO:
             logger.log_db_query(str(query), params, error=e)
             raise  # ← Raise exception instead of returning []
 
-    async def get_user_by_role_id(self, user_role_id: int) -> Optional[Dict[str, Any]]:
+    async def get_user_by_role_id(self, user_role_id: str) -> Optional[Dict[str, Any]]:
         """Get user and role information by user_role_id."""
         query = text("""
             SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.created_at,

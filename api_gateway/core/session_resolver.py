@@ -1,17 +1,17 @@
 """
 Session UUID to Numeric ID Resolver for API Gateway
 
-Handles conversion of chat session UUIDs (e.g., "session_xxx") to numeric database IDs.
+Handles conversion of chat session UUIDs (e.g., "session_xxx") to database IDs.
 This resolver runs once at the API Gateway level, so internal services don't need to
-perform lookups - they always receive numeric IDs.
+perform lookups - they always receive database IDs.
 
 Architecture:
 - External API (UI) uses: UUID session IDs (e.g., "session_1772521413864_5o610dbd1")
-- Internal services use: Numeric database IDs (e.g., 505)
-- API Gateway translates UUID → Numeric ID once, on entry
-- Internal services trust the numeric ID without further lookup
+- Internal services use: Database IDs (UUID strings after PG18 migration)
+- API Gateway translates session UUID → database ID once, on entry
+- Internal services trust the database ID without further lookup
 
-Uses Redis DB 5 for session UUID→numeric ID cache (dedicated, separate from Pub/Sub DB 3).
+Uses Redis DB 5 for session UUID→database ID cache (dedicated, separate from Pub/Sub DB 3).
 """
 
 from typing import Optional
@@ -20,9 +20,9 @@ from api_gateway.core.logging_config import get_railway_logger
 logger = get_railway_logger(__name__)
 
 
-async def resolve_session_uuid_to_numeric_id(session_uuid: str) -> Optional[int]:
+async def resolve_session_uuid_to_numeric_id(session_uuid: str) -> Optional[str]:
     """
-    Resolve chat session UUID to numeric database ID.
+    Resolve chat session UUID to database ID.
 
     Uses Redis DB 5 cache first (fast), falls back to database query.
     Caches result for 1 hour to avoid repeated lookups.
@@ -31,16 +31,16 @@ async def resolve_session_uuid_to_numeric_id(session_uuid: str) -> Optional[int]
         session_uuid: Session UUID like "session_1772521413864_5o610dbd1"
 
     Returns:
-        Numeric session ID (e.g., 505) or None if not found
+        Database session ID (UUID string) or None if not found
     """
     try:
-        from shared.redis_session_id_cache import get_numeric_id, set_numeric_id
+        from shared.redis_session_id_cache import get_session_db_id, set_session_db_id
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text
 
         # Step 1: Try Redis DB 5 cache first (very fast)
         try:
-            cached_id = await get_numeric_id(session_uuid)
+            cached_id = await get_session_db_id(session_uuid)
             if cached_id is not None:
                 logger.debug(f"Resolved {session_uuid} from Redis cache (DB 5) -> {cached_id}")
                 return cached_id
@@ -59,7 +59,7 @@ async def resolve_session_uuid_to_numeric_id(session_uuid: str) -> Optional[int]
 
                     # Step 3: Cache the mapping in Redis DB 5 (TTL: 1 hour)
                     try:
-                        await set_numeric_id(session_uuid, numeric_id)
+                        await set_session_db_id(session_uuid, numeric_id)
                         logger.debug(f"Cached {session_uuid} -> {numeric_id} in Redis DB 5")
                     except Exception as cache_error:
                         logger.warning(f"Failed to cache UUID mapping: {cache_error}")

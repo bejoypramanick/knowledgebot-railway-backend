@@ -34,40 +34,28 @@ from ..schemas.models import (
 logger = get_otel_logger("configuration_router", "configuration")
 router = APIRouter()
 
-def get_session_id_from_context(request: Request, session_id: str | int) -> int:
+def get_session_id_from_context(request: Request, session_id: str) -> str:
     """
-    Get the numeric session ID from request context.
+    Get the session database ID from request context.
 
-    Internal services ONLY work with numeric session IDs.
-    API Gateway always provides numeric session_id in request body/params.
+    Internal services work with session database IDs (UUIDs after PG18 migration).
+    API Gateway provides session_id in request body/params.
 
     Args:
         request: FastAPI Request object
-        session_id: Numeric session ID (int or numeric string, NEVER UUID)
+        session_id: Session database ID (string)
 
     Returns:
-        Numeric session ID (int)
+        Session database ID (str)
 
     Raises:
         HTTPException: If session ID is invalid
     """
-    # Handle int directly
-    if isinstance(session_id, int):
+    if isinstance(session_id, str) and session_id:
         return session_id
 
-    # Parse numeric string to int
-    if isinstance(session_id, str):
-        if session_id.isdigit():
-            numeric_id = int(session_id)
-            logger.debug(f"✅ Converted numeric string '{session_id}' to int: {numeric_id}")
-            return numeric_id
-        else:
-            # Should never receive UUID here - API Gateway should have converted it
-            logger.error(f"❌ Invalid session ID format (expected numeric, got): {session_id}")
-            raise HTTPException(status_code=400, detail="session_id must be numeric (API Gateway should convert UUID)")
-
     logger.error(f"❌ Could not parse session ID: {session_id}")
-    raise HTTPException(status_code=400, detail=f"Invalid session ID type: {type(session_id)}")
+    raise HTTPException(status_code=400, detail=f"Invalid session ID: {session_id}")
 
 @router.get("/version")
 async def get_version():
@@ -672,7 +660,7 @@ async def add_admin_user(request_data: AdminManagementRequest, request: Request)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/admins/{user_id}")
-async def remove_admin_user(user_id: int, request: Request):
+async def remove_admin_user(user_id: str, request: Request):
     """Remove an admin user by user ID"""
     try:
         result = await config_service.remove_admin(user_id)
@@ -702,7 +690,7 @@ async def add_human_agent(request_data: AdminManagementRequest, request: Request
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/human-agents/{user_id}")
-async def remove_human_agent(user_id: int, request: Request):
+async def remove_human_agent(user_id: str, request: Request):
     """Remove a human agent by user ID"""
     try:
         result = await config_service.remove_human_agent(user_id)
@@ -729,11 +717,11 @@ async def get_chat_logs():
 async def delete_chat_log(session_id: str, request: Request):
     """Delete a chat log"""
     try:
-        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
-        numeric_session_id = get_session_id_from_context(request, session_id)
-        logger.info(f"🔍 Delete chat log endpoint: session_id={numeric_session_id}")
+        # Get session database ID
+        session_db_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 Delete chat log endpoint: session_id={session_db_id}")
 
-        result = await chat_log_service.delete_chat_log(numeric_session_id, "admin@example.com")
+        result = await chat_log_service.delete_chat_log(session_db_id, "admin@example.com")
         return {"success": True, "message": "Chat log deleted successfully"}
     except HTTPException:
         raise
@@ -1108,17 +1096,8 @@ async def set_current_customer_session(request: Request):
 
         logger.info(f"🔄 Setting current customer session: {session_id}")
 
-        # Convert numeric ID to UUID if needed
-        if isinstance(session_id, int) or (isinstance(session_id, str) and session_id.isdigit()):
-            # Numeric ID - look up UUID from database
-            session_id = int(session_id)
-            session_data = await chat_log_service.dao.get_session_by_id(session_id)
-            if not session_data:
-                raise HTTPException(status_code=404, detail=f"Chat session {session_id} not found")
-            session_uuid = session_data.get("session_id")
-        else:
-            # Already UUID
-            session_uuid = session_id
+        # Session IDs are always UUIDs now
+        session_uuid = str(session_id)
 
         logger.info(f"✅ Found session UUID: {session_uuid}")
 
@@ -1419,12 +1398,11 @@ async def send_customer_message(request: Request):
     """Send a message from a customer to an assigned agent (no AI processing)
 
     Request body: {
-        session_id: int (numeric session ID - converted by API Gateway from UUID),
+        session_id: str (session database ID),
         text: str (message text)
     }
 
-    NOTE: API Gateway converts UUID→numeric before forwarding here.
-    This endpoint uses numeric ID for all DB operations and looks up
+    This endpoint uses the session database ID for all DB operations and looks up
     the UUID only for Redis channel broadcasting.
     """
     try:
@@ -1440,25 +1418,22 @@ async def send_customer_message(request: Request):
         if not session_id_raw:
             raise HTTPException(status_code=400, detail="session_id is required")
 
-        try:
-            numeric_session_id = int(session_id_raw)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail=f"session_id must be numeric (API Gateway converts UUID). Got: {session_id_raw}")
+        session_db_id = str(session_id_raw)
 
         # Look up UUID via service (for Redis channel broadcasting)
-        session_uuid = await chat_log_service.get_session_uuid(numeric_session_id)
+        session_uuid = await chat_log_service.get_session_uuid(session_db_id)
         if not session_uuid:
-            raise HTTPException(status_code=404, detail=f"Session not found: {numeric_session_id}")
-        logger.info(f"✅ Numeric ID {numeric_session_id} → UUID {session_uuid}")
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_db_id}")
+        logger.info(f"✅ Session DB ID {session_db_id} → UUID {session_uuid}")
 
         # Check if agent is assigned (Redis DB4 cache + DB fallback via service)
-        assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
+        assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, session_db_id)
 
         if not assigned_agent_id:
             raise HTTPException(status_code=400, detail="No agent assigned to this session. Use chatbot API instead.")
 
         # Save customer message to database
-        message_id = await chat_log_service.send_customer_message(numeric_session_id, text)
+        message_id = await chat_log_service.send_customer_message(session_db_id, text)
 
         # Prepare event data - use UUID for Redis channel matching
         import datetime
@@ -1471,7 +1446,7 @@ async def send_customer_message(request: Request):
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
 
-        logger.info(f"📨 Broadcasting customer message: numeric={numeric_session_id}, uuid={session_uuid}")
+        logger.info(f"📨 Broadcasting customer message: session_db_id={session_db_id}, uuid={session_uuid}")
 
         from shared.redis_pubsub_manager import broadcast_event_to_agent, broadcast_event_to_all_agents, broadcast_event_to_session
 
@@ -1508,7 +1483,7 @@ async def send_agent_message(request: Request):
     """Send a message from an agent or customer in a chat session
 
     Request body: {
-        session_id: int (numeric session ID),
+        session_id: str (session database ID),
         text: str (message text),
         agent_id?: str (optional, defaults to X-User-Email header),
         sender?: str (optional, "agent" or "user", defaults to "agent")
@@ -1521,10 +1496,7 @@ async def send_agent_message(request: Request):
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required in request body")
 
-        try:
-            numeric_session_id = int(session_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+        session_db_id = str(session_id)
 
         text = body.get("text", "")
         sender_type = body.get("sender", "agent")  # "agent" or "user" (customer)
@@ -1543,18 +1515,18 @@ async def send_agent_message(request: Request):
         if sender_id_int is None:
             raise HTTPException(status_code=400, detail="Could not resolve user identity from authenticated email.")
 
-        logger.info(f"🔍 POST /admin/chat-sessions/messages called for session {numeric_session_id}, sender: {sender_email} (ID: {sender_id_int})")
+        logger.info(f"🔍 POST /admin/chat-sessions/messages called for session {session_db_id}, sender: {sender_email} (ID: {sender_id_int})")
 
         # Get session UUID via service (for SSE channel broadcasting)
-        session_uuid = await chat_log_service.get_session_uuid(numeric_session_id)
+        session_uuid = await chat_log_service.get_session_uuid(session_db_id)
         if not session_uuid:
-            raise HTTPException(status_code=404, detail=f"Session {numeric_session_id} not found")
-        logger.info(f"🔍 [SEND_MESSAGE] Numeric ID: {numeric_session_id}, UUID: {session_uuid}")
+            raise HTTPException(status_code=404, detail=f"Session {session_db_id} not found")
+        logger.info(f"🔍 [SEND_MESSAGE] Session DB ID: {session_db_id}, UUID: {session_uuid}")
 
         # Authorization check BEFORE saving — all lookups are Redis-cached
         if sender_type == "agent":
             # Get assigned agent ID via service (Redis cache + DB fallback)
-            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
+            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, session_db_id)
 
             # Compare numeric IDs for authorization
             if sender_id_int != assigned_agent_id:
@@ -1562,16 +1534,16 @@ async def send_agent_message(request: Request):
                 admin_ids = await chat_log_service.get_admin_ids_cached()
                 is_sender_admin = sender_id_int in admin_ids
                 if is_sender_admin:
-                    logger.warning(f"⚠️ Admin ID {sender_id_int} attempted to reply to session {numeric_session_id} assigned to agent ID {assigned_agent_id}")
+                    logger.warning(f"⚠️ Admin ID {sender_id_int} attempted to reply to session {session_db_id} assigned to agent ID {assigned_agent_id}")
                     raise HTTPException(status_code=403, detail="Only the assigned agent can reply to this chat. You can view messages as read-only.")
                 else:
-                    logger.warning(f"⚠️ User ID {sender_id_int} attempted to send message to session {numeric_session_id} assigned to agent ID {assigned_agent_id}")
+                    logger.warning(f"⚠️ User ID {sender_id_int} attempted to send message to session {session_db_id} assigned to agent ID {assigned_agent_id}")
                     raise HTTPException(status_code=403, detail="Only the assigned agent can send messages to this chat")
 
-            logger.info(f"✅ Authorization check passed: ID {sender_id_int} is assigned to session {numeric_session_id}")
+            logger.info(f"✅ Authorization check passed: ID {sender_id_int} is assigned to session {session_db_id}")
 
         # Save message to database (only after auth passes)
-        message_id = await chat_log_service.send_agent_message(numeric_session_id, sender_email, text)
+        message_id = await chat_log_service.send_agent_message(session_db_id, sender_email, text)
 
         # Prepare event data
         import datetime
@@ -1610,7 +1582,7 @@ async def send_agent_message(request: Request):
 
         elif sender_type == "user":
             # Customer sent message → Notify assigned agent AND all admins
-            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
+            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, session_db_id)
 
             if assigned_agent_id:
                 admin_ids = await chat_log_service.get_admin_ids_cached()
@@ -1632,7 +1604,7 @@ async def send_agent_message(request: Request):
         return {
             "success": True,
             "message_id": str(message_id),
-            "session_id": str(numeric_session_id)
+            "session_id": str(session_db_id)
         }
     except HTTPException:
         raise
@@ -1654,11 +1626,11 @@ async def end_agent_session(request: Request):
             raise HTTPException(status_code=400, detail="session_id is required in request body")
 
         # Resolve session ID (accepts both numeric and UUID formats) via service
-        numeric_session_id, session_uuid = await chat_log_service.resolve_session_id(session_id)
+        session_db_id, session_uuid = await chat_log_service.resolve_session_id(session_id)
 
         user_email = request.headers.get("X-User-Email", "agent@example.com")
 
-        logger.info(f"🔍 End-agent endpoint: session_id={numeric_session_id}, uuid={session_uuid}")
+        logger.info(f"🔍 End-agent endpoint: session_id={session_db_id}, uuid={session_uuid}")
 
         # Get user ID for broadcasting (via service with Redis cache)
         user_id = await chat_log_service.get_user_id_by_email_cached(user_email)
@@ -1667,7 +1639,7 @@ async def end_agent_session(request: Request):
             raise HTTPException(status_code=400, detail=f"Invalid agent email: {user_email}")
 
         await chat_log_service.update_chat_session(
-            session_id=numeric_session_id,
+            session_id=session_db_id,
             user_email=user_email,
             status="closed"
         )
@@ -1680,14 +1652,14 @@ async def end_agent_session(request: Request):
         event_data = {
             "type": "session_ended",
             "session_id": session_uuid,      # Use UUID for SSE channel matching
-            "numeric_session_id": numeric_session_id,
+            "session_db_id": session_db_id,
             "ended_by": "agent",
             "agent_email": user_email,
             "show_feedback": True,  # Trigger feedback UI for customer
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
 
-        logger.info(f"📤 [END_AGENT] Broadcasting session_ended event: session_uuid={session_uuid}, numeric={numeric_session_id}, agent={user_email}")
+        logger.info(f"📤 [END_AGENT] Broadcasting session_ended event: session_uuid={session_uuid}, numeric={session_db_id}, agent={user_email}")
         result = await broadcast_event_to_session(session_uuid, event_data)
         logger.info(f"📤 [END_AGENT] Broadcast result: {result}")
 
@@ -1698,7 +1670,7 @@ async def end_agent_session(request: Request):
         return {
             "success": True,
             "message": "Session ended by agent",
-            "session_id": numeric_session_id,
+            "session_id": session_db_id,
             "session_uuid": session_uuid
         }
     except HTTPException:
@@ -1738,13 +1710,13 @@ async def end_customer_session(request: Request):
 
         # Resolve session ID (accepts both numeric and UUID formats) via service
         # Use session_uuid from body/state if available, otherwise resolve_session_id will get it
-        numeric_session_id, resolved_uuid = await chat_log_service.resolve_session_id(session_id)
+        session_db_id, resolved_uuid = await chat_log_service.resolve_session_id(session_id)
         session_uuid = session_uuid or resolved_uuid
 
         user_email = request.headers.get("X-User-Email", "customer@example.com")
 
         # Pass numeric ID to service
-        await chat_log_service.end_customer_session(numeric_session_id, user_email)
+        await chat_log_service.end_customer_session(session_db_id, user_email)
 
         # Broadcast session_ended event with feedback prompt to customer
         from shared.redis_pubsub_manager import broadcast_event_to_session
@@ -1752,8 +1724,8 @@ async def end_customer_session(request: Request):
 
         event_data = {
             "type": "session_ended",
-            "session_id": session_uuid or str(numeric_session_id),
-            "numeric_session_id": numeric_session_id,
+            "session_id": session_uuid or str(session_db_id),
+            "session_db_id": session_db_id,
             "ended_by": "customer",
             "show_feedback": True,  # Trigger feedback UI
             "timestamp": datetime.datetime.utcnow().isoformat()
@@ -1767,7 +1739,7 @@ async def end_customer_session(request: Request):
 
         # Notify the assigned agent and all admins (via service with Redis cache)
         if session_uuid:
-            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
+            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, session_db_id)
             if assigned_agent_id:
                 await broadcast_event_to_agent(assigned_agent_id, event_data)
         await broadcast_event_to_all_agents(event_data)
@@ -1791,7 +1763,7 @@ async def submit_session_feedback(request: Request):
 
     API Gateway injects session_id (numeric) and session_uuid (UUID) from cookie.
     Request Body:
-        session_id: int (numeric, injected by API Gateway)
+        session_id: str (session database ID, injected by API Gateway)
         session_uuid: str (UUID, injected by API Gateway)
         feedback_type: str ('positive' or 'negative')
     """
@@ -1813,7 +1785,7 @@ async def submit_session_feedback(request: Request):
             raise HTTPException(status_code=400, detail="session_id is required (should be injected by API Gateway or provided in request body)")
 
         # Resolve session ID (accepts both numeric and UUID formats) via service
-        numeric_session_id, _ = await chat_log_service.resolve_session_id(session_id)
+        session_db_id, _ = await chat_log_service.resolve_session_id(session_id)
 
         if not feedback_type:
             raise HTTPException(status_code=400, detail="feedback_type is required")
@@ -1821,15 +1793,15 @@ async def submit_session_feedback(request: Request):
         if feedback_type not in ['positive', 'negative']:
             raise HTTPException(status_code=400, detail="feedback_type must be 'positive' or 'negative'")
 
-        logger.info(f"🔍 Feedback endpoint: session_id={numeric_session_id}, feedback={feedback_type}")
+        logger.info(f"🔍 Feedback endpoint: session_id={session_db_id}, feedback={feedback_type}")
 
         # Update feedback in database
-        success = await chat_log_service.update_session_feedback(numeric_session_id, feedback_type)
+        success = await chat_log_service.update_session_feedback(session_db_id, feedback_type)
 
         if not success:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        logger.info(f"✅ Customer feedback '{feedback_type}' submitted for session {numeric_session_id}")
+        logger.info(f"✅ Customer feedback '{feedback_type}' submitted for session {session_db_id}")
 
         return {
             "success": True,
@@ -1876,14 +1848,10 @@ async def request_human_agent(request: Request):
                 detail="session_id is required in request body or should be injected by API Gateway"
             )
 
-        # Session ID should be numeric (API Gateway converts UUID to numeric ID before calling internal services)
-        try:
-            session_db_id = int(session_id)
-            logger.info(f"🧑 [ENDPOINT] Session ID (numeric): {session_db_id}")
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+        session_db_id = str(session_id)
+        logger.info(f"🧑 [ENDPOINT] Session ID: {session_db_id}")
 
-        # Pass numeric ID to service
+        # Pass session database ID to service
         logger.info(f"🔍 [ENDPOINT] Calling chat_log_service.request_human_agent with session_id={session_db_id}")
         assignment_result = await chat_log_service.request_human_agent(session_db_id)
         logger.info(f"✅ [ENDPOINT] Agent assigned: {assignment_result}")
@@ -1909,7 +1877,7 @@ async def request_human_agent(request: Request):
 async def delete_chat_session(request: Request):
     """Delete a chat session and all associated messages
 
-    Request params: session_id (numeric session ID as query parameter)
+    Request params: session_id (session database ID as query parameter)
     """
     try:
         session_id = request.query_params.get("session_id")
@@ -1917,26 +1885,23 @@ async def delete_chat_session(request: Request):
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id query parameter is required")
 
-        try:
-            numeric_session_id = int(session_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+        session_db_id = str(session_id)
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
-        logger.info(f"🔍 Delete endpoint: session_id={numeric_session_id}")
+        logger.info(f"🔍 Delete endpoint: session_id={session_db_id}")
 
         # Delete all messages for the session first
-        await chat_log_service.delete_session_messages(numeric_session_id)
+        await chat_log_service.delete_session_messages(session_db_id)
 
         # Delete the session itself
-        await chat_log_service.delete_chat_session(numeric_session_id)
+        await chat_log_service.delete_chat_session(session_db_id)
 
-        logger.info(f"Deleted chat session {numeric_session_id} by {user_email}")
+        logger.info(f"Deleted chat session {session_db_id} by {user_email}")
 
         return {
             "success": True,
             "message": "Chat session deleted successfully",
-            "session_id": numeric_session_id
+            "session_id": session_db_id
         }
     except HTTPException:
         raise
@@ -1948,7 +1913,7 @@ async def delete_chat_session(request: Request):
 async def mark_session_as_read(request: Request, user: dict = Depends(get_current_user)):
     """Mark session as read
 
-    Request body: {session_id: int (numeric session ID)}
+    Request body: {session_id: str (session database ID)}
     """
     try:
         body = await request.json()
@@ -1957,22 +1922,19 @@ async def mark_session_as_read(request: Request, user: dict = Depends(get_curren
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required in request body")
 
-        try:
-            numeric_session_id = int(session_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+        session_db_id = str(session_id)
 
         user_email = user.get("email")
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
 
-        logger.info(f"🔍 Mark-read endpoint: session_id={numeric_session_id}, user={user_email}")
-        await chat_log_service.mark_session_as_read(numeric_session_id, user_email)
+        logger.info(f"🔍 Mark-read endpoint: session_id={session_db_id}, user={user_email}")
+        await chat_log_service.mark_session_as_read(session_db_id, user_email)
 
         return {
             "success": True,
             "message": "Session marked as read",
-            "session_id": numeric_session_id
+            "session_id": session_db_id
         }
     except HTTPException:
         raise
@@ -1984,7 +1946,7 @@ async def mark_session_as_read(request: Request, user: dict = Depends(get_curren
 async def mark_session_as_unread(request: Request, user: dict = Depends(get_current_user)):
     """Mark session as unread
 
-    Request body: {session_id: int (numeric session ID)}
+    Request body: {session_id: str (session database ID)}
     """
     try:
         body = await request.json()
@@ -1993,22 +1955,19 @@ async def mark_session_as_unread(request: Request, user: dict = Depends(get_curr
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required in request body")
 
-        try:
-            numeric_session_id = int(session_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+        session_db_id = str(session_id)
 
         user_email = user.get("email")
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
 
-        logger.info(f"🔍 Mark-unread endpoint: session_id={numeric_session_id}, user={user_email}")
-        await chat_log_service.mark_session_as_unread(numeric_session_id, user_email)
+        logger.info(f"🔍 Mark-unread endpoint: session_id={session_db_id}, user={user_email}")
+        await chat_log_service.mark_session_as_unread(session_db_id, user_email)
 
         return {
             "success": True,
             "message": "Session marked as unread",
-            "session_id": numeric_session_id
+            "session_id": session_db_id
         }
     except HTTPException:
         raise
@@ -2040,25 +1999,25 @@ async def mark_message_as_read(message_id: int, user: dict = Depends(get_current
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/chat-sessions/unread-count")
-async def get_unread_message_count(request: Request, session_id: int = Query(...)):
+async def get_unread_message_count(request: Request, session_id: str = Query(...)):
     """Get unread message count for a session
 
     Args:
-        session_id: Numeric session ID (required query parameter)
+        session_id: Session database ID (required query parameter)
     """
     try:
-        numeric_session_id = session_id
+        session_db_id = session_id
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
-        logger.info(f"🔍 Unread-count endpoint: session_id={numeric_session_id}")
+        logger.info(f"🔍 Unread-count endpoint: session_id={session_db_id}")
 
-        count = await chat_log_service.get_unread_message_count(numeric_session_id)
+        count = await chat_log_service.get_unread_message_count(session_db_id)
 
-        logger.info(f"Retrieved unread message count for session {numeric_session_id} by {user_email}")
+        logger.info(f"Retrieved unread message count for session {session_db_id} by {user_email}")
 
         return {
             "success": True,
-            "session_id": numeric_session_id,
+            "session_id": session_db_id,
             "unread_count": count
         }
     except HTTPException:

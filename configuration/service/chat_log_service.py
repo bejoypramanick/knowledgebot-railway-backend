@@ -25,7 +25,7 @@ class ChatLogService:
 
     # --- Cached identity resolution methods (Redis DB4 cache + DB fallback) ---
 
-    async def get_user_id_by_email_cached(self, email: str) -> Optional[int]:
+    async def get_user_id_by_email_cached(self, email: str) -> Optional[str]:
         """Get user ID from email, using Redis cache with DB fallback."""
         from shared.redis_agent_cache import get_cached_user_id, set_cached_user_id
         cached = await get_cached_user_id(email)
@@ -36,7 +36,7 @@ class ChatLogService:
             await set_cached_user_id(email, user_id)
         return user_id
 
-    async def get_email_by_user_id_cached(self, user_id: int) -> Optional[str]:
+    async def get_email_by_user_id_cached(self, user_id: str) -> Optional[str]:
         """Get email from user ID, using Redis cache with DB fallback."""
         from shared.redis_agent_cache import get_cached_user_email, set_cached_user_id
         cached = await get_cached_user_email(user_id)
@@ -47,7 +47,7 @@ class ChatLogService:
             await set_cached_user_id(email, user_id)  # Caches both directions
         return email
 
-    async def get_admin_ids_cached(self) -> List[int]:
+    async def get_admin_ids_cached(self) -> List[str]:
         """Get all admin IDs, using Redis cache with DB fallback."""
         from shared.redis_agent_cache import get_cached_admin_ids, set_cached_admin_ids
         cached = await get_cached_admin_ids()
@@ -57,74 +57,66 @@ class ChatLogService:
         await set_cached_admin_ids(ids)
         return ids
 
-    async def get_assigned_agent_id_cached(self, session_uuid: str, numeric_session_id: int) -> Optional[int]:
+    async def get_assigned_agent_id_cached(self, session_uuid: str, session_db_id: str) -> Optional[str]:
         """Get assigned agent ID, using Redis DB4 cache with DB fallback."""
         from shared.redis_agent_cache import get_assigned_agent, set_assigned_agent
         cached = await get_assigned_agent(session_uuid)
         if cached:
-            try:
-                return int(cached)
-            except (ValueError, TypeError):
-                logger.warning(f"⚠️ Cached agent value is non-numeric (legacy): '{cached}' - falling through to DB lookup")
-        agent_id = await self.dao.get_assigned_agent_id(numeric_session_id)
+            return str(cached)
+        agent_id = await self.dao.get_assigned_agent_id(session_db_id)
         if agent_id:
             await set_assigned_agent(session_uuid, agent_id)
-            logger.info(f"Cached agent assignment (DB 4): {numeric_session_id} -> ID {agent_id}")
+            logger.info(f"Cached agent assignment (DB 4): {session_db_id} -> ID {agent_id}")
         return agent_id
 
-    async def get_session_uuid(self, numeric_session_id: int) -> Optional[str]:
-        """Get session UUID from numeric session ID."""
-        return await self.dao.get_session_uuid(numeric_session_id)
+    async def get_session_uuid(self, session_db_id: str) -> Optional[str]:
+        """Get session UUID from session DB ID."""
+        return await self.dao.get_session_uuid(session_db_id)
 
-    async def resolve_session_id(self, session_id_raw: str) -> tuple[int, Optional[str]]:
-        """Resolve session_id (numeric or UUID) to (numeric_id, uuid) tuple.
+    async def resolve_session_id(self, session_id_raw: str) -> tuple[str, Optional[str]]:
+        """Resolve session_id (UUID) to (db_id, uuid) tuple.
 
-        Accepts both numeric IDs and UUIDs. Returns (numeric_id, session_uuid).
+        All session IDs are now UUIDs resolved via get_session_db_id_by_uuid.
+        Returns (db_id, session_uuid).
         Raises HTTPException if session not found.
         """
         session_id_str = str(session_id_raw)
-        if session_id_str.isdigit():
-            numeric_id = int(session_id_str)
-            session_uuid = await self.dao.get_session_uuid(numeric_id)
-            if not session_uuid:
-                raise HTTPException(status_code=404, detail=f"Session {numeric_id} not found")
-            return numeric_id, session_uuid
-        else:
-            numeric_id = await self.dao.get_session_numeric_id(session_id_str)
-            if not numeric_id:
-                raise HTTPException(status_code=404, detail=f"Session not found: {session_id_str}")
-            return numeric_id, session_id_str
+        db_id = await self.dao.get_session_numeric_id(session_id_str)
+        if not db_id:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id_str}")
+        return db_id, session_id_str
 
-    async def resolve_sender_identity(self, sender_id_raw: Optional[str], header_email: str) -> tuple[Optional[int], Optional[str]]:
-        """Resolve sender numeric ID and email from agent_id body param or X-User-Email header.
+    async def resolve_sender_identity(self, sender_id_raw: Optional[str], header_email: str) -> tuple[Optional[str], Optional[str]]:
+        """Resolve sender ID and email from agent_id body param or X-User-Email header.
 
         Returns:
-            (sender_id_int, sender_email) tuple. Either may be None if resolution fails.
+            (sender_id, sender_email) tuple. Either may be None if resolution fails.
         """
-        sender_id_int = None
+        sender_id = None
         sender_email = None
 
         if sender_id_raw and sender_id_raw != 'system':
-            try:
-                sender_id_int = int(sender_id_raw)
-            except (ValueError, TypeError):
-                # agent_id is non-numeric (could be email)
-                sender_id_int = await self.get_user_id_by_email_cached(str(sender_id_raw))
-                if sender_id_int:
-                    sender_email = str(sender_id_raw)
+            # Try to resolve as email first, otherwise treat as ID
+            resolved_id = await self.get_user_id_by_email_cached(str(sender_id_raw))
+            if resolved_id:
+                sender_id = resolved_id
+                sender_email = str(sender_id_raw)
+            else:
+                # Treat as user ID directly
+                sender_id = str(sender_id_raw)
 
         # Fallback to X-User-Email header
-        if sender_id_int is None and header_email:
-            sender_id_int = await self.get_user_id_by_email_cached(header_email)
-            if sender_id_int:
+        if sender_id is None and header_email:
+            sender_id = await self.get_user_id_by_email_cached(header_email)
+            if sender_id:
                 sender_email = header_email
                 logger.info(f"🔍 Resolved sender from X-User-Email header: {header_email} → ID {sender_id_int}")
 
         # Get email if we have ID but no email yet
-        if sender_id_int and not sender_email:
-            sender_email = await self.get_email_by_user_id_cached(sender_id_int) or f"agent-{sender_id_int}"
+        if sender_id and not sender_email:
+            sender_email = await self.get_email_by_user_id_cached(sender_id) or f"agent-{sender_id}"
 
-        return sender_id_int, sender_email
+        return sender_id, sender_email
 
     async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
         """Get all chat logs"""
@@ -134,7 +126,7 @@ class ChatLogService:
             logger.error(f"Error getting all chat logs: {e}")
             raise
 
-    async def delete_chat_log(self, session_id: int, user_email: str) -> Dict[str, Any]:
+    async def delete_chat_log(self, session_id: str, user_email: str) -> Dict[str, Any]:
         """Delete a chat log"""
         try:
             return await self.dao.delete_chat_log(session_id)
@@ -142,7 +134,7 @@ class ChatLogService:
             logger.error(f"Error deleting chat log {session_id}: {e}")
             raise
 
-    async def assign_chat_to_agent(self, session_id: int, agent_email: str):
+    async def assign_chat_to_agent(self, session_id: str, agent_email: str):
         """Assign chat to specific agent"""
         try:
             # session_id is already numeric (resolved by API Gateway)
@@ -220,7 +212,7 @@ class ChatLogService:
             logger.error(f"Error assigning chat to agent: {e}", exc_info=True)
             raise
 
-    async def get_agent_online_status(self, agent_id: int) -> bool:
+    async def get_agent_online_status(self, agent_id: str) -> bool:
         """
         Check if agent is online by checking Redis presence key.
         Agent is considered online if they have an active SSE connection.
@@ -252,7 +244,7 @@ class ChatLogService:
             logger.error(f"Error getting agent chat count: {e}")
             return 0
 
-    async def assign_chat_with_load_balancing(self, session_id: int) -> Optional[Dict[str, Any]]:
+    async def assign_chat_with_load_balancing(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Assign a chat to an available agent using load balancing (numeric ID only).
         
         Returns:
@@ -390,7 +382,7 @@ class ChatLogService:
             logger.info(f"✅ [CHATLOG] No sessions found, returning empty list (total time: {time.time() - start_time:.2f}s)")
             return [], total_count
 
-        session_db_ids = [int(s['id']) if isinstance(s['id'], str) else s['id'] for s in sessions_data]
+        session_db_ids = [str(s['id']) for s in sessions_data]
         logger.info(f"⚡ [CHATLOG] Fetching latest messages for {len(session_db_ids)} sessions: {session_db_ids[:5]}{'...' if len(session_db_ids) > 5 else ''}")
 
         # Fetch latest messages for ALL sessions in ONE query (optimized)
@@ -412,8 +404,7 @@ class ChatLogService:
         formatted_sessions = []
         for session_row in sessions_data:
             session_id = session_row['session_id']
-            # Ensure session_db_id is an integer (may be string from database)
-            session_db_id = int(session_row['id']) if isinstance(session_row['id'], str) else session_row['id']
+            session_db_id = str(session_row['id'])
 
             raw_metadata = session_row['metadata']
             if raw_metadata is None:
@@ -510,22 +501,22 @@ class ChatLogService:
         logger.info(f"✅ [CHATLOG] Completed get_chat_sessions: {len(formatted_sessions)} sessions formatted in {total_duration:.2f}s total")
         return formatted_sessions, total_count
 
-    async def get_session_messages(self, session_id: int):
+    async def get_session_messages(self, session_id: str):
         """Get all messages for a specific chat session (full conversation on click)."""
         return await self.dao.get_session_messages(session_id)
 
-    async def update_session_feedback(self, session_id: int, feedback_type: str) -> bool:
+    async def update_session_feedback(self, session_id: str, feedback_type: str) -> bool:
         """Update session feedback (positive/negative)."""
         return await self.dao.update_session_feedback(session_id, feedback_type)
 
-    async def send_agent_message(self, session_id: int, agent_email: str, text: str):
+    async def send_agent_message(self, session_id: str, agent_email: str, text: str):
         """Send a message from an agent to a customer using numeric ID only.
         Broadcasting to customer SSE is handled by the router after this call."""
         message_id = await self.dao.create_message(session_id, 'agent', text)
         await self.dao.increment_message_count(session_id)
         return message_id
 
-    async def send_customer_message(self, session_id: int, text: str):
+    async def send_customer_message(self, session_id: str, text: str):
         """Save a customer message to the database.
         Broadcasting is handled by the router after this call."""
         message_id = await self.dao.create_message(session_id, 'user', text)
@@ -533,7 +524,7 @@ class ChatLogService:
         return message_id
 
 
-    async def update_chat_session(self, session_id: int, user_email: str, status: Optional[str] = None,
+    async def update_chat_session(self, session_id: str, user_email: str, status: Optional[str] = None,
                                  assigned_agent: Optional[str] = None):
         """Update a chat session's metadata and status (numeric ID only)."""
         # session_id is already numeric (resolved by API Gateway)
@@ -588,7 +579,7 @@ class ChatLogService:
                 await self.connection_manager.broadcast_to_session(session_ended_message, str(session_id))
         return True
 
-    async def end_customer_session(self, session_id: int, user_email: str):
+    async def end_customer_session(self, session_id: str, user_email: str):
         """End a chat session from the customer side (numeric ID only)."""
         # session_id is already numeric (resolved by API Gateway)
         # Verify session exists
@@ -617,7 +608,7 @@ class ChatLogService:
             await self.connection_manager.broadcast_to_session(session_ended_message, str(session_db_id))
         return True
 
-    async def request_human_agent(self, session_id: int):
+    async def request_human_agent(self, session_id: str):
         """Request human agent connection - accepts numeric ID only (endpoint handles UUID conversion)"""
         logger.info(f"🧑 [HUMAN_AGENT] Request received for session {session_id}")
 
@@ -642,7 +633,7 @@ class ChatLogService:
         logger.info(f"✅ [HUMAN_AGENT] Successfully assigned session {session_id} to agent {assigned_agent_email} (ID: {assigned_agent_id})")
         return {'email': assigned_agent_email, 'id': assigned_agent_id}
 
-    async def delete_session_messages(self, session_id: int) -> bool:
+    async def delete_session_messages(self, session_id: str) -> bool:
         """Delete all messages for a chat session using numeric ID only."""
         try:
             # session_id is already numeric (resolved by API Gateway)
@@ -653,7 +644,7 @@ class ChatLogService:
             logger.error(f"Error deleting messages for session {session_id}: {e}")
             raise
 
-    async def delete_chat_session(self, session_id: int) -> bool:
+    async def delete_chat_session(self, session_id: str) -> bool:
         """Delete a chat session and its metadata using numeric ID only."""
         try:
             # session_id is already numeric (resolved by API Gateway)
@@ -664,7 +655,7 @@ class ChatLogService:
             logger.error(f"Error deleting chat session {session_id}: {e}")
             raise
 
-    async def mark_session_messages_as_unread(self, session_id: int) -> bool:
+    async def mark_session_messages_as_unread(self, session_id: str) -> bool:
         """Mark all messages in a session as unread (delivered) using numeric ID only."""
         try:
             # session_id is already numeric (resolved by API Gateway)
@@ -675,7 +666,7 @@ class ChatLogService:
             logger.error(f"Error marking messages as unread for session {session_id}: {e}")
             raise
 
-    async def mark_session_as_read(self, session_id: int, user_email: str) -> bool:
+    async def mark_session_as_read(self, session_id: str, user_email: str) -> bool:
         """Mark entire session as read by human agent or admin (session-level)."""
         try:
             # Verify user is agent or admin
@@ -697,7 +688,7 @@ class ChatLogService:
             logger.error(f"Error marking session {session_id} as read: {e}")
             raise
 
-    async def mark_session_as_unread(self, session_id: int, user_email: str) -> bool:
+    async def mark_session_as_unread(self, session_id: str, user_email: str) -> bool:
         """Mark entire session as unread by human agent or admin (session-level)."""
         try:
             # Verify user is agent or admin
@@ -717,7 +708,7 @@ class ChatLogService:
             logger.error(f"Error marking session {session_id} as unread: {e}")
             raise
 
-    async def get_unread_message_count(self, session_id: int) -> int:
+    async def get_unread_message_count(self, session_id: str) -> int:
         """Get count of unread messages in a session (numeric ID only)."""
         try:
             # session_id is already numeric (resolved by API Gateway)

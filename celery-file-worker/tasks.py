@@ -16,7 +16,7 @@ logger = get_otel_logger("celery_tasks", "celery-file-worker")
 @celery_app.task(bind=True, max_retries=2)
 def process_file_upload_task(
     self,
-    file_id: int,
+    file_id: str,
     user_email: str
 ):
     """

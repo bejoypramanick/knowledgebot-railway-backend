@@ -100,11 +100,9 @@ class NotificationsDAO:
             if not notification_ids:
                 return 0
             async with get_db_session() as session:
-                int_ids = [int(nid) if isinstance(nid, str) else nid for nid in notification_ids]
-
                 # Build dynamic IN clause for asyncpg compatibility
-                placeholders = ",".join([f":id_{i}" for i in range(len(int_ids))])
-                params = {f"id_{i}": nid for i, nid in enumerate(int_ids)}
+                placeholders = ",".join([f":id_{i}" for i in range(len(notification_ids))])
+                params = {f"id_{i}": nid for i, nid in enumerate(notification_ids)}
 
                 query = f"""
                     UPDATE notifications

@@ -198,7 +198,7 @@ async def get_file_item_processing_status(item_id: str, request: Request = None)
         user_email, user_id = extract_user_from_request(request)
         
         # Get file record
-        file_record = await get_file_by_id(int(item_id))
+        file_record = await get_file_by_id(item_id)
         if file_record:
             return {
                 "success": True,
@@ -331,13 +331,6 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
         logger.info(f"🗑️  [FILE_DELETE_REQUEST] Deleting file {file_id} (hard_delete={hard_delete})")
         logger.info(f"   Requested by: {user_email}")
 
-        # Validate file_id
-        try:
-            file_id_int = int(file_id)
-        except ValueError as e:
-            logger.error(f"❌ [FILE_DELETE_INVALID_ID] Invalid file_id: {file_id} - {e}")
-            raise HTTPException(status_code=400, detail=f"Invalid file ID format: {file_id}")
-
         from knowledgebase_ingestion.service.comprehensive_deletion_service import (
             comprehensive_deletion_service,
             ItemType
@@ -345,7 +338,7 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
 
         # Delete file with complete cleanup
         result = await comprehensive_deletion_service.delete_item(
-            item_id=file_id_int,
+            item_id=file_id,
             item_type=ItemType.FILE,
             hard_delete=hard_delete
         )
@@ -477,7 +470,7 @@ async def download_processed_content(file_id: str, request: Request = None):
                 SELECT original_filename as name, processed_content_s3_key
                 FROM file_uploads WHERE id = :id
             """
-            result = await session.execute(text(file_query), {"id": int(file_id)})
+            result = await session.execute(text(file_query), {"id": file_id})
             record = result.mappings().first()
 
             # If not found, try scraped_websites table
@@ -486,7 +479,7 @@ async def download_processed_content(file_id: str, request: Request = None):
                     SELECT original_url as name, processed_content_s3_key
                     FROM scraped_websites WHERE id = :id
                 """
-                result = await session.execute(text(website_query), {"id": int(file_id)})
+                result = await session.execute(text(website_query), {"id": file_id})
                 record = result.mappings().first()
 
             if not record:
@@ -729,7 +722,7 @@ async def upload_file_async(
             result = file_celery.send_task(
                 'tasks.process_file_upload_task',
                 args=[
-                    int(file_id),  # Pass file_id instead of individual parameters
+                    file_id,  # Pass file_id instead of individual parameters
                     user_email  # Keep user_email for logging context
                 ],
                 queue='file_processing'
@@ -746,7 +739,7 @@ async def upload_file_async(
             logger.info(f"💾 [DB_UPDATE] Updating DB with real Celery task ID: {celery_task_id}")
             dao = get_fileupload_dao()
             try:
-                await dao.update_celery_task_id(int(file_id), celery_task_id)
+                await dao.update_celery_task_id(file_id, celery_task_id)
                 logger.info(f"✅ [DB_UPDATE_SUCCESS] DB updated with Celery task ID")
                 logger.info(f"⏱️  [DB_COMMIT_WAIT] Waited for DB commit")
             except Exception as db_err:
@@ -763,7 +756,7 @@ async def upload_file_async(
             try:
                 from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
                 dao = FileUploadDAO()
-                full_file = await dao.get_file_by_id(int(file_id))
+                full_file = await dao.get_file_by_id(file_id)
                 
                 if full_file:
                     logger.info(f"✅ [FILE_FETCH] Fetched full file record for UI")

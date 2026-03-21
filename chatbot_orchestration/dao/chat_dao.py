@@ -18,7 +18,7 @@ class ChatDAO:
     def __init__(self):
         self._store = get_chat_store()
 
-    async def create_session(self, session_id: str, user_role_id: int = None) -> Optional[Dict[str, Any]]:
+    async def create_session(self, session_id: str, user_role_id: str = None) -> Optional[Dict[str, Any]]:
         """
         Create a new chat session in Redis.
         PG row is created lazily by write-through or on first message (for numeric ID).
@@ -55,7 +55,7 @@ class ChatDAO:
             }
         return None
 
-    async def get_user_email_from_role_id(self, user_role_id: int) -> Optional[str]:
+    async def get_user_email_from_role_id(self, user_role_id: str) -> Optional[str]:
         """Get user email from user_role_id (PG lookup — cold path, rarely called)."""
         if user_role_id is None:
             return None
@@ -101,9 +101,9 @@ class ChatDAO:
 
         return {"messages": messages}
 
-    async def ensure_numeric_id(self, session_id: str) -> Optional[int]:
+    async def ensure_db_id(self, session_id: str) -> Optional[str]:
         """
-        Ensure session has a PG numeric ID. Creates PG row if needed.
+        Ensure session has a PG database ID. Creates PG row if needed.
         This is the ONLY PG call in the hot path — happens once per new session.
         """
         # Check if we already have a db_id cached in Redis
@@ -111,7 +111,7 @@ class ChatDAO:
         if session and session.get("db_id"):
             return session["db_id"]
 
-        # Need to create PG row to get serial ID
+        # Need to create PG row to get database ID
         try:
             async with get_db_session() as db_session:
                 result = await db_session.execute(
@@ -128,11 +128,11 @@ class ChatDAO:
 
                 # Cache the db_id in Redis
                 await self._store.set_session_db_id(session_id, db_id)
-                logger.info(f"PG numeric ID created for {session_id}: {db_id}")
+                logger.info(f"PG database ID created for {session_id}: {db_id}")
                 return db_id
 
         except Exception as e:
-            logger.error(f"Error creating PG numeric ID for {session_id}: {e}")
+            logger.error(f"Error creating PG database ID for {session_id}: {e}")
             return None
 
     async def delete_session(self, session_id: str) -> bool:

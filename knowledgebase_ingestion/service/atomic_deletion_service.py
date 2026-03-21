@@ -28,7 +28,7 @@ class AtomicDeletionService:
     def __init__(self):
         self.tracer = trace.get_tracer("atomic_deletion")
         
-    async def delete_file_atomically(self, file_id: int) -> Dict[str, Any]:
+    async def delete_file_atomically(self, file_id: str) -> Dict[str, Any]:
         """
         Delete file atomically with complete cleanup
         
@@ -140,7 +140,7 @@ class AtomicDeletionService:
                     "file_id": str(file_id)
                 }
     
-    async def delete_website_atomically(self, website_id: int) -> Dict[str, Any]:
+    async def delete_website_atomically(self, website_id: str) -> Dict[str, Any]:
         """
         Delete website atomically with complete cleanup
         

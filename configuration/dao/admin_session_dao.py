@@ -22,7 +22,7 @@ class AdminSessionDAO:
     async def create_session(
         self,
         session_id: str,
-        user_role_id: int,
+        user_role_id: str,
         email: str,
         role_name: str,
         ip_address: Optional[str],

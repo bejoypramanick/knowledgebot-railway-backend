@@ -65,7 +65,7 @@ async def get_web_item_processing_status(item_id: str, request: Request = None):
         user_email, user_id = extract_user_from_request(request)
         
         # Get website record
-        website_record = await get_website_by_id(int(item_id))
+        website_record = await get_website_by_id(item_id)
         if website_record:
             return {
                 "success": True,
@@ -209,7 +209,7 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
 
         # Delete website with complete cleanup (auto-detects WEBSITE/WEBPAGE/SITEMAP)
         result = await comprehensive_deletion_service.delete_item(
-            item_id=int(website_id),
+            item_id=website_id,
             item_type=ItemType.WEBSITE,
             hard_delete=hard_delete
         )

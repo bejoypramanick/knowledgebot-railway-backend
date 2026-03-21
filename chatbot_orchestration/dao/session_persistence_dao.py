@@ -28,17 +28,17 @@ class SessionPersistenceDAO:
         if session and session.get("db_id"):
             return session["db_id"]
 
-        # Need PG row for numeric ID (single PG call, first message only)
+        # Need PG row for database ID (single PG call, first message only)
         from chatbot_orchestration.dao.chat_dao import ChatDAO
         chat_dao = ChatDAO()
-        db_id = await chat_dao.ensure_numeric_id(session_id)
+        db_id = await chat_dao.ensure_db_id(session_id)
         if db_id:
             return db_id
 
         # Should not happen, but raise if we can't get an ID
-        raise RuntimeError(f"Failed to get or create numeric ID for session {session_id}")
+        raise RuntimeError(f"Failed to get or create database ID for session {session_id}")
 
-    async def save_user_message(self, session_db_id: int, content: str) -> int:
+    async def save_user_message(self, session_db_id: str, content: str) -> int:
         """
         Save a user message to Redis.
         Returns a synthetic message index (not a PG serial ID).

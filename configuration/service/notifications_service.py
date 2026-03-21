@@ -24,7 +24,7 @@ class NotificationsService:
             logger.error(f"Error getting notifications: {e}")
             raise
 
-    async def mark_as_read(self, notification_id: int) -> bool:
+    async def mark_as_read(self, notification_id: str) -> bool:
         """Mark notification as read"""
         try:
             await self._notifications_dao.mark_as_read(notification_id)
@@ -33,7 +33,7 @@ class NotificationsService:
             logger.error(f"Error marking notification as read: {e}")
             raise
 
-    async def delete_notification(self, notification_id: int) -> bool:
+    async def delete_notification(self, notification_id: str) -> bool:
         """Delete a notification"""
         try:
             await self._notifications_dao.delete_notification(notification_id)
