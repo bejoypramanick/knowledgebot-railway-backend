@@ -1426,17 +1426,8 @@ async def stream_admin_chat_sessions(
 
         logger.info(f"🔌 [SSE-STREAM] Chat sessions stream requested: status={status}, limit={limit}, cursor={cursor}")
 
-        # Get total count first (fast indexed query)
-        total_count = await chat_log_service.dao.count_all_sessions(status)
-
         async def event_generator():
-            import time as _time
-
             try:
-                # 1. Send total count immediately so UI can show "X conversations"
-                yield f"event: count\ndata: {json.dumps({'total_count': total_count})}\n\n"
-
-                # 2. Stream sessions one-by-one
                 loaded = 0
                 last_cursor = None
 
@@ -1452,9 +1443,9 @@ async def stream_admin_chat_sessions(
                     last_cursor = session_dict.get('last_message_at')
                     yield f"event: session\ndata: {json.dumps(session_dict, default=str)}\n\n"
 
-                # 3. Send done marker with next cursor for infinite scroll
-                has_more = (loaded == limit) and (loaded < total_count)
-                yield f"event: done\ndata: {json.dumps({'loaded': loaded, 'has_more': has_more, 'next_cursor': last_cursor, 'total_count': total_count})}\n\n"
+                # has_more: if we got exactly `limit` rows, there are likely more
+                has_more = (loaded == limit)
+                yield f"event: done\ndata: {json.dumps({'loaded': loaded, 'has_more': has_more, 'next_cursor': last_cursor})}\n\n"
 
                 logger.info(f"✅ [SSE-STREAM] Streamed {loaded} sessions, has_more={has_more}")
 
