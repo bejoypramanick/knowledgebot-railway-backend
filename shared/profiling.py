@@ -89,7 +89,6 @@ def get_profiling_stats(sort_by: str = "ttot", limit: int = 50, filter_module: O
             "module": module,
             "lineno": stat.lineno,
             "ncall": stat.ncall,
-            "nactcall": stat.nactcall,
             "ttot": round(stat.ttot, 6),
             "tsub": round(stat.tsub, 6),
             "tavg": round(stat.tavg, 6),
