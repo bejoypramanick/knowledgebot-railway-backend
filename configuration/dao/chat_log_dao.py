@@ -1170,8 +1170,9 @@ class ChatLogDAO:
     ):
         """
         Stream sessions one-by-one using PG18 server-side cursor.
-        Uses LATERAL join to include latest message per session inline.
-        Uses keyset (cursor) pagination for efficient infinite scroll.
+        NO CTEs — plain JOINs + LATERAL so PG can yield rows immediately
+        via index scan on last_activity_at DESC without materializing first.
+        User-N display IDs are computed client-side (not ROW_NUMBER).
 
         Yields:
             Dict for each session row (includes latest_msg_content, latest_msg_role, latest_msg_at)
@@ -1180,51 +1181,56 @@ class ChatLogDAO:
         start_time = time.time()
         logger.info(f"🔍 [STREAM-DAO] stream_all_sessions called: status={archive_status}, limit={limit}, cursor={cursor_timestamp}")
 
-        # Build cursor condition for keyset pagination
-        cursor_condition = ""
+        # Build WHERE conditions
+        conditions = ["(cs.message_count > 0 OR cs.message_count IS NULL)"]
         params = {"limit": limit}
 
         if cursor_timestamp:
-            cursor_condition = "AND cs.last_activity_at < :cursor_ts"
+            conditions.append("cs.last_activity_at < :cursor_ts")
             params["cursor_ts"] = cursor_timestamp
 
-        if archive_status.lower() == 'all':
-            status_condition = ""
-        else:
-            status_condition = "AND cs.archive_status = :archive_status"
+        if archive_status.lower() != 'all':
+            conditions.append("cs.archive_status = :archive_status")
             params["archive_status"] = archive_status
 
+        where_clause = " AND ".join(conditions)
+
+        # No CTE — PG can stream immediately via index scan.
+        # User-N: correlated subquery counts sessions created before this one (global rank).
+        # Agent dedup: LATERAL picks active assignment first (single row).
         query = f"""
-            WITH ranked_sessions AS (
-                SELECT cs.*,
-                       'User-' || ROW_NUMBER() OVER (ORDER BY cs.created_at ASC) as user_display_id
-                FROM chat_sessions cs
-                WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
-                {status_condition}
-            ),
-            deduped AS (
-                SELECT DISTINCT ON (rs.id) rs.*, u.email as agent_email, u.id as agent_id
-                FROM ranked_sessions rs
-                LEFT JOIN session_assignments sa ON rs.id = sa.session_id
-                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                LEFT JOIN users u ON urm.user_id = u.id
-                ORDER BY rs.id, CASE WHEN sa.status = 'active' THEN 0 ELSE 1 END, sa.assigned_at DESC NULLS LAST
-            )
-            SELECT d.*,
+            SELECT cs.*,
+                   'User-' || (
+                       SELECT COUNT(*) FROM chat_sessions cs2
+                       WHERE cs2.created_at <= cs.created_at
+                         AND (cs2.message_count > 0 OR cs2.message_count IS NULL)
+                   ) as user_display_id,
+                   ag.email as agent_email,
+                   ag.user_id as agent_id,
                    lm.content as latest_msg_content,
                    lm.role as latest_msg_role,
                    lm.created_at as latest_msg_at,
                    lm.id as latest_msg_id
-            FROM deduped d
+            FROM chat_sessions cs
+            LEFT JOIN LATERAL (
+                SELECT u.email, u.id as user_id
+                FROM session_assignments sa
+                JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                JOIN users u ON urm.user_id = u.id
+                WHERE sa.session_id = cs.id
+                ORDER BY CASE WHEN sa.status = 'active' THEN 0 ELSE 1 END,
+                         sa.assigned_at DESC NULLS LAST
+                LIMIT 1
+            ) ag ON true
             LEFT JOIN LATERAL (
                 SELECT id, content, role, created_at
                 FROM chat_messages
-                WHERE session_id = d.id
+                WHERE session_id = cs.id
                 ORDER BY created_at DESC
                 LIMIT 1
             ) lm ON true
-            WHERE 1=1 {cursor_condition.replace('cs.', 'd.')}
-            ORDER BY d.last_activity_at DESC NULLS LAST
+            WHERE {where_clause}
+            ORDER BY cs.last_activity_at DESC NULLS LAST
             LIMIT :limit
         """
 
@@ -1232,8 +1238,13 @@ class ChatLogDAO:
             logger.log_db_operation(query, params)
 
             async with get_db_session() as session:
-                # Use stream() for PG18 server-side cursor — yields rows as they arrive
-                result = await session.stream(text(query), params)
+                # stream() = PG18 server-side cursor
+                # yield_per=1 forces single-row fetch — each row sent to SSE immediately
+                # Without this, asyncpg buffers the entire result before yielding
+                result = await session.stream(
+                    text(query).execution_options(yield_per=1),
+                    params
+                )
 
                 row_count = 0
                 async for row in result:
