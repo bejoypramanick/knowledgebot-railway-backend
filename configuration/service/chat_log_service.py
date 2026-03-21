@@ -57,34 +57,19 @@ class ChatLogService:
         await set_cached_admin_ids(ids)
         return ids
 
-    async def get_assigned_agent_id_cached(self, session_uuid: str, session_db_id: str) -> Optional[str]:
+    async def get_assigned_agent_id_cached(self, session_id: str) -> Optional[str]:
         """Get assigned agent ID, using Redis DB4 cache with DB fallback."""
         from shared.redis_agent_cache import get_assigned_agent, set_assigned_agent
-        cached = await get_assigned_agent(session_uuid)
+        cached = await get_assigned_agent(session_id)
         if cached:
             return str(cached)
-        agent_id = await self.dao.get_assigned_agent_id(session_db_id)
+        agent_id = await self.dao.get_assigned_agent_id(session_id)
         if agent_id:
-            await set_assigned_agent(session_uuid, agent_id)
-            logger.info(f"Cached agent assignment (DB 4): {session_db_id} -> ID {agent_id}")
+            await set_assigned_agent(session_id, agent_id)
+            logger.info(f"Cached agent assignment (DB 4): {session_id} -> ID {agent_id}")
         return agent_id
 
-    async def get_session_uuid(self, session_db_id: str) -> Optional[str]:
-        """Get session UUID from session DB ID."""
-        return await self.dao.get_session_uuid(session_db_id)
 
-    async def resolve_session_id(self, session_id_raw: str) -> tuple[str, Optional[str]]:
-        """Resolve session_id (UUID) to (db_id, uuid) tuple.
-
-        All session IDs are now UUIDs resolved via get_session_db_id_by_uuid.
-        Returns (db_id, session_uuid).
-        Raises HTTPException if session not found.
-        """
-        session_id_str = str(session_id_raw)
-        db_id = await self.dao.get_session_numeric_id(session_id_str)
-        if not db_id:
-            raise HTTPException(status_code=404, detail=f"Session not found: {session_id_str}")
-        return db_id, session_id_str
 
     async def resolve_sender_identity(self, sender_id_raw: Optional[str], header_email: str) -> tuple[Optional[str], Optional[str]]:
         """Resolve sender ID and email from agent_id body param or X-User-Email header.
@@ -147,8 +132,8 @@ class ChatLogService:
                 raise HTTPException(status_code=404, detail=f"Session {session_db_id} not found")
             
             # Get session UUID for caching and broadcasting
-            # PG18 migration: The UUID PK is now 'id'
-            session_uuid = session.get('id') or session.get('session_id')  # UUID format
+            # PG18: session_id is now id (UUIDv7)
+            session_uuid = session.get('id')  # UUID format
             
             # Get agent user ID for broadcasting
             agent_id = await self.dao.get_user_id_by_email(agent_email)
@@ -534,8 +519,8 @@ class ChatLogService:
         if not session_data:
             raise HTTPException(status_code=404, detail="Chat session not found")
         
-        # PG18: The UUID PK is now 'id'
-        session_uuid = session_data.get('id') or session_data.get('session_id')  # UUID format
+        # PG18: session_id is now id (UUIDv7)
+        session_uuid = session_data.get('id')  # UUID format
 
         metadata = session_data['metadata'] or {}
         if isinstance(metadata, str):
@@ -589,8 +574,8 @@ class ChatLogService:
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # PG18: The UUID PK is now 'id'
-        session_uuid = session.get('id') or session.get('session_id')  # UUID format
+        # PG18: session_id is now id (UUIDv7)
+        session_uuid = session.get('id')  # UUID format
 
         await self.dao.archive_session(session_id, 'closed')
         

@@ -84,7 +84,7 @@ async def validate_chat_window_load(request: Request):
             "ready": bool,
             "chat_enabled": bool,
             "domain_authorized": bool,
-            "session_uuid": str | null,
+            "session_id": str | null,
             "reason": str | null
         }
     """
@@ -106,7 +106,7 @@ async def validate_chat_window_load(request: Request):
                 "ready": False,
                 "chat_enabled": False,
                 "domain_authorized": False,
-                "session_uuid": None,
+                "session_id": None,
                 "reason": "Widget embedding not authorized for this domain"
             }
 
@@ -139,7 +139,7 @@ async def validate_chat_window_load(request: Request):
                 "ready": False,
                 "chat_enabled": False,
                 "domain_authorized": True,
-                "session_uuid": None,
+                "session_id": None,
                 "reason": "Chat is currently disabled"
             }
 
@@ -165,7 +165,7 @@ async def validate_chat_window_load(request: Request):
                             "ready": False,
                             "chat_enabled": True,
                             "domain_authorized": True,
-                            "session_uuid": None,
+                            "session_id": None,
                             "reason": f"Service {service_name} is not ready (status {resp.status_code})"
                         }
                 except Exception as svc_err:
@@ -174,7 +174,7 @@ async def validate_chat_window_load(request: Request):
                         "ready": False,
                         "chat_enabled": True,
                         "domain_authorized": True,
-                        "session_uuid": None,
+                        "session_id": None,
                         "reason": f"Service {service_name} is not reachable"
                     }
 
@@ -192,31 +192,31 @@ async def validate_chat_window_load(request: Request):
                         "ready": False,
                         "chat_enabled": True,
                         "domain_authorized": True,
-                        "session_uuid": None,
+                        "session_id": None,
                         "reason": f"Failed to create session (status {session_response.status_code})"
                     }
 
                 session_data = session_response.json()
-                session_uuid = session_data.get("session_id")
+                session_id = session_data.get("session_id")
 
-                if not session_uuid:
+                if not session_id:
                     logger.error(f"[{correlation_id}] ❌ Session creation returned no session_id")
                     return {
                         "ready": False,
                         "chat_enabled": True,
                         "domain_authorized": True,
-                        "session_uuid": None,
+                        "session_id": None,
                         "reason": "Failed to generate session ID"
                     }
 
-                logger.info(f"[{correlation_id}] ✅ Session created with PG18 UUIDv7: {session_uuid}")
+                logger.info(f"[{correlation_id}] ✅ Session created with PG18 UUIDv7: {session_id}")
         except Exception as session_err:
             logger.error(f"[{correlation_id}] ❌ Session creation error: {session_err}")
             return {
                 "ready": False,
                 "chat_enabled": True,
                 "domain_authorized": True,
-                "session_uuid": None,
+                "session_id": None,
                 "reason": f"Failed to create session: {str(session_err)}"
             }
 
@@ -224,7 +224,7 @@ async def validate_chat_window_load(request: Request):
             "ready": True,
             "chat_enabled": True,
             "domain_authorized": True,
-            "session_uuid": session_uuid,
+            "session_id": session_id,
             "reason": None
         }
 
@@ -234,7 +234,7 @@ async def validate_chat_window_load(request: Request):
             "ready": False,
             "chat_enabled": False,
             "domain_authorized": True,
-            "session_uuid": None,
+            "session_id": None,
             "reason": f"Chat initialization failed: {str(e)}"
         }
 

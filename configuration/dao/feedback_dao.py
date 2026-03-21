@@ -49,7 +49,7 @@ class FeedbackDAO:
     async def get_all_feedback(self) -> List[Dict[str, Any]]:
         """Get all feedback (sessions with feedback provided)."""
         query = """
-            SELECT id as session_id, feedback_type, feedback_provided_at, user_role_id
+            SELECT id, feedback_type, feedback_provided_at, user_role_id
             FROM chat_sessions
             WHERE feedback_type IS NOT NULL
             ORDER BY feedback_provided_at DESC
@@ -89,7 +89,7 @@ class FeedbackDAO:
         # PG18: id IS the UUIDv7 PK — alias as session_id for backward compat
         query = f"""
             SELECT
-                id as session_id,
+                id,
                 feedback_type
             FROM chat_sessions
             WHERE id IN ({placeholders})
@@ -104,7 +104,7 @@ class FeedbackDAO:
 
                 # Transform results into expected format
                 for record in records:
-                    session_id = str(record['session_id'])
+                    session_id = str(record['id'])
                     feedback_type = record.get('feedback_type')
 
                     if session_id in result_dict:

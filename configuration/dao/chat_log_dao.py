@@ -1048,7 +1048,7 @@ class ChatLogDAO:
         # PG18: id IS the UUIDv7 PK — alias as session_id for backward compat
         query = f"""
             SELECT
-                id as session_id,
+                id,
                 feedback_type
             FROM chat_sessions
             WHERE id IN ({placeholders})
@@ -1079,7 +1079,7 @@ class ChatLogDAO:
             result_dict = {}
             for row in rows:
                 row_dict = dict(row._mapping)
-                session_id = row_dict['session_id']
+                session_id = str(row_dict['id'])
                 feedback_type = row_dict.get('feedback_type')
                 
                 result_dict[session_id] = {
