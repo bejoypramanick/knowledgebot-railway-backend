@@ -1045,9 +1045,6 @@ async def generic_proxy_handler(request: Request, path: str):
         if "chatAgentConfig" in backend_path or "configuration/chatAgentConfig" in backend_path:
             request_timeout = 60.0  # Configuration aggregates multiple DB queries
             logger.info(f"⏱️  Using extended timeout {request_timeout}s for chatAgentConfig (multiple parallel queries)")
-        elif "configuration/data/" in backend_path:
-            request_timeout = 60.0  # Data endpoints may do complex queries
-            logger.info(f"⏱️  Using extended timeout {request_timeout}s for data endpoint")
         elif "batch" in backend_path or "batchupload" in backend_path or "delete/batch" in backend_path:
             request_timeout = 300.0  # 5 minutes for batch operations
             logger.info(f"⏱️  Using extended timeout {request_timeout}s for batch operation")
