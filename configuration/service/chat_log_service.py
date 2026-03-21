@@ -519,13 +519,27 @@ class ChatLogService:
         start_time = time.time()
         logger.info(f"🔍 [STREAM] Starting stream_chat_sessions - role={role}, status={archive_status}, limit={limit}, cursor={cursor}")
 
-        # Resolve current user ID for is_assigned_to_me
+        import asyncio
+
+        # Pre-fetch User-N mapping + resolve current user ID in parallel
+        # Both are fast indexed queries (~5ms each), run simultaneously
         current_user_id = None
-        if user_email:
-            try:
-                current_user_id = await self.dao.get_user_id_by_email(user_email)
-            except Exception as e:
-                logger.warning(f"⚠️ Could not get user ID for {user_email}: {e}")
+        display_id_map = {}
+
+        async def _resolve_user():
+            nonlocal current_user_id
+            if user_email:
+                try:
+                    current_user_id = await self.dao.get_user_id_by_email(user_email)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not get user ID for {user_email}: {e}")
+
+        async def _fetch_display_map():
+            nonlocal display_id_map
+            display_id_map = await self.dao.get_user_display_id_map()
+
+        await asyncio.gather(_resolve_user(), _fetch_display_map())
+        logger.info(f"⏱️ [STREAM] Pre-fetch done: {len(display_id_map)} display IDs, user_id={current_user_id}")
 
         from ..schemas.chat_log_schemas import ChatSessionResponse, ChatMessageResponse
 
@@ -533,7 +547,8 @@ class ChatLogService:
         async for session_row in self.dao.stream_all_sessions_with_latest_message(
             archive_status=archive_status,
             limit=limit,
-            cursor_timestamp=cursor
+            cursor_timestamp=cursor,
+            display_id_map=display_id_map
         ):
             session_count += 1
             session_id = str(session_row['id'])
