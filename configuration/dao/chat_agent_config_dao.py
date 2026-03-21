@@ -55,7 +55,7 @@ class ChatAgentConfigDAO:
             WHEN NOT MATCHED THEN
                 INSERT (setting_name, setting_value, setting_type)
                 VALUES (source.setting_name, source.setting_value, source.setting_type)
-            RETURNING merge_action() AS action, setting_name
+            RETURNING merge_action() AS action, target.setting_name
         """)
         params = {'name': name, 'value': value, 'setting_type': setting_type}
         try:
