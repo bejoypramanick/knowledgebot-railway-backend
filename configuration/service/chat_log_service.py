@@ -499,6 +499,131 @@ class ChatLogService:
         logger.info(f"✅ [CHATLOG] Completed get_chat_sessions: {len(formatted_sessions)} sessions formatted in {total_duration:.2f}s total")
         return formatted_sessions, total_count
 
+    async def stream_chat_sessions(
+        self,
+        role: str,
+        user_email: str,
+        archive_status: str,
+        limit: int,
+        cursor: str = None,
+        agent_id: str = None
+    ):
+        """
+        Async generator that yields formatted sessions one-by-one for SSE streaming.
+        Uses PG18 server-side cursor + LATERAL join for progressive rendering.
+
+        Yields:
+            dict — each session formatted as ChatSessionResponse-compatible dict
+        """
+        import time
+        start_time = time.time()
+        logger.info(f"🔍 [STREAM] Starting stream_chat_sessions - role={role}, status={archive_status}, limit={limit}, cursor={cursor}")
+
+        # Resolve current user ID for is_assigned_to_me
+        current_user_id = None
+        if user_email:
+            try:
+                current_user_id = await self.dao.get_user_id_by_email(user_email)
+            except Exception as e:
+                logger.warning(f"⚠️ Could not get user ID for {user_email}: {e}")
+
+        from ..schemas.chat_log_schemas import ChatSessionResponse, ChatMessageResponse
+
+        session_count = 0
+        async for session_row in self.dao.stream_all_sessions_with_latest_message(
+            archive_status=archive_status,
+            limit=limit,
+            cursor_timestamp=cursor
+        ):
+            session_count += 1
+            session_id = str(session_row['id'])
+            session_db_id = session_id
+
+            # Parse metadata
+            raw_metadata = session_row.get('metadata')
+            if raw_metadata is None:
+                metadata = {}
+            elif isinstance(raw_metadata, str):
+                try:
+                    metadata = json.loads(raw_metadata)
+                except (json.JSONDecodeError, TypeError):
+                    metadata = {}
+            elif isinstance(raw_metadata, dict):
+                metadata = raw_metadata
+            else:
+                metadata = {}
+
+            # Build latest message (from LATERAL join, no extra query)
+            messages = []
+            if session_row.get('latest_msg_content'):
+                messages = [ChatMessageResponse(
+                    id=str(session_row['latest_msg_id']),
+                    text=session_row['latest_msg_content'],
+                    sender=session_row['latest_msg_role'],
+                    timestamp=session_row['latest_msg_at'].isoformat() if session_row.get('latest_msg_at') else datetime.utcnow().isoformat(),
+                    session_id=session_id
+                )]
+
+            # Determine assigned agent
+            assigned_agent = metadata.get('assigned_agent')
+            if not assigned_agent and session_row.get('agent_email'):
+                assigned_agent = session_row['agent_email']
+            if not assigned_agent and agent_id:
+                assigned_agent = agent_id
+
+            # Determine status
+            status = session_row.get('archive_status', 'active')
+            if status == 'active':
+                last_activity = session_row.get('last_activity_at')
+                is_expired = False
+                if last_activity:
+                    if last_activity.tzinfo:
+                        last_activity_naive = last_activity.replace(tzinfo=None) - (last_activity.utcoffset() or timedelta(0))
+                    else:
+                        last_activity_naive = last_activity
+                    time_diff = datetime.utcnow() - last_activity_naive
+                    is_expired = time_diff.total_seconds() > 300
+
+                if not (session_row.get('is_active') and assigned_agent and not is_expired):
+                    status = 'closed'
+
+            # Feedback from chat_sessions.feedback_type (already in the row from main query)
+            feedback_type = session_row.get('feedback_type')
+            session_feedback = feedback_type if feedback_type in ('positive', 'negative') else None
+
+            # User display ID
+            user_display_id = session_row.get('user_display_id') or f"User-{session_db_id[:8]}"
+            customer_name = metadata.get('customer_name') or user_display_id
+
+            # Assignment check
+            assigned_agent_id = session_row.get('agent_id')
+            is_assigned_to_me = (assigned_agent_id is not None and current_user_id is not None and assigned_agent_id == current_user_id)
+
+            session_obj = ChatSessionResponse(
+                id=str(session_db_id),
+                session_uuid=session_id,
+                user_display_id=user_display_id,
+                customer_name=customer_name,
+                customer_email=metadata.get('customer_email') or user_display_id,
+                status=status,
+                last_message_at=session_row['last_activity_at'].isoformat() if session_row.get('last_activity_at') else datetime.utcnow().isoformat(),
+                created_at=session_row['created_at'].isoformat() if session_row.get('created_at') else None,
+                assigned_agent=assigned_agent,
+                assigned_agent_id=assigned_agent_id,
+                is_assigned_to_me=is_assigned_to_me,
+                feedback=session_feedback,
+                customer_feedback=session_feedback,
+                agent_feedback=session_feedback,
+                chat_type='human-handoff' if assigned_agent else 'ai-chat',
+                is_session_read=session_row.get('is_session_read', False),
+                messages=messages
+            )
+
+            yield session_obj.dict()
+
+        total_duration = time.time() - start_time
+        logger.info(f"✅ [STREAM] Streamed {session_count} sessions in {total_duration:.2f}s")
+
     async def get_session_messages(self, session_id: str):
         """Get all messages for a specific chat session (full conversation on click)."""
         return await self.dao.get_session_messages(session_id)

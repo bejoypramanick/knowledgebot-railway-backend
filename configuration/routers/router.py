@@ -1393,6 +1393,94 @@ async def get_admin_chat_sessions(
         logger.error(f"❌ Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/admin/chat-sessions/stream")
+async def stream_admin_chat_sessions(
+    request: Request,
+    status: str = "all",
+    limit: int = 50,
+    cursor: str = None,
+    role: str = "admin",
+    agent_id: str = None,
+):
+    """
+    SSE endpoint that streams chat sessions one-by-one from PG18.
+    Uses server-side cursor + LATERAL join for progressive rendering.
+    Supports cursor-based infinite scroll.
+
+    SSE event format:
+      event: count\ndata: {"total_count": 150}\n\n
+      event: session\ndata: {session JSON}\n\n
+      event: done\ndata: {"loaded": 50, "has_more": true, "next_cursor": "2025-03-20T..."}\n\n
+
+    Query params:
+      status: "all"|"active"|"closed"
+      limit: sessions per page (default 50)
+      cursor: ISO timestamp of last session's last_activity_at (for infinite scroll)
+      role: "admin"|"human_agent"
+      agent_id: optional agent filter
+    """
+    try:
+        user_email = getattr(request.state, "user_email", None) or request.headers.get("X-User-Email", "")
+        if not user_email:
+            raise HTTPException(status_code=401, detail="User email not found in request")
+
+        logger.info(f"🔌 [SSE-STREAM] Chat sessions stream requested: status={status}, limit={limit}, cursor={cursor}")
+
+        # Get total count first (fast indexed query)
+        total_count = await chat_log_service.dao.count_all_sessions(status)
+
+        async def event_generator():
+            import time as _time
+
+            try:
+                # 1. Send total count immediately so UI can show "X conversations"
+                yield f"event: count\ndata: {json.dumps({'total_count': total_count})}\n\n"
+
+                # 2. Stream sessions one-by-one
+                loaded = 0
+                last_cursor = None
+
+                async for session_dict in chat_log_service.stream_chat_sessions(
+                    role=role,
+                    user_email=user_email,
+                    archive_status=status,
+                    limit=limit,
+                    cursor=cursor,
+                    agent_id=agent_id
+                ):
+                    loaded += 1
+                    last_cursor = session_dict.get('last_message_at')
+                    yield f"event: session\ndata: {json.dumps(session_dict, default=str)}\n\n"
+
+                # 3. Send done marker with next cursor for infinite scroll
+                has_more = (loaded == limit) and (loaded < total_count)
+                yield f"event: done\ndata: {json.dumps({'loaded': loaded, 'has_more': has_more, 'next_cursor': last_cursor, 'total_count': total_count})}\n\n"
+
+                logger.info(f"✅ [SSE-STREAM] Streamed {loaded} sessions, has_more={has_more}")
+
+            except (BrokenPipeError, ConnectionResetError) as e:
+                logger.debug(f"🔌 [SSE-STREAM] Client disconnected: {type(e).__name__}")
+            except Exception as e:
+                logger.error(f"❌ [SSE-STREAM] Error in event generator: {e}")
+                import traceback
+                logger.error(f"❌ [SSE-STREAM] Traceback: {traceback.format_exc()}")
+                yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ [SSE-STREAM] Error setting up stream: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/customer/sessions/messages")
 async def send_customer_message(request: Request):
     """Send a message from a customer to an assigned agent (no AI processing)

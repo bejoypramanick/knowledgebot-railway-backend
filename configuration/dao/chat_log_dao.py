@@ -1161,6 +1161,104 @@ class ChatLogDAO:
             logger.error(f"❌ Failed to mark session {session_id} as unread: {e}")
             return False
 
+    async def stream_all_sessions_with_latest_message(
+        self,
+        archive_status: str,
+        limit: int,
+        cursor_timestamp: Optional[str] = None
+    ):
+        """
+        Stream sessions one-by-one using PG18 server-side cursor.
+        Uses LATERAL join to include latest message per session inline.
+        Uses keyset (cursor) pagination for efficient infinite scroll.
+
+        Yields:
+            Dict for each session row (includes latest_msg_content, latest_msg_role, latest_msg_at)
+        """
+        import time
+        start_time = time.time()
+        logger.info(f"🔍 [STREAM-DAO] stream_all_sessions called: status={archive_status}, limit={limit}, cursor={cursor_timestamp}")
+
+        # Build cursor condition for keyset pagination
+        cursor_condition = ""
+        params = {"limit": limit}
+
+        if cursor_timestamp:
+            cursor_condition = "AND cs.last_activity_at < :cursor_ts"
+            params["cursor_ts"] = cursor_timestamp
+
+        if archive_status.lower() == 'all':
+            status_condition = ""
+        else:
+            status_condition = "AND cs.archive_status = :archive_status"
+            params["archive_status"] = archive_status
+
+        query = f"""
+            WITH ranked_sessions AS (
+                SELECT cs.*,
+                       'User-' || ROW_NUMBER() OVER (ORDER BY cs.created_at ASC) as user_display_id
+                FROM chat_sessions cs
+                WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
+                {status_condition}
+            ),
+            deduped AS (
+                SELECT DISTINCT ON (rs.id) rs.*, u.email as agent_email, u.id as agent_id
+                FROM ranked_sessions rs
+                LEFT JOIN session_assignments sa ON rs.id = sa.session_id
+                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                LEFT JOIN users u ON urm.user_id = u.id
+                ORDER BY rs.id, CASE WHEN sa.status = 'active' THEN 0 ELSE 1 END, sa.assigned_at DESC NULLS LAST
+            )
+            SELECT d.*,
+                   lm.content as latest_msg_content,
+                   lm.role as latest_msg_role,
+                   lm.created_at as latest_msg_at,
+                   lm.id as latest_msg_id
+            FROM deduped d
+            LEFT JOIN LATERAL (
+                SELECT id, content, role, created_at
+                FROM chat_messages
+                WHERE session_id = d.id
+                ORDER BY created_at DESC
+                LIMIT 1
+            ) lm ON true
+            WHERE 1=1 {cursor_condition.replace('cs.', 'd.')}
+            ORDER BY d.last_activity_at DESC NULLS LAST
+            LIMIT :limit
+        """
+
+        try:
+            logger.log_db_operation(query, params)
+
+            async with get_db_session() as session:
+                # Use stream() for PG18 server-side cursor — yields rows as they arrive
+                result = await session.stream(text(query), params)
+
+                row_count = 0
+                async for row in result:
+                    row_count += 1
+                    yield dict(row._mapping)
+
+                logger.info(f"⏱️ [STREAM-DAO] Streamed {row_count} sessions in {time.time() - start_time:.2f}s")
+
+        except Exception as e:
+            logger.error(f"❌ [STREAM-DAO] Error streaming sessions: {e}")
+            import traceback
+            logger.error(f"❌ [STREAM-DAO] Traceback: {traceback.format_exc()}")
+
+    async def get_feedback_for_session(self, session_id: str) -> Optional[str]:
+        """Get feedback type for a single session (used in streaming mode)."""
+        query = "SELECT feedback_type FROM chat_sessions WHERE id = :session_id"
+        try:
+            params = {"session_id": session_id}
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                return row[0] if row and row[0] else None
+        except Exception as e:
+            logger.error(f"❌ [STREAM-DAO] Error getting feedback for {session_id}: {e}")
+            return None
+
     async def is_session_read(self, session_id: str) -> bool:
         """Check if session is read."""
         query = "SELECT is_session_read FROM chat_sessions WHERE id = :session_id"
