@@ -90,7 +90,6 @@ async def validate_chat_window_load(request: Request):
     """
     try:
         from shared.redis_widget_config_cache import get_display_chatbot, set_display_chatbot
-        from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
         import uuid
 
         correlation_id = str(uuid.uuid4())
@@ -179,11 +178,47 @@ async def validate_chat_window_load(request: Request):
                         "reason": f"Service {service_name} is not reachable"
                     }
 
-        # Step 4: Create session with PG18 database-generated UUIDv7
-        session_dao = SessionPersistenceDAO()
-        session_uuid = await session_dao.create_session()
+        # Step 4: Create session with PG18 database-generated UUIDv7 (via chatbot_orchestration service)
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                session_response = await client.post(
+                    f"{settings.chatbot_orchestration_url}/api/v1/chatbot/chat/session",
+                    json={"agent_id": "default"}
+                )
 
-        logger.info(f"[{correlation_id}] ✅ Session created with PG18 UUIDv7: {session_uuid}")
+                if session_response.status_code != 200:
+                    logger.error(f"[{correlation_id}] ❌ Session creation failed: {session_response.status_code}")
+                    return {
+                        "ready": False,
+                        "chat_enabled": True,
+                        "domain_authorized": True,
+                        "session_uuid": None,
+                        "reason": f"Failed to create session (status {session_response.status_code})"
+                    }
+
+                session_data = session_response.json()
+                session_uuid = session_data.get("session_id")
+
+                if not session_uuid:
+                    logger.error(f"[{correlation_id}] ❌ Session creation returned no session_id")
+                    return {
+                        "ready": False,
+                        "chat_enabled": True,
+                        "domain_authorized": True,
+                        "session_uuid": None,
+                        "reason": "Failed to generate session ID"
+                    }
+
+                logger.info(f"[{correlation_id}] ✅ Session created with PG18 UUIDv7: {session_uuid}")
+        except Exception as session_err:
+            logger.error(f"[{correlation_id}] ❌ Session creation error: {session_err}")
+            return {
+                "ready": False,
+                "chat_enabled": True,
+                "domain_authorized": True,
+                "session_uuid": None,
+                "reason": f"Failed to create session: {str(session_err)}"
+            }
 
         return {
             "ready": True,
