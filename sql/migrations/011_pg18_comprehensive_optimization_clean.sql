@@ -34,8 +34,8 @@ ALTER TABLE chat_sessions ADD COLUMN sentiment_score int
     ELSE 0 END
   ) VIRTUAL;
 
-ALTER TABLE chat_sessions ADD COLUMN session_timespan tsrange
-  GENERATED ALWAYS AS (tsrange(started_at, COALESCE(ended_at, last_activity_at))) VIRTUAL;
+ALTER TABLE chat_sessions ADD COLUMN session_timespan tstzrange
+  GENERATED ALWAYS AS (tstzrange(started_at, COALESCE(ended_at, last_activity_at))) VIRTUAL;
 
 ALTER TABLE chat_messages ADD COLUMN quality_score int
   GENERATED ALWAYS AS (
@@ -88,8 +88,8 @@ ALTER TABLE token_usage_log ADD COLUMN model_provider_key varchar(200)
 ALTER TABLE token_usage_log ADD COLUMN calculated_cost_cents int
   GENERATED ALWAYS AS (ROUND((prompt_tokens * 0.003 + completion_tokens * 0.006)::numeric)::int) VIRTUAL;
 
-ALTER TABLE metrics ADD COLUMN metric_window tsrange
-  GENERATED ALWAYS AS (tsrange(created_at, updated_at)) VIRTUAL;
+ALTER TABLE metrics ADD COLUMN metric_window tstzrange
+  GENERATED ALWAYS AS (tstzrange(created_at, updated_at)) VIRTUAL;
 
 DROP INDEX IF EXISTS idx_users_email;
 CREATE INDEX idx_users_email_covering ON users(email)
