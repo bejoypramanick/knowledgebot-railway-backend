@@ -333,59 +333,44 @@ class ChatLogDAO:
             return []
 
         # Handle 'all' status - return all sessions regardless of archive status
-        if archive_status.lower() == 'all':
-            query = """
-                SELECT * FROM (
-                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email, u.id as agent_id
+        # Include global User-N identifier
+        try:
+            query = f"""
+                WITH ranked_sessions AS (
+                    SELECT cs.*, 
+                           'User-' || ROW_NUMBER() OVER (ORDER BY cs.created_at ASC) as user_display_id
                     FROM chat_sessions cs
-                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-                    LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                    LEFT JOIN users u ON urm.user_id = u.id
+                    WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
+                ),
+                agent_sessions AS (
+                    SELECT rs.*, u.email as agent_email, u.id as agent_id
+                    FROM ranked_sessions rs
+                    JOIN session_assignments sa ON rs.id = sa.session_id
+                    JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                    JOIN users u ON urm.user_id = u.id
                     WHERE sa.user_role_id = :user_role_id
-                      AND (cs.message_count > 0 OR cs.message_count IS NULL)
-                    ORDER BY cs.id
-                ) deduped
-                ORDER BY deduped.last_activity_at DESC NULLS LAST
+                      AND (:archive_status = 'all' OR rs.archive_status = :archive_status)
+                      AND (rs.message_count > 0 OR rs.message_count IS NULL)
+                )
+                SELECT DISTINCT ON (id) * FROM agent_sessions
+                ORDER BY id, last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
             """
-            try:
-                params = {"user_role_id": user_role_id, "limit": limit, "offset": offset}
-                logger.log_db_operation(query, params)
-                async with get_db_session() as session:
-                    result = await session.execute(text(query), params)
-                    rows = result.fetchall()
-                    logger.log_db_query(query, params, rows)
-                    return [dict(row._mapping) for row in rows]
-            except Exception as e:
-                logger.log_db_query(query, params, error=e)
-                return []
-        else:
-            query = """
-                SELECT * FROM (
-                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email, u.id as agent_id
-                    FROM chat_sessions cs
-                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-                    LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                    LEFT JOIN users u ON urm.user_id = u.id
-                    WHERE sa.user_role_id = :user_role_id
-                      AND cs.archive_status = :archive_status
-                      AND (cs.message_count > 0 OR cs.message_count IS NULL)
-                    ORDER BY cs.id
-                ) deduped
-                ORDER BY deduped.last_activity_at DESC NULLS LAST
-                LIMIT :limit OFFSET :offset
-            """
-            try:
-                params = {"user_role_id": user_role_id, "archive_status": archive_status, "limit": limit, "offset": offset}
-                logger.log_db_operation(query, params)
-                async with get_db_session() as session:
-                    result = await session.execute(text(query), params)
-                    rows = result.fetchall()
-                    logger.log_db_query(query, params, rows)
-                    return [dict(row._mapping) for row in rows]
-            except Exception as e:
-                logger.log_db_query(query, params, error=e)
-                return []
+            params = {
+                "user_role_id": user_role_id, 
+                "archive_status": archive_status, 
+                "limit": limit, 
+                "offset": offset
+            }
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                rows = result.fetchall()
+                logger.log_db_query(query, params, rows)
+                return [dict(row._mapping) for row in rows]
+        except Exception as e:
+            logger.error(f"❌ Error fetching sessions for agent {email}: {e}")
+            return []
 
     async def count_sessions_for_agent(self, email: str, archive_status: str) -> int:
         user_role_id = await self.get_user_role_id(email)
@@ -436,35 +421,30 @@ class ChatLogDAO:
         logger.info(f"🔍 [CHATLOG-DAO] get_all_sessions called: archive_status={archive_status}, limit={limit}, offset={offset}")
         
         # Handle 'all' status - return all sessions regardless of archive status
-        # Exclude sessions with no messages (abandoned/test sessions)
+        # Include a global sequence number (User-1, User-2, etc.) based on creation time
         if archive_status.lower() == 'all':
             query = """
-                SELECT * FROM (
-                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email, u.id as agent_id
+                WITH ranked_sessions AS (
+                    SELECT cs.*, 
+                           'User-' || ROW_NUMBER() OVER (ORDER BY cs.created_at ASC) as user_display_id
                     FROM chat_sessions cs
-                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                    WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
+                ),
+                deduped AS (
+                    SELECT DISTINCT ON (rs.id) rs.*, u.email as agent_email, u.id as agent_id
+                    FROM ranked_sessions rs
+                    LEFT JOIN session_assignments sa ON rs.id = sa.session_id
                     LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                     LEFT JOIN users u ON urm.user_id = u.id
-                    WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
-                    ORDER BY cs.id, CASE WHEN sa.status = 'active' THEN 0 ELSE 1 END, sa.assigned_at DESC NULLS LAST
-                ) deduped
-                ORDER BY deduped.last_activity_at DESC NULLS LAST
+                    ORDER BY rs.id, CASE WHEN sa.status = 'active' THEN 0 ELSE 1 END, sa.assigned_at DESC NULLS LAST
+                )
+                SELECT * FROM deduped
+                ORDER BY last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
             """
-            explain_query = f"EXPLAIN ANALYZE {query}"
             
             try:
                 params = {"limit": limit, "offset": offset}
-                logger.info(f"🔍 [CHATLOG-DAO] Executing query with params: {params}")
-                
-                # Run EXPLAIN ANALYZE
-                async with get_db_session() as session:
-                    explain_result = await session.execute(text(explain_query), params)
-                    explain_rows = explain_result.fetchall()
-                    logger.info(f"📊 [CHATLOG-DAO] get_all_sessions EXPLAIN ANALYZE:")
-                    for row in explain_rows:
-                        logger.info(f"📊 {row[0]}")
-                
                 logger.log_db_operation(query, params)
                 
                 db_start = time.time()
@@ -482,33 +462,28 @@ class ChatLogDAO:
                 return []
         else:
             query = """
-                SELECT * FROM (
-                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email, u.id as agent_id
+                WITH ranked_sessions AS (
+                    SELECT cs.*, 
+                           'User-' || ROW_NUMBER() OVER (ORDER BY cs.created_at ASC) as user_display_id
                     FROM chat_sessions cs
-                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-                    LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                    LEFT JOIN users u ON urm.user_id = u.id
                     WHERE cs.archive_status = :archive_status
                       AND (cs.message_count > 0 OR cs.message_count IS NULL)
-                    ORDER BY cs.id, CASE WHEN sa.status = 'active' THEN 0 ELSE 1 END, sa.assigned_at DESC NULLS LAST
-                ) deduped
-                ORDER BY deduped.last_activity_at DESC NULLS LAST
+                ),
+                deduped AS (
+                    SELECT DISTINCT ON (rs.id) rs.*, u.email as agent_email, u.id as agent_id
+                    FROM ranked_sessions rs
+                    LEFT JOIN session_assignments sa ON rs.id = sa.session_id
+                    LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                    LEFT JOIN users u ON urm.user_id = u.id
+                    ORDER BY rs.id, CASE WHEN sa.status = 'active' THEN 0 ELSE 1 END, sa.assigned_at DESC NULLS LAST
+                )
+                SELECT * FROM deduped
+                ORDER BY last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
             """
-            explain_query = f"EXPLAIN ANALYZE {query}"
             
             try:
                 params = {"archive_status": archive_status, "limit": limit, "offset": offset}
-                logger.info(f"🔍 [CHATLOG-DAO] Executing query with params: {params}")
-                
-                # Run EXPLAIN ANALYZE
-                async with get_db_session() as session:
-                    explain_result = await session.execute(text(explain_query), params)
-                    explain_rows = explain_result.fetchall()
-                    logger.info(f"📊 [CHATLOG-DAO] get_all_sessions (filtered) EXPLAIN ANALYZE:")
-                    for row in explain_rows:
-                        logger.info(f"📊 {row[0]}")
-                
                 logger.log_db_operation(query, params)
                 
                 db_start = time.time()
@@ -531,22 +506,11 @@ class ChatLogDAO:
         
         try:
             # Handle 'all' status - count all sessions regardless of archive status
-            # Exclude sessions with no messages (abandoned/test sessions)
             if archive_status.lower() == 'all':
                 query = "SELECT COUNT(*) FROM chat_sessions WHERE (message_count > 0 OR message_count IS NULL)"
-                explain_query = f"EXPLAIN ANALYZE {query}"
                 params = {}
                 
-                # Run EXPLAIN ANALYZE
-                async with get_db_session() as session:
-                    explain_result = await session.execute(text(explain_query), params)
-                    explain_rows = explain_result.fetchall()
-                    logger.info(f"📊 [CHATLOG-DAO] count_all_sessions EXPLAIN ANALYZE:")
-                    for row in explain_rows:
-                        logger.info(f"📊 {row[0]}")
-                
                 logger.log_db_operation(query, params)
-                
                 db_start = time.time()
                 async with get_db_session() as session:
                     result = await session.execute(text(query), params)
@@ -558,19 +522,9 @@ class ChatLogDAO:
                 return count or 0
             else:
                 query = "SELECT COUNT(*) FROM chat_sessions WHERE archive_status = :archive_status AND (message_count > 0 OR message_count IS NULL)"
-                explain_query = f"EXPLAIN ANALYZE {query}"
                 params = {"archive_status": archive_status}
                 
-                # Run EXPLAIN ANALYZE
-                async with get_db_session() as session:
-                    explain_result = await session.execute(text(explain_query), params)
-                    explain_rows = explain_result.fetchall()
-                    logger.info(f"📊 [CHATLOG-DAO] count_all_sessions (filtered) EXPLAIN ANALYZE:")
-                    for row in explain_rows:
-                        logger.info(f"📊 {row[0]}")
-                
                 logger.log_db_operation(query, params)
-                
                 db_start = time.time()
                 async with get_db_session() as session:
                     result = await session.execute(text(query), params)
@@ -1054,17 +1008,7 @@ class ChatLogDAO:
             WHERE id IN ({placeholders})
         """
         
-        explain_query = f"EXPLAIN ANALYZE {query}"
-
         try:
-            # Run EXPLAIN ANALYZE
-            async with get_db_session() as session:
-                explain_result = await session.execute(text(explain_query), params)
-                explain_rows = explain_result.fetchall()
-                logger.info(f"📊 [CHATLOG-DAO] get_batch_feedback_counts EXPLAIN ANALYZE:")
-                for row in explain_rows:
-                    logger.info(f"📊 {row[0]}")
-            
             logger.log_db_operation(query, params)
             
             db_start = time.time()

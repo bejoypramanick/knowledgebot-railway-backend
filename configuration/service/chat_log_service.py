@@ -377,15 +377,19 @@ class ChatLogService:
         step_duration = time.time() - step_start
         logger.info(f"⏱️ [CHATLOG] Step 2: Loaded latest messages for {len(latest_messages)} sessions in {step_duration:.2f}s")
 
-        # Get all session IDs for batch feedback query (uses new UUID PK 'id')
+        # Get all session IDs for batch queries (uses new UUID PK 'id')
         session_ids = [str(s['id']) for s in sessions_data]
-        logger.info(f"⚡ [CHATLOG] Fetching feedback for {len(session_ids)} sessions")
+        logger.info(f"⚡ [CHATLOG] Batch fetching data for {len(session_ids)} sessions")
         
-        # OPTIMIZATION: Fetch feedback counts for all sessions in one query
+        # OPTIMIZATION: Batch fetch messages and feedback counts in parallel
         step_start = time.time()
-        batch_feedback_counts = await self.dao.get_batch_feedback_counts(session_ids)
+        import asyncio
+        batch_messages, batch_feedback_counts = await asyncio.gather(
+            self.dao.get_messages_for_sessions(session_ids),
+            self.dao.get_batch_feedback_counts(session_ids)
+        )
         step_duration = time.time() - step_start
-        logger.info(f"⏱️ [CHATLOG] Step 3: Loaded feedback counts in {step_duration:.2f}s")
+        logger.info(f"⏱️ [CHATLOG] Step 3: Batch loaded messages and feedback in {step_duration:.2f}s")
 
         formatted_sessions = []
         for session_row in sessions_data:
@@ -408,7 +412,10 @@ class ChatLogService:
 
             # Include all messages for the session (needed for chat detail view)
             from ..schemas.chat_log_schemas import ChatMessageResponse
-            all_session_messages = await self.dao.get_session_messages(session_db_id)
+            
+            # Use pre-fetched batch messages to avoid N+1 queries
+            all_session_messages = batch_messages.get(session_id, [])
+            
             messages = [
                 ChatMessageResponse(
                     id=str(msg['id']),
@@ -417,7 +424,7 @@ class ChatLogService:
                     timestamp=msg['created_at'].isoformat() if msg['created_at'] else datetime.utcnow().isoformat(),
                     session_id=session_id
                 )
-                for msg in (all_session_messages or [])
+                for msg in all_session_messages
             ]
 
             assigned_agent = metadata.get('assigned_agent')
@@ -453,10 +460,13 @@ class ChatLogService:
             elif feedback_counts['negative_count'] > 0:
                 session_feedback = 'negative'
 
+            # Get User-N identifier (pre-computed in DAO via global ROW_NUMBER)
+            user_display_id = session_row.get('user_display_id') or f"User-{session_db_id[:8]}"
+
             # Get customer_name from metadata or generate it
             customer_name = metadata.get('customer_name')
             if not customer_name:
-                customer_name = f"User-{session_db_id}"
+                customer_name = user_display_id
 
             # Get agent_id from SQL join (session_assignments → user_role_mapping → users)
             assigned_agent_id = session_row.get('agent_id')
@@ -468,8 +478,9 @@ class ChatLogService:
             formatted_sessions.append(ChatSessionResponse(
                 id=str(session_db_id),
                 session_uuid=session_id,  # Include the UUID for frontend to use in mark-read/unread calls
+                user_display_id=user_display_id, # SEQUENTIAL Rank: User-1, User-2, etc.
                 customer_name=customer_name,  # Use generated name if not in metadata
-                customer_email=metadata.get('customer_email'),
+                customer_email=metadata.get('customer_email') or user_display_id,
                 status=status,
                 last_message_at=session_row['last_activity_at'].isoformat() if session_row['last_activity_at'] else datetime.utcnow().isoformat(),
                 created_at=session_row['created_at'].isoformat() if session_row['created_at'] else None,

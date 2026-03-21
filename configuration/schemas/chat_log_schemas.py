@@ -18,6 +18,7 @@ class ChatMessageResponse(BaseModel):
 class ChatSessionResponse(BaseModel):
     id: str
     session_uuid: Optional[str] = None  # UUID value (httpOnly cookie value)
+    user_display_id: Optional[str] = None # SEQUENTIAL Rank: User-1, User-2, etc.
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
     status: str
