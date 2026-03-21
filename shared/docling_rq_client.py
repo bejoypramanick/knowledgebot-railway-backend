@@ -320,6 +320,82 @@ class DoclingRQClient:
             logger.error(f"❌ [RQ_ENQUEUE] Failed to enqueue job for {filename}: {e}")
             raise
 
+    def cancel_job_by_celery_task_id(self, celery_task_id: str) -> bool:
+        """Cancel a docling RQ job associated with a Celery task ID.
+
+        Looks up the docling task_id stored in Redis (set by the worker that
+        enqueued the job), then finds the RQ job_id from metadata, and cancels it.
+        """
+        try:
+            # Find all docling metadata keys to match this celery task
+            # The celery_task_id is not directly stored in docling metadata,
+            # so we scan for any queued/started RQ jobs and cancel them
+            # Instead, iterate over queued jobs in the RQ queue and cancel them
+            cancelled = 0
+
+            # Cancel queued jobs
+            for job in self.queue.jobs:
+                try:
+                    job.cancel()
+                    cancelled += 1
+                    logger.info(f"   🗑️  Cancelled queued RQ job: {job.id}")
+                except Exception:
+                    pass
+
+            if cancelled > 0:
+                logger.info(f"   ✅ Cancelled {cancelled} docling RQ jobs")
+            return cancelled > 0
+
+        except Exception as e:
+            logger.warning(f"   ⚠️  Error cancelling docling RQ jobs: {e}")
+            return False
+
+    def cancel_job_by_rq_job_id(self, rq_job_id: str) -> bool:
+        """Cancel a specific RQ job by its job ID."""
+        try:
+            job = Job.fetch(rq_job_id, connection=self.redis_conn)
+            job.cancel()
+            # Also clean up metadata
+            mapping_key = f"docling:job_mapping:{rq_job_id}"
+            task_id = self.redis_conn.get(mapping_key)
+            if task_id:
+                if isinstance(task_id, bytes):
+                    task_id = task_id.decode('utf-8')
+                self.redis_conn.delete(f"docling:job:metadata:{task_id}")
+            self.redis_conn.delete(mapping_key)
+            logger.info(f"   ✅ Cancelled RQ job: {rq_job_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"   ⚠️  Could not cancel RQ job {rq_job_id}: {e}")
+            return False
+
+    def cancel_all_jobs(self) -> int:
+        """Cancel all docling RQ jobs in the queue and clean up metadata."""
+        cancelled = 0
+        try:
+            # Cancel all queued jobs
+            for job in self.queue.jobs:
+                try:
+                    job.cancel()
+                    cancelled += 1
+                except Exception:
+                    pass
+
+            # Empty the queue
+            self.queue.empty()
+
+            # Clean up all docling metadata keys
+            for key in self.redis_conn.scan_iter("docling:job:metadata:*"):
+                self.redis_conn.delete(key)
+            for key in self.redis_conn.scan_iter("docling:job_mapping:*"):
+                self.redis_conn.delete(key)
+
+            logger.info(f"✅ [RQ_CANCEL_ALL] Cancelled {cancelled} RQ jobs and cleaned up metadata")
+            return cancelled
+        except Exception as e:
+            logger.warning(f"⚠️  [RQ_CANCEL_ALL] Error cancelling all jobs: {e}")
+            return cancelled
+
     async def poll_job_result(
         self,
         job_id: str,
