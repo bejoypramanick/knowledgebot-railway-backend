@@ -149,7 +149,7 @@ class ActionAudit:
                 action_values = {
                     "action_id": self.action_id,
                     "session_id": session_db_id,
-                    "user_role_id": 0,  # user_role_id placeholder (will be fetched from session if needed)
+                    "user_role_id": "00000000-0000-0000-0000-000000000000",  # placeholder UUID
                     "email": admin_email,
                     "role_name": admin_role,
                     "action_type": self.action_type,

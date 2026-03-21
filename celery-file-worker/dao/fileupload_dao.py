@@ -88,8 +88,8 @@ class FileUploadDAO:
                 docling_processing_time_ms = :docling_processing_time_ms,
                 docling_images_extracted = :docling_images_extracted,
                 docling_images_with_ocr = :docling_images_with_ocr,
-                original_file_extension = :original_file_extension,
-                original_mime_type = :original_mime_type,
+                file_extension = :original_file_extension,
+                mime_type = :original_mime_type,
                 processed_content_s3_key = :processed_content_s3_key,
                 processing_status = 'completed',
                 updated_at = NOW()
@@ -226,7 +226,11 @@ class FileUploadDAO:
                     return None
 
                 # Get user role mapping for this email
-                user_role = (await session.execute(text("SELECT user_role_id FROM user_role_mapping WHERE email = :email AND role_id = :role_id LIMIT 1"),
+                user_role = (await session.execute(text("""
+                    SELECT urm.user_role_id FROM user_role_mapping urm
+                    JOIN users u ON urm.user_id = u.id
+                    WHERE u.email = :email AND urm.role_id = :role_id LIMIT 1
+                """),
                     {"email": user_email or 'admin', "role_id": admin_role})).scalar()
 
                 return user_role

@@ -665,14 +665,17 @@ class PerformanceDAO:
         query = """
             WITH monthly_feedback AS (
                 SELECT
-                    DATE_TRUNC('month', created_at) as month_date,
-                    AVG(CASE WHEN rating IN (1,2,3,4,5) THEN rating END) as avg_rating,
-                    COUNT(CASE WHEN rating IN (1,2,3,4,5) THEN 1 END) as feedback_count
-                FROM chat_messages
-                WHERE role = 'user'
-                AND created_at >= NOW() - INTERVAL '6 months'
-                AND rating IS NOT NULL
-                GROUP BY DATE_TRUNC('month', created_at)
+                    DATE_TRUNC('month', cs.feedback_provided_at) as month_date,
+                    AVG(CASE cs.feedback_type
+                        WHEN 'positive' THEN 5.0
+                        WHEN 'neutral' THEN 3.0
+                        WHEN 'negative' THEN 1.0
+                    END) as avg_rating,
+                    COUNT(*) as feedback_count
+                FROM chat_sessions cs
+                WHERE cs.feedback_type IS NOT NULL
+                AND cs.feedback_provided_at >= NOW() - INTERVAL '6 months'
+                GROUP BY DATE_TRUNC('month', cs.feedback_provided_at)
             )
             SELECT
                 TO_CHAR(month_date, 'Mon') as month,
@@ -723,7 +726,7 @@ class PerformanceDAO:
     async def get_recent_engagement(self) -> Optional[float]:
         """Get average engagement time for last 30 days."""
         query = """
-            SELECT AVG(EXTRACT(EPOCH FROM (last_activity_at - created_at)) / 60)
+            SELECT AVG(duration_minutes)
             FROM chat_sessions
             WHERE last_activity_at >= NOW() - INTERVAL '30 days'
             AND last_activity_at IS NOT NULL AND created_at IS NOT NULL
@@ -742,7 +745,7 @@ class PerformanceDAO:
     async def get_previous_engagement(self) -> Optional[float]:
         """Get average engagement time from 30-60 days ago."""
         query = """
-            SELECT AVG(EXTRACT(EPOCH FROM (last_activity_at - created_at)) / 60)
+            SELECT AVG(duration_minutes)
             FROM chat_sessions
             WHERE last_activity_at >= NOW() - INTERVAL '60 days'
             AND last_activity_at < NOW() - INTERVAL '30 days'

@@ -326,12 +326,12 @@ class FileUploadDAO:
     ):
         """Record API usage in the database."""
         query = """
-            INSERT INTO api_usage_log
-            (user_id, provider, model, prompt_tokens, completion_tokens, total_tokens, api_call_type, request_metadata, created_at)
-            VALUES (:user_id, :provider, :model, :prompt_tokens, :completion_tokens, :total_tokens, :api_call_type, :request_metadata, NOW())
+            INSERT INTO token_usage_log
+            (user_email, provider, model, prompt_tokens, completion_tokens, total_tokens, api_call_type, request_metadata, created_at)
+            VALUES (:user_email, :provider, :model, :prompt_tokens, :completion_tokens, :total_tokens, :api_call_type, CAST(:request_metadata AS jsonb), NOW())
         """
         params = {
-            "user_id": user_id,
+            "user_email": user_id,
             "provider": provider,
             "model": model,
             "prompt_tokens": prompt_tokens,
@@ -354,14 +354,15 @@ class FileUploadDAO:
     async def record_metric(self, metric_data: Dict[str, Any]):
         """Log a metric record."""
         query = """
-            INSERT INTO metrics_log
-            (metric_type, metric_value, metadata, created_at)
-            VALUES (:metric_type, :metric_value, :metadata, NOW())
+            INSERT INTO metrics
+            (metric_type, metric_name, value, tags, created_at)
+            VALUES (:metric_type, :metric_name, :value, CAST(:tags AS jsonb), NOW())
         """
         params = {
             "metric_type": metric_data['metric_type'],
-            "metric_value": metric_data['metric_value'],
-            "metadata": json.dumps(metric_data.get('metadata', {}))
+            "metric_name": metric_data.get('metric_name', metric_data['metric_type']),
+            "value": metric_data.get('metric_value', metric_data.get('value', 0)),
+            "tags": json.dumps(metric_data.get('metadata', {}))
         }
         try:
             logger.log_db_operation(query, params)

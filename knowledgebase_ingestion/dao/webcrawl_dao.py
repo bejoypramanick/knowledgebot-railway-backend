@@ -228,7 +228,7 @@ class WebCrawlDAO:
     async def get_website_details_by_task_id(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get website details by celery_task_id for worker processing."""
         query = """
-            SELECT id, original_url, processing_status, user_email, celery_task_id
+            SELECT id, original_url, processing_status, user_role_id, celery_task_id
             FROM scraped_websites
             WHERE celery_task_id = :task_id
         """
@@ -243,7 +243,7 @@ class WebCrawlDAO:
                         "website_id": result.id,
                         "original_url": result.original_url,
                         "processing_status": result.processing_status,
-                        "user_email": result.user_email,
+                        "user_role_id": result.user_role_id,
                         "celery_task_id": result.celery_task_id
                     }
                 return None
@@ -263,7 +263,7 @@ class WebCrawlDAO:
         logger.info("🌳 [TREE_START] get_hierarchical_websites() called")
 
         # Build WHERE clause based on include_inactive flag
-        where_clause = "WHERE parent_id IS NULL"
+        where_clause = "WHERE is_root_page = true"
         if not include_inactive:
             # Active: pending, processing, queued, and completed
             where_clause += " AND processing_status IN ('pending', 'processing', 'queued', 'completed')"

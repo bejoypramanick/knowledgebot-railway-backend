@@ -66,31 +66,29 @@ class FileDAO:
         """Insert new file metadata record."""
         query = """
             INSERT INTO file_uploads (
-                user_id, original_filename, file_display_name, size_bytes,
+                user_role_id, original_filename, display_name, file_size,
                 mime_type, processing_status, gemini_file_name, gemini_file_uri,
-                gemini_state, gemini_processed_at, source, sha256_hash,
-                file_search_metadata, created_at
+                gemini_state, sha256_hash,
+                metadata, created_at
             ) VALUES (
-                :user_id, :original_filename, :file_display_name, :size_bytes,
+                :user_role_id, :original_filename, :display_name, :file_size,
                 :mime_type, :processing_status, :gemini_file_name, :gemini_file_uri,
-                :gemini_state, :gemini_processed_at, :source, :sha256_hash,
-                CAST(:file_search_metadata AS jsonb), NOW()
+                :gemini_state, :sha256_hash,
+                CAST(:metadata AS jsonb), NOW()
             ) RETURNING id
         """
         params = {
-            "user_id": record_data.get('user_id'),
+            "user_role_id": record_data.get('user_role_id') or record_data.get('user_id'),
             "original_filename": record_data.get('original_filename'),
-            "file_display_name": record_data.get('file_display_name'),
-            "size_bytes": record_data.get('size_bytes'),
+            "display_name": record_data.get('file_display_name') or record_data.get('display_name'),
+            "file_size": record_data.get('size_bytes') or record_data.get('file_size'),
             "mime_type": record_data.get('mime_type'),
             "processing_status": record_data.get('processing_status'),
             "gemini_file_name": record_data.get('gemini_file_name'),
             "gemini_file_uri": record_data.get('gemini_file_uri'),
             "gemini_state": record_data.get('gemini_state'),
-            "gemini_processed_at": record_data.get('gemini_processed_at'),
-            "source": record_data.get('source'),
             "sha256_hash": record_data.get('sha256_hash'),
-            "file_search_metadata": record_data.get('file_search_metadata'),
+            "metadata": record_data.get('file_search_metadata') or record_data.get('metadata', '{}'),
         }
         try:
             logger.log_db_operation(query, params)

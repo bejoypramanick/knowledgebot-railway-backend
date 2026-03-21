@@ -169,7 +169,7 @@ class ChatDAO:
     async def get_all_sessions(self) -> List[Dict[str, Any]]:
         """Get all chat sessions (admin cold path — PG only)."""
         query = """
-            SELECT id, user_email, metadata, created_at, last_activity_at
+            SELECT id, user_role_id, metadata, created_at, last_activity_at
             FROM chat_sessions
             ORDER BY last_activity_at DESC
         """

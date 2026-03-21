@@ -37,7 +37,7 @@ class AuthDAO:
     async def check_user_exists(self, email: str) -> Optional[Dict[str, Any]]:
         """Check if user exists for given email."""
         query = text("""
-            SELECT id, email, display_name, email_verified, created_at, updated_at
+            SELECT id, email, is_active, created_at, updated_at
             FROM users
             WHERE email = :email
         """)
@@ -112,7 +112,7 @@ class AuthDAO:
         """Get user and role information by user_role_id."""
         query = text("""
             SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.created_at,
-                   u.email, u.display_name, u.email_verified, u.created_at as user_created_at,
+                   u.email, u.is_active, u.created_at as user_created_at,
                    r.role_name, r.role_description
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id

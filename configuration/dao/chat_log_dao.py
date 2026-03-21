@@ -224,7 +224,9 @@ class ChatLogDAO:
         try:
             query = """
                 SELECT id, started_at, last_activity_at, is_active,
-                       message_count, archive_status, customer_email, customer_name
+                       message_count, archive_status,
+                       metadata->>'customer_email' as customer_email,
+                       metadata->>'customer_name' as customer_name
                 FROM chat_sessions
                 WHERE id = :session_id::uuid
             """

@@ -49,7 +49,7 @@ class FeedbackDAO:
     async def get_all_feedback(self) -> List[Dict[str, Any]]:
         """Get all feedback (sessions with feedback provided)."""
         query = """
-            SELECT id as session_id, feedback_type, feedback_provided_at, feedback_user_role_id
+            SELECT id as session_id, feedback_type, feedback_provided_at, user_role_id
             FROM chat_sessions
             WHERE feedback_type IS NOT NULL
             ORDER BY feedback_provided_at DESC
