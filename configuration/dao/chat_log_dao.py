@@ -663,16 +663,13 @@ class ChatLogDAO:
         
         logger.info(f"🔍 [CHATLOG-DAO] Session IDs: {session_ids}")
         
-        # Use a simpler approach: for each session, get the message with MAX(id)
+        # Use DISTINCT ON to efficiently get the latest message per session
+        # Works with UUIDv7 since they are time-sortable
         query = """
-            SELECT cm.*
-            FROM chat_messages cm
-            INNER JOIN (
-                SELECT session_id, MAX(id) as max_id
-                FROM chat_messages
-                WHERE session_id = ANY(:session_ids)
-                GROUP BY session_id
-            ) latest ON cm.session_id = latest.session_id AND cm.id = latest.max_id
+            SELECT DISTINCT ON (session_id) *
+            FROM chat_messages
+            WHERE session_id = ANY(:session_ids)
+            ORDER BY session_id, id DESC
         """
         
         try:
