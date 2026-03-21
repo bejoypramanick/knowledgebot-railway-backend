@@ -360,7 +360,6 @@ class StreamingService:
                                         customer_name = session_metadata.get('customer_name') if isinstance(session_metadata, dict) else None
 
                                         # Skip auto-generated User-{id} names — frontend already has the correct ROW_NUMBER-based User-N
-                                        import re
                                         if customer_name and re.match(r'^User-\d+$', customer_name):
                                             customer_name = None
 
