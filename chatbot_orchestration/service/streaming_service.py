@@ -1142,14 +1142,30 @@ class StreamingService:
                 if citation_urls:
                     logger.info(f"📎 [CITATION_POST] Found {len(citation_urls)} citation URLs from tool responses: {citation_urls}")
                     # Replace plain [N] markers with clickable <a> links
+                    markers_replaced = 0
                     for i, url in enumerate(citation_urls, 1):
                         plain_marker = f'[{i}]'
                         clickable_link = f'<a href="{url}" target="_blank" rel="noopener noreferrer">[{i}]</a>'
                         if plain_marker in full_response:
                             full_response = full_response.replace(plain_marker, clickable_link)
+                            markers_replaced += 1
                             logger.info(f"📎 [CITATION_POST] Replaced {plain_marker} → clickable link to {url}")
-                        else:
-                            logger.info(f"📎 [CITATION_POST] Marker {plain_marker} not found in response")
+
+                    # Fallback: if no [N] markers were found but we have URLs,
+                    # append a sources section so citations are never lost
+                    if markers_replaced == 0:
+                        logger.warning(f"📎 [CITATION_POST] No [N] markers in response — appending sources section")
+                        sources_html = '<p class="citation-sources"><strong>Sources:</strong> '
+                        source_links = []
+                        for i, url in enumerate(citation_urls, 1):
+                            source_links.append(
+                                f'<a href="{url}" target="_blank" rel="noopener noreferrer">[{i}]</a>'
+                            )
+                        sources_html += ' '.join(source_links) + '</p>'
+                        full_response += sources_html
+                        logger.info(f"📎 [CITATION_POST] Appended {len(citation_urls)} source links as fallback")
+                    else:
+                        logger.info(f"📎 [CITATION_POST] Replaced {markers_replaced} inline markers")
                 else:
                     logger.info("📎 [CITATION_POST] No [CITATION_SOURCES] found in tool responses")
 
