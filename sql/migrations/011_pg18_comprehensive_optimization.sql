@@ -268,15 +268,15 @@ CREATE INDEX idx_session_assignments_transferred ON session_assignments(user_rol
 -- file_uploads table: Covering and category indexes
 DROP INDEX IF EXISTS idx_file_uploads_processing_pending;
 CREATE INDEX idx_file_uploads_processing_active ON file_uploads(processing_status, created_at DESC)
-  INCLUDE (display_name, user_role_id, file_category)
+  INCLUDE (display_name, user_role_id)
   WHERE processing_status IN ('pending', 'processing');
 
 CREATE INDEX idx_file_uploads_completed_lookup ON file_uploads(gemini_file_name)
-  INCLUDE (display_name, processed_content_s3_key, file_size, file_category)
+  INCLUDE (display_name, processed_content_s3_key, file_size)
   WHERE processing_status = 'completed';
 
 CREATE INDEX idx_file_uploads_user_files ON file_uploads(user_role_id, processing_status, created_at DESC)
-  INCLUDE (display_name, file_size, file_category);
+  INCLUDE (display_name, file_size);
 
 CREATE INDEX idx_file_uploads_docling_perf ON file_uploads(docling_processing_time_ms DESC)
   INCLUDE (docling_images_extracted, docling_images_with_ocr, processed_by_docling)
@@ -297,16 +297,16 @@ CREATE INDEX idx_file_uploads_s3_processed ON file_uploads(processed_content_s3_
 -- scraped_websites table: Covering and domain indexes
 DROP INDEX IF EXISTS idx_scraped_websites_parent_id;
 CREATE INDEX idx_scraped_websites_parent_hierarchy ON scraped_websites(parent_id, created_at DESC)
-  INCLUDE (processing_status, depth, pages_scraped, is_root_page)
+  INCLUDE (processing_status, depth, pages_scraped)
   WHERE parent_id IS NOT NULL;
 
 DROP INDEX IF EXISTS idx_scraped_websites_processing_pending;
 CREATE INDEX idx_scraped_websites_processing_active ON scraped_websites(processing_status, created_at DESC)
-  INCLUDE (domain, pages_scraped, file_size, url_domain)
+  INCLUDE (domain, pages_scraped, file_size)
   WHERE processing_status IN ('pending', 'processing');
 
 CREATE INDEX idx_scraped_websites_domain_processed ON scraped_websites(domain, processing_status, created_at DESC)
-  INCLUDE (pages_scraped, file_size, url_domain);
+  INCLUDE (pages_scraped, file_size);
 
 CREATE INDEX idx_scraped_websites_domain_content ON scraped_websites(domain)
   INCLUDE (title, pages_scraped, char_count)
@@ -324,7 +324,7 @@ CREATE INDEX idx_scraped_websites_metadata_source ON scraped_websites((metadata-
   WHERE metadata->>'source_type' IS NOT NULL;
 
 CREATE INDEX idx_scraped_websites_url_lookup ON scraped_websites(original_url, processing_status, created_at DESC)
-  INCLUDE (title, domain, url_domain)
+  INCLUDE (title, domain)
   WHERE processing_status != 'deleted';
 
 CREATE INDEX idx_scraped_websites_failed_analysis ON scraped_websites(created_at DESC)
@@ -377,55 +377,55 @@ CREATE INDEX idx_security_settings_lookup ON security_settings(setting_name)
 -- llm_providers table: Covering and capacity monitoring
 DROP INDEX IF EXISTS idx_llm_providers_provider_name;
 CREATE INDEX idx_llm_providers_lookup ON llm_providers(provider_name)
-  INCLUDE (is_active, token_limit, token_used, token_remaining);
+  INCLUDE (is_active, token_limit, token_used);
 
 CREATE INDEX idx_llm_providers_critical ON llm_providers(provider_name)
-  WHERE tokens_remaining < 100000 AND is_active = true;
+  WHERE (token_limit - token_used) < 100000 AND is_active = true;
 
 -- api_usage table: Covering indexes for analytics
 DROP INDEX IF EXISTS idx_api_usage_provider;
 CREATE INDEX idx_api_usage_provider_activity ON api_usage(api_provider, created_at DESC)
-  INCLUDE (http_method, tokens_input, tokens_output, user_email, token_cost_cents);
+  INCLUDE (http_method, tokens_input, tokens_output, user_email);
 
 DROP INDEX IF EXISTS idx_api_usage_endpoint;
 CREATE INDEX idx_api_usage_endpoint_perf ON api_usage(api_endpoint, http_method, created_at DESC)
-  INCLUDE (response_size_bytes, tokens_output, token_cost_cents);
+  INCLUDE (response_size_bytes, tokens_output);
 
 DROP INDEX IF EXISTS idx_api_usage_user_email;
 CREATE INDEX idx_api_usage_user_activity ON api_usage(user_email, created_at DESC)
-  INCLUDE (api_provider, api_endpoint, tokens_input, tokens_output, token_cost_cents);
+  INCLUDE (api_provider, api_endpoint, tokens_input, tokens_output);
 
 CREATE INDEX idx_api_usage_expensive_calls ON api_usage(created_at DESC)
-  INCLUDE (api_provider, tokens_output, request_size_bytes, token_cost_cents)
-  WHERE token_cost_cents > 1000;
+  INCLUDE (api_provider, tokens_output, request_size_bytes)
+  WHERE (tokens_input * 3 + tokens_output * 12) > 1000;
 
 CREATE INDEX idx_api_usage_recent_activity ON api_usage(api_provider, created_at DESC)
-  INCLUDE (tokens_input, tokens_output, token_cost_cents)
+  INCLUDE (tokens_input, tokens_output)
   WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '7 days';
 
 -- token_usage_log table: High-value covering indexes
 DROP INDEX IF EXISTS idx_token_usage_log_session_id;
 CREATE INDEX idx_token_usage_session_spend ON token_usage_log(session_id, created_at DESC)
-  INCLUDE (total_tokens, cost_cents, provider, model, calculated_cost_cents)
+  INCLUDE (total_tokens, cost_cents, provider, model)
   WHERE session_id IS NOT NULL;
 
 DROP INDEX IF EXISTS idx_token_usage_log_provider;
 CREATE INDEX idx_token_usage_provider_metrics ON token_usage_log(provider, created_at DESC)
-  INCLUDE (model, prompt_tokens, completion_tokens, cost_cents, api_call_type, calculated_cost_cents);
+  INCLUDE (model, prompt_tokens, completion_tokens, cost_cents, api_call_type);
 
 CREATE INDEX idx_token_usage_model_analysis ON token_usage_log(provider, model, created_at DESC)
-  INCLUDE (prompt_tokens, completion_tokens, cost_cents, total_tokens, calculated_cost_cents);
+  INCLUDE (prompt_tokens, completion_tokens, cost_cents, total_tokens);
 
 CREATE INDEX idx_token_usage_message_tracking ON token_usage_log(message_id, created_at DESC)
   INCLUDE (provider, total_tokens, cost_cents, api_call_type)
   WHERE message_id IS NOT NULL;
 
 CREATE INDEX idx_token_usage_expensive ON token_usage_log(created_at DESC)
-  INCLUDE (provider, model, cost_cents, calculated_cost_cents)
-  WHERE calculated_cost_cents > 1000;
+  INCLUDE (provider, model, cost_cents)
+  WHERE ROUND((prompt_tokens * 0.003 + completion_tokens * 0.006)::numeric)::int > 1000;
 
 CREATE INDEX idx_token_usage_recent ON token_usage_log(provider, created_at DESC)
-  INCLUDE (model, total_tokens, cost_cents, calculated_cost_cents)
+  INCLUDE (model, total_tokens, cost_cents)
   WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '7 days';
 
 -- metrics table: Type and window indexes
