@@ -149,8 +149,9 @@ async def get_chatbot_config(cache: bool = True):
     start_time = time.time()
 
     try:
+        from shared.redis_ui_cache import cache_get, cache_set, CHAT_AGENT_CONFIG_KEY, TTL_LONG
+
         if cache:
-            from shared.redis_ui_cache import cache_get, cache_set, CHAT_AGENT_CONFIG_KEY, TTL_LONG
             cached = await cache_get(CHAT_AGENT_CONFIG_KEY)
             if cached:
                 logger.info(f"[CACHE HIT] GET /chatAgentConfig ({time.time() - start_time:.3f}s)")
@@ -158,8 +159,8 @@ async def get_chatbot_config(cache: bool = True):
 
         config = await config_service.get_chatAgent_config()
 
-        if cache:
-            await cache_set(CHAT_AGENT_CONFIG_KEY, config, TTL_LONG)
+        # Always re-cache (cache=false means skip read, not skip write)
+        await cache_set(CHAT_AGENT_CONFIG_KEY, config, TTL_LONG)
 
         logger.info(f"[DB] GET /chatAgentConfig ({time.time() - start_time:.3f}s)")
         return {"success": True, "data": config}
