@@ -16,6 +16,12 @@ from shared.redis_pubsub_manager import (
     broadcast_event_for_session
 )
 
+def _map_role_to_sender(role: str) -> str:
+    """Map database role ('user'/'assistant') to frontend sender ('customer'/'bot')."""
+    role_map = {"user": "customer", "assistant": "bot"}
+    return role_map.get(role, role)
+
+
 class ChatLogService:
     """Service layer for chat log operations"""
 
@@ -417,7 +423,7 @@ class ChatLogService:
                 ChatMessageResponse(
                     id=str(msg['id']),
                     text=msg['content'],
-                    sender=msg['role'],
+                    sender=_map_role_to_sender(msg['role']),
                     timestamp=msg['created_at'].isoformat() if msg['created_at'] else datetime.utcnow().isoformat(),
                     session_id=session_id
                 )
@@ -571,7 +577,7 @@ class ChatLogService:
                 messages = [ChatMessageResponse(
                     id=str(session_row['latest_msg_id']),
                     text=session_row['latest_msg_content'],
-                    sender=session_row['latest_msg_role'],
+                    sender=_map_role_to_sender(session_row['latest_msg_role']),
                     timestamp=session_row['latest_msg_at'].isoformat() if session_row.get('latest_msg_at') else datetime.utcnow().isoformat(),
                     session_id=session_id
                 )]

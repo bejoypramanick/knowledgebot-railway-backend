@@ -342,7 +342,15 @@ class StreamingService:
                                         content=message,
                                         metadata={"user_email": user_email}
                                     )
-                                    
+
+                                    # Save system message indicating human agent request
+                                    await session_state_manager.save_message(
+                                        session_id=session_id,
+                                        role="assistant",
+                                        content=f"Human agent requested. Agent {assigned_agent} has been assigned to this chat.",
+                                        metadata={"type": "human_agent_request", "assigned_agent": assigned_agent}
+                                    )
+
                                     # Broadcast session to agent with all messages
                                     from shared.redis_pubsub_manager import broadcast_event_to_agent
                                     from datetime import datetime
@@ -354,11 +362,13 @@ class StreamingService:
                                     if redis_session:
 
                                         messages = []
+                                        role_to_sender = {"user": "customer", "assistant": "bot"}
                                         for i, msg in enumerate(redis_messages):
+                                            raw_role = msg.get('role', '')
                                             messages.append({
                                                 "id": str(i),
                                                 "text": msg.get('content', ''),
-                                                "sender": msg.get('role', ''),
+                                                "sender": role_to_sender.get(raw_role, raw_role),
                                                 "timestamp": msg.get('created_at', datetime.utcnow().isoformat()),
                                                 "session_id": session_id
                                             })
