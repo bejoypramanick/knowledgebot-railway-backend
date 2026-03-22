@@ -45,10 +45,10 @@ class GeminiCacheManager:
         self._cached_system_prompt: Optional[str] = None
         self._cached_tool_functions: Optional[List[Callable]] = None
 
-    def _compute_hash(self, system_prompt: str, tool_functions: List[Callable]) -> str:
-        """Compute hash of system prompt + tool names to detect changes."""
+    def _compute_hash(self, system_prompt: str, tool_functions: List[Callable], file_search_store_id: Optional[str] = None) -> str:
+        """Compute hash of system prompt + tool names + file search store to detect changes."""
         tool_names = sorted(f.__name__ for f in tool_functions)
-        content = f"{system_prompt}|{'|'.join(tool_names)}"
+        content = f"{system_prompt}|{'|'.join(tool_names)}|{file_search_store_id or ''}"
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     @property
@@ -69,6 +69,7 @@ class GeminiCacheManager:
         system_prompt: str,
         tool_functions: List[Callable],
         model_name: str,
+        file_search_store_id: Optional[str] = None,
     ) -> Optional[str]:
         """Create or reuse Gemini cached content.
 
@@ -76,12 +77,13 @@ class GeminiCacheManager:
             system_prompt: The full system prompt text
             tool_functions: List of tool functions (for declarations)
             model_name: The Gemini model name (e.g. "gemini-2.5-flash")
+            file_search_store_id: Optional FileSearch store ID to include in cache
 
         Returns:
             Cache name (e.g. "cachedContents/abc123") or None on failure
         """
         async with self._lock:
-            content_hash = self._compute_hash(system_prompt, tool_functions)
+            content_hash = self._compute_hash(system_prompt, tool_functions, file_search_store_id)
 
             # Check for force refresh environment variable
             force_refresh = os.getenv("FORCE_CACHE_REFRESH", "false").lower() == "true"
@@ -105,25 +107,27 @@ class GeminiCacheManager:
                     logger.warning("GenAI client not available, skipping cache creation")
                     return None
 
-                # Convert tool functions to Gemini format
-                gemini_tools = convert_tools_to_gemini_format(tool_functions)
-                logger.info(f"Converted {len(tool_functions)} tool functions to {len(gemini_tools)} Gemini tools for caching")
-                
-                if len(tool_functions) > 0 and len(gemini_tools) == 0:
-                    logger.error("🚨 CRITICAL: All tool conversions failed! Cache will be created without tools!")
-                    logger.error("🚨 This will cause the agent to not have access to search_knowledge_base!")
-                
-                if gemini_tools:
-                    for i, tool in enumerate(gemini_tools):
-                        if hasattr(tool, 'function_declarations'):
-                            tool_names = [f.name for f in tool.function_declarations]
-                            logger.info(f"   Gemini Tool {i+1}: {tool_names}")
-                        else:
-                            logger.warning(f"   Gemini Tool {i+1}: No function_declarations found")
-
-                # Create cached content
+                # Build tools list for cache
                 from google.genai import types
 
+                gemini_tools = []
+
+                # Convert function tools to Gemini format (if any)
+                if tool_functions:
+                    gemini_tools = convert_tools_to_gemini_format(tool_functions)
+                    logger.info(f"Converted {len(tool_functions)} function tools to {len(gemini_tools)} Gemini tools")
+
+                # Add FileSearch tool if store ID provided
+                if file_search_store_id:
+                    file_search_tool = types.Tool(
+                        file_search=types.FileSearch(
+                            file_search_store_names=[file_search_store_id]
+                        )
+                    )
+                    gemini_tools.append(file_search_tool)
+                    logger.info(f"Added FileSearch tool to cache: {file_search_store_id}")
+
+                # Create cached content
                 cache_config = types.CreateCachedContentConfig(
                     system_instruction=system_prompt,
                     tools=gemini_tools if gemini_tools else None,
@@ -132,13 +136,7 @@ class GeminiCacheManager:
                 )
 
                 logger.info(f"Creating Gemini cache (model: {model_name}, TTL: {self._cache_ttl}s, hash: {content_hash})")
-                logger.info(f"Cache config includes:")
-                logger.info(f"  - System instruction: {len(system_prompt)} chars")
-                logger.info(f"  - Tools: {len(gemini_tools) if gemini_tools else 0} tool(s)")
-                if gemini_tools:
-                    for tool in gemini_tools:
-                        if hasattr(tool, 'function_declarations'):
-                            logger.info(f"    - Tool functions: {[f.name for f in tool.function_declarations]}")
+                logger.info(f"Cache config: {len(system_prompt)} chars system prompt, {len(gemini_tools)} tool(s)")
                 
                 cached_content = await client.aio.caches.create(
                     model=model_name,

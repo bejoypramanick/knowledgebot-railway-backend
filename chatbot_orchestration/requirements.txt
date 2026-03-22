@@ -24,10 +24,10 @@ tenacity>=8.2.2
 
 # Chatbot Orchestration Service-Specific Requirements
 # Pydantic AI
-pydantic-ai>=1.32.0
+pydantic-ai>=1.70.0
 
 # Google Gemini
-google-genai>=1.60.0
+google-genai>=1.68.0
 google-auth>=2.38.0
 
 # Enhanced email validation

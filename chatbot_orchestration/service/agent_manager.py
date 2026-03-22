@@ -4,17 +4,19 @@ Handles agent creation, caching, and configuration
 """
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic_ai import Agent
+from pydantic_ai.builtin_tools import FileSearchTool
 from shared.otel_logger import get_otel_logger
+from shared.file_search import get_file_search_store_by_display_name
 
 from ..core.ai import MODEL_NAME, get_genai_client
 from ..core.cached_google_model import CachedGoogleModel
 from ..core.cache_manager import gemini_cache_manager
 from ..core.dependencies import ChatSessionDeps
-from ..tools.knowledge_tools import search_knowledge_base, query_railway_postgres, request_human_agent_connection
 from .session_manager import session_state_manager
 
 logger = get_otel_logger("agent_manager", "chatbot-orchestration")
@@ -237,19 +239,26 @@ class AgentManager:
             logger.error(f"❌ Failed to build system prompt: {prompt_error}")
             raise
 
-        # Define tools (fixed set)
-        tool_functions = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
-        logger.info(f"Registering {len(tool_functions)} tools with agent")
-        for tool in tool_functions:
-            logger.info(f"  - Tool: {tool.__name__}")
+        # Resolve FileSearch store for builtin FileSearchTool
+        try:
+            store_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
+            store_id = get_file_search_store_by_display_name(self.genai_client, store_display_name)
+            if not store_id:
+                raise RuntimeError(f"FileSearch store '{store_display_name}' not found")
+            file_search_tool = FileSearchTool(file_store_ids=[store_id])
+            logger.info(f"FileSearchTool created with store: {store_id}")
+        except Exception as fs_error:
+            logger.error(f"Failed to resolve FileSearch store: {fs_error}")
+            raise
 
-        # Create Gemini explicit context cache (system prompt + tool declarations)
+        # Create Gemini explicit context cache (system prompt + FileSearch tool)
         cache_name = None
         try:
             cache_name = await gemini_cache_manager.ensure_cache(
                 system_prompt=system_prompt,
-                tool_functions=tool_functions,
+                tool_functions=[],
                 model_name=MODEL_NAME,
+                file_search_store_id=store_id,
             )
             if cache_name:
                 logger.info(f"Gemini cache active: {cache_name}")
@@ -258,27 +267,21 @@ class AgentManager:
         except Exception as cache_error:
             logger.warning(f"Gemini cache creation failed: {cache_error}, using fallback")
 
-        # Create agent
+        # Create agent with builtin FileSearchTool (single Gemini call)
         logger.info("Creating agent for session")
         try:
-            # Use CachedGoogleModel which strips tools/system_instruction when cache is active
             google_model = CachedGoogleModel(MODEL_NAME)
             logger.info("CachedGoogleModel created")
 
-            # Agent STILL gets system_prompt and tools (fallback if cache fails,
-            # and tools are needed for execution/parsing even when declarations are cached)
             agent = Agent(
                 google_model,
                 system_prompt=system_prompt,
-                tools=tool_functions,
+                builtin_tools=[file_search_tool],
                 deps_type=ChatSessionDeps,
                 end_strategy='exhaustive'
             )
             logger.info(f"Agent created (system prompt: {len(system_prompt)} chars, cache: {cache_name or 'none'})")
-            logger.info(f"Agent tools: {len(agent.tools) if hasattr(agent, 'tools') else 'unknown'}")
-            if hasattr(agent, 'tools'):
-                for tool in agent.tools:
-                    logger.info(f"  - Agent tool: {tool}")
+            logger.info(f"Agent builtin_tools: FileSearchTool (store: {store_id})")
 
         except Exception as agent_error:
             logger.error(f"Failed to create Agent: {agent_error}")

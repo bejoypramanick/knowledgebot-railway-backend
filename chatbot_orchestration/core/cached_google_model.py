@@ -12,7 +12,7 @@ rebuilds the config WITH system_instruction/tools (inline fallback), and retries
 
 Resilience Patterns:
 1. Exponential Backoff: Retries with jittered backoff for 503 errors
-2. Model Fallback: Falls back to gemini-2.0-flash if gemini-2.5-flash-lite is unavailable
+2. Model Fallback: Falls back to gemini-2.5-flash if gemini-2.5-flash-lite is unavailable
 3. Circuit Breaker: Trips after 10 failures in 60s, blocks requests for 60s
 """
 
@@ -356,7 +356,7 @@ class CachedGoogleModel(GoogleModel):
         This ensures RAG search and all tool functionality works identically in fallback mode.
         """
         primary_model = self.model_name or "gemini-2.5-flash-lite"
-        fallback_model = "gemini-2.0-flash"
+        fallback_model = "gemini-2.5-flash"
         
         logger.info(f"🔄 Falling back from {primary_model} to {fallback_model}")
         
