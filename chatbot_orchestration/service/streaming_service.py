@@ -373,9 +373,10 @@ class StreamingService:
                                                 "session_id": session_id
                                             })
 
-                                        # Get customer_name from Redis session metadata (only real names, not auto-generated)
+                                        # Get customer_name/email from Redis session metadata (only real names, not auto-generated)
                                         session_metadata = redis_session.get('metadata', {})
                                         customer_name = session_metadata.get('customer_name') if isinstance(session_metadata, dict) else None
+                                        customer_email = session_metadata.get('customer_email') if isinstance(session_metadata, dict) else None
 
                                         # Skip auto-generated User-{id} names — frontend already has the correct ROW_NUMBER-based User-N
                                         if customer_name and re.match(r'^User-\d+$', customer_name):
@@ -388,7 +389,7 @@ class StreamingService:
                                                 "id": session_id,
                                                 "session_uuid": session_id,
                                                 "customer_name": customer_name,
-                                                "customer_email": None,
+                                                "customer_email": customer_email,
                                                 "status": redis_session.get('archive_status', 'active'),
                                                 "last_message_at": redis_session.get('last_activity_at', datetime.utcnow().isoformat()),
                                                 "created_at": redis_session.get('started_at'),
@@ -542,6 +543,19 @@ class StreamingService:
                 from shared.redis_pubsub_manager import broadcast_event_to_all_agents
                 from datetime import datetime
 
+                # Resolve customer display name for admin chat log
+                customer_display_name = None
+                try:
+                    from shared.redis_chat_store import get_chat_store as _get_store
+                    _store = _get_store()
+                    _redis_session = await _store.get_session(session_id)
+                    if _redis_session:
+                        _meta = _redis_session.get('metadata', {})
+                        if isinstance(_meta, dict):
+                            customer_display_name = _meta.get('customer_name') or _meta.get('customer_email')
+                except Exception:
+                    pass
+
                 user_message_event = {
                     "type": "customer_message",
                     "message_id": f"user-{session_id}-{int(time.time() * 1000)}",
@@ -549,7 +563,8 @@ class StreamingService:
                     "text": message,
                     "sender": "user",
                     "timestamp": datetime.utcnow().isoformat(),
-                    "user_email": user_email
+                    "user_email": user_email,
+                    "customer_name": customer_display_name
                 }
 
                 await broadcast_event_to_all_agents(user_message_event)

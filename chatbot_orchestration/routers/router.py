@@ -38,6 +38,7 @@ async def chat_with_agent_stream(request: Request):
 
         message = body.get("message")
         session_id = body.get("session_id")
+        user_email = body.get("user_email", "anonymous@example.com")
 
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
@@ -69,7 +70,7 @@ async def chat_with_agent_stream(request: Request):
 
         # Stream the AI response directly — no session setup needed
         async def generate_response():
-            async for chunk in agent_service.stream_agent_response(message, session_id):
+            async for chunk in agent_service.stream_agent_response(message, session_id, user_email):
                 yield chunk
 
         return StreamingResponse(
