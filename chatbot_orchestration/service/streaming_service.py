@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any, Dict, List, AsyncGenerator
 import sys
-from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart, BuiltinToolReturnPart
 from shared.otel_logger import get_otel_logger, set_session_id
 
 from ..core.dependencies import ChatSessionDeps
@@ -987,9 +987,9 @@ class StreamingService:
 
                         if not is_greeting:
                             logger.error(f"TOOL CALL REQUIREMENT NOT MET: query='{message[:80]}', tools=0")
-                            logger.error(f"🚨 CRITICAL: Agent should have called search_knowledge_base for non-greeting query")
+                            logger.error(f"🚨 CRITICAL: Agent should have used FileSearchTool for non-greeting query")
                             logger.error(f"🚨 Response was: {full_response[:100]}...")
-                            logger.error(f"🚨 This indicates the agent is not following the mandatory tool-calling requirement")
+                            logger.error(f"🚨 This indicates the agent is not using the builtin FileSearch tool")
 
                 except Exception as result_error:
                     logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)
@@ -1025,60 +1025,74 @@ class StreamingService:
                 logger.info(f"✅ Removed Time-to-Solve metadata if present")
 
                 # ================================================================
-                # CITATION POST-PROCESSING: Convert [1] markers to clickable links
+                # CITATION POST-PROCESSING: Extract from BuiltinToolReturnPart
                 # ================================================================
-                # The search_knowledge_base tool appends [CITATION_SOURCES] to its
-                # return value, but the agent generates its own response text with
-                # plain [1] markers. Extract URLs from tool responses and make them clickable.
+                # Pydantic AI's FileSearchTool returns BuiltinToolReturnPart with
+                # tool_name='file_search' and content containing retrieved_contexts
+                # (list of dicts with title, text, uri, file_search_store fields).
+                # Extract titles, map to original URLs, then make [N] markers clickable.
                 citation_urls = []
-                for msg in all_messages:
-                    if hasattr(msg, 'parts'):
-                        for part in msg.parts:
-                            if hasattr(part, 'content') and isinstance(part.content, str):
-                                content = part.content
-                                # Extract URLs from [CITATION_SOURCES]...[/CITATION_SOURCES] block
-                                citation_match = re.search(
-                                    r'\[CITATION_SOURCES\](.*?)\[/CITATION_SOURCES\]',
-                                    content, re.DOTALL
-                                )
-                                if citation_match:
-                                    urls_text = citation_match.group(1)
-                                    for line in urls_text.strip().split('\n'):
-                                        line = line.strip()
-                                        if line.startswith('- '):
-                                            url = line[2:].strip()
-                                            if url and url not in citation_urls:
-                                                citation_urls.append(url)
+                try:
+                    # Step 1: Extract doc titles from BuiltinToolReturnPart
+                    doc_titles = []
+                    for msg in all_messages:
+                        if hasattr(msg, 'parts'):
+                            for part in msg.parts:
+                                if isinstance(part, BuiltinToolReturnPart) and part.tool_name == 'file_search':
+                                    retrieved_contexts = part.content if isinstance(part.content, list) else []
+                                    for ctx in retrieved_contexts:
+                                        if isinstance(ctx, dict):
+                                            title = ctx.get('title', '')
+                                            if title and title not in doc_titles:
+                                                doc_titles.append(title)
 
-                if citation_urls:
-                    logger.info(f"📎 [CITATION_POST] Found {len(citation_urls)} citation URLs from tool responses: {citation_urls}")
-                    # Replace plain [N] markers with clickable <a> links
-                    markers_replaced = 0
-                    for i, url in enumerate(citation_urls, 1):
-                        plain_marker = f'[{i}]'
-                        clickable_link = f'<a href="{url}" target="_blank" rel="noopener noreferrer">[{i}]</a>'
-                        if plain_marker in full_response:
-                            full_response = full_response.replace(plain_marker, clickable_link)
-                            markers_replaced += 1
-                            logger.info(f"📎 [CITATION_POST] Replaced {plain_marker} → clickable link to {url}")
+                    if doc_titles:
+                        logger.info(f"📎 [CITATION_POST] Extracted {len(doc_titles)} doc titles from FileSearch: {doc_titles}")
 
-                    # Fallback: if no [N] markers were found but we have URLs,
-                    # append a sources section so citations are never lost
-                    if markers_replaced == 0:
-                        logger.warning(f"📎 [CITATION_POST] No [N] markers in response — appending sources section")
-                        sources_html = '<p class="citation-sources"><strong>Sources:</strong> '
-                        source_links = []
+                        # Step 2: Map titles to original URLs
+                        from ..tools.knowledge_tools import _batch_lookup_urls_by_gemini_file_names
+                        url_map = await _batch_lookup_urls_by_gemini_file_names(doc_titles)
+                        logger.info(f"📎 [CITATION_POST] URL mapping result: {len(url_map)}/{len(doc_titles)} resolved")
+
+                        # Build ordered citation URL list (preserving FileSearch order)
+                        seen_urls = set()
+                        for title in doc_titles:
+                            url = url_map.get(title)
+                            if url and url not in seen_urls:
+                                citation_urls.append(url)
+                                seen_urls.add(url)
+
+                    if citation_urls:
+                        logger.info(f"📎 [CITATION_POST] Found {len(citation_urls)} citation URLs: {citation_urls}")
+                        # Replace plain [N] markers with clickable <a> links
+                        markers_replaced = 0
                         for i, url in enumerate(citation_urls, 1):
-                            source_links.append(
-                                f'<a href="{url}" target="_blank" rel="noopener noreferrer">[{i}]</a>'
-                            )
-                        sources_html += ' '.join(source_links) + '</p>'
-                        full_response += sources_html
-                        logger.info(f"📎 [CITATION_POST] Appended {len(citation_urls)} source links as fallback")
+                            plain_marker = f'[{i}]'
+                            clickable_link = f'<a href="{url}" target="_blank" rel="noopener noreferrer">[{i}]</a>'
+                            if plain_marker in full_response:
+                                full_response = full_response.replace(plain_marker, clickable_link)
+                                markers_replaced += 1
+                                logger.info(f"📎 [CITATION_POST] Replaced {plain_marker} → clickable link to {url}")
+
+                        # Fallback: if no [N] markers were found but we have URLs,
+                        # append a sources section so citations are never lost
+                        if markers_replaced == 0:
+                            logger.warning(f"📎 [CITATION_POST] No [N] markers in response — appending sources section")
+                            sources_html = '<p class="citation-sources"><strong>Sources:</strong> '
+                            source_links = []
+                            for i, url in enumerate(citation_urls, 1):
+                                source_links.append(
+                                    f'<a href="{url}" target="_blank" rel="noopener noreferrer">[{i}]</a>'
+                                )
+                            sources_html += ' '.join(source_links) + '</p>'
+                            full_response += sources_html
+                            logger.info(f"📎 [CITATION_POST] Appended {len(citation_urls)} source links as fallback")
+                        else:
+                            logger.info(f"📎 [CITATION_POST] Replaced {markers_replaced} inline markers")
                     else:
-                        logger.info(f"📎 [CITATION_POST] Replaced {markers_replaced} inline markers")
-                else:
-                    logger.info("📎 [CITATION_POST] No [CITATION_SOURCES] found in tool responses")
+                        logger.info("📎 [CITATION_POST] No FileSearch citations found in response")
+                except Exception as citation_error:
+                    logger.warning(f"📎 [CITATION_POST] Citation processing failed (non-fatal): {citation_error}")
 
                 # Add all debug download links if S3 upload succeeded
                 download_links = []
