@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any, Dict, List, AsyncGenerator
 import sys
-from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart, BuiltinToolReturnPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart, BuiltinToolCallPart, BuiltinToolReturnPart
 from shared.otel_logger import get_otel_logger, set_session_id
 
 from ..core.dependencies import ChatSessionDeps
@@ -938,7 +938,51 @@ class StreamingService:
                                                 full_response = text_content  # ← KEY FIX: Use the latest response
                                                 chunk_count += 1
 
-                                    # Track tool calls with detailed logging
+                                    # Log FileSearch builtin tool call (query)
+                                    if isinstance(part, BuiltinToolCallPart) and getattr(part, 'tool_name', '') == 'file_search':
+                                        tool_call_count += 1
+                                        logger.info("=" * 80)
+                                        logger.info("🔍 FILESEARCH BUILTIN TOOL CALL")
+                                        logger.info(f"   Tool Name: {part.tool_name}")
+                                        logger.info(f"   Tool Call ID: {getattr(part, 'tool_call_id', 'N/A')}")
+                                        logger.info(f"   Args: {getattr(part, 'args', {})}")
+                                        logger.info(f"   Tool Call #{tool_call_count} in this response")
+                                        logger.info("=" * 80)
+
+                                    # Log FileSearch builtin tool return (grounding data + retrieved contexts)
+                                    elif isinstance(part, BuiltinToolReturnPart) and getattr(part, 'tool_name', '') == 'file_search':
+                                        logger.info("=" * 80)
+                                        logger.info("📄 FILESEARCH BUILTIN TOOL RESPONSE (GROUNDING DATA)")
+                                        logger.info(f"   Tool Name: {part.tool_name}")
+                                        logger.info(f"   Tool Call ID: {getattr(part, 'tool_call_id', 'N/A')}")
+                                        logger.info(f"   Content Type: {type(part.content).__name__}")
+
+                                        if isinstance(part.content, list):
+                                            logger.info(f"   Retrieved Contexts: {len(part.content)} results")
+                                            for ctx_idx, ctx in enumerate(part.content):
+                                                if isinstance(ctx, dict):
+                                                    title = ctx.get('title', 'N/A')
+                                                    uri = ctx.get('uri', 'N/A')
+                                                    file_search_store = ctx.get('file_search_store', 'N/A')
+                                                    text = ctx.get('text', '')
+                                                    text_preview = text[:500] if text else '<empty>'
+                                                    logger.info(f"   --- Retrieved Context #{ctx_idx + 1} ---")
+                                                    logger.info(f"   Title: {title}")
+                                                    logger.info(f"   URI: {uri}")
+                                                    logger.info(f"   FileSearch Store: {file_search_store}")
+                                                    logger.info(f"   Text Length: {len(text)} chars")
+                                                    logger.info(f"   Text Preview: {text_preview}")
+                                                else:
+                                                    logger.info(f"   --- Retrieved Context #{ctx_idx + 1} (non-dict) ---")
+                                                    logger.info(f"   Type: {type(ctx).__name__}")
+                                                    logger.info(f"   Value: {str(ctx)[:500]}")
+                                        else:
+                                            content_str = str(part.content)
+                                            logger.info(f"   Content (non-list): {content_str[:1000]}")
+
+                                        logger.info("=" * 80)
+
+                                    # Track other tool calls with detailed logging
                                     elif hasattr(part, 'tool_name'):
                                         tool_name = getattr(part, 'tool_name', 'unknown')
                                         tool_args = getattr(part, 'args', {})
