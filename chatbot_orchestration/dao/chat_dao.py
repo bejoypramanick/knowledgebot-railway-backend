@@ -125,21 +125,30 @@ class ChatDAO:
             logger.error(f"Error creating PG18 session: {e}")
             return None
 
-    async def ensure_session_exists(self, session_id: str) -> Optional[str]:
+    async def ensure_session_exists(self, session_id: str, metadata: dict = None) -> Optional[str]:
         """
         Ensure session exists in PG. Creates row if needed (idempotent).
         PG18: id IS the UUIDv7 PK — no separate session_id column.
+        Stores customer_email in metadata JSONB on first creation.
         """
         try:
+            import json as _json
+            metadata_json = _json.dumps(metadata) if metadata else '{}'
             async with get_db_session() as db_session:
                 result = await db_session.execute(
                     text("""
-                        INSERT INTO chat_sessions (id, is_active, archive_status, started_at, last_activity_at, message_count)
-                        VALUES (CAST(:id AS UUID), true, 'active', NOW(), NOW(), 0)
-                        ON CONFLICT (id) DO UPDATE SET last_activity_at = NOW()
+                        INSERT INTO chat_sessions (id, is_active, archive_status, started_at, last_activity_at, message_count, metadata)
+                        VALUES (CAST(:id AS UUID), true, 'active', NOW(), NOW(), 0, CAST(:metadata AS JSONB))
+                        ON CONFLICT (id) DO UPDATE SET
+                            last_activity_at = NOW(),
+                            metadata = CASE
+                                WHEN chat_sessions.metadata IS NULL OR chat_sessions.metadata = '{}'::jsonb
+                                THEN CAST(:metadata AS JSONB)
+                                ELSE chat_sessions.metadata
+                            END
                         RETURNING id
                     """),
-                    {"id": session_id}
+                    {"id": session_id, "metadata": metadata_json}
                 )
                 db_id = str(result.scalar())
                 await db_session.commit()

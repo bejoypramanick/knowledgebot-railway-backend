@@ -70,10 +70,17 @@ class SessionStateManager:
             store = get_chat_store()
 
             # Ensure session exists in Redis (lazy creation)
-            session_data = await store.get_or_create_session(session_uuid=session_id)
+            # Pass customer_email from metadata so chat log shows the user identity
+            session_metadata = {}
+            if metadata and metadata.get("user_email"):
+                session_metadata["customer_email"] = metadata["user_email"]
+            session_data = await store.get_or_create_session(
+                session_uuid=session_id,
+                metadata=session_metadata if session_metadata else None
+            )
 
-            # PG18: session_id IS the UUIDv7 PK — ensure PG row exists
-            await self.chat_dao.ensure_session_exists(session_id)
+            # PG18: session_id IS the UUIDv7 PK — ensure PG row exists (with metadata)
+            await self.chat_dao.ensure_session_exists(session_id, metadata=session_metadata if session_metadata else None)
 
             # Save message to Redis (atomic pipeline: RPUSH + HINCRBY + HSET + SADD)
             result = await store.save_message(session_id, role, content, metadata)
