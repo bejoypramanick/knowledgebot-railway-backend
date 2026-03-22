@@ -182,8 +182,8 @@ CRITICAL FILESEARCH TABLE STRATEGY:
 When FileSearch results contain table data:
 - Look for **Summary** sections that describe the table's purpose and content
 - Look for **Column Summary** sections that explain what each column represents
-- **Natural language row data**: Each row uses format "**Row X**: [Natural language sentence describing the data]"
-- **IMPORTANT**: Each row contains a flowing sentence that describes all related data about the same entity/record
+- **Natural language row data**: Each row uses format "**Row X**: [Natural language sentence with VERBATIM column header names and VERBATIM cell values]"
+- **IMPORTANT**: Each row contains a flowing sentence with the exact column header names and exact cell values, making keyword search easy
 - **ALWAYS LOOK FOR TABLES**: Actively search for and identify tables in FileSearch results to provide comprehensive context
 - **TABLE-FIRST APPROACH**: When answering questions, prioritize finding relevant tables that support your response
 - **REFERENCE TABLES**: Always mention and reference specific tables when they contain relevant data
@@ -343,8 +343,8 @@ CRITICAL FILESEARCH TABLE STRATEGY FOR FOLLOW-UPS:
 When FileSearch results contain table data:
 - **Summary** sections that describe the table's purpose and content
 - **Column Summary** sections that explain what each column represents
-- **Natural language row data**: Each row uses format "**Row X**: [Natural language sentence describing the data]"
-- **IMPORTANT**: Each row contains a flowing sentence that describes all related data about the same entity/record
+- **Natural language row data**: Each row uses format "**Row X**: [Natural language sentence with VERBATIM column header names and VERBATIM cell values]"
+- **IMPORTANT**: Each row contains a flowing sentence with the exact column header names and exact cell values, making keyword search easy
 - **ALWAYS LOOK FOR TABLES**: Actively search for and identify tables in FileSearch results to provide comprehensive context
 - **TABLE-FIRST APPROACH**: When answering questions, prioritize finding relevant tables that support your response
 - **REFERENCE TABLES**: Always mention and reference specific tables when they contain relevant data
@@ -438,8 +438,8 @@ CRITICAL FILESEARCH TABLE STRATEGY FOR FIRST-TIME QUERIES:
 When FileSearch results contain table data:
 - **Summary** sections that describe the table's purpose and content
 - **Column Summary** sections that explain what each column represents
-- **Natural language row data**: Each row uses format "**Row X**: [Natural language sentence describing the data]"
-- **IMPORTANT**: Each row contains a flowing sentence that describes all related data about the same entity/record
+- **Natural language row data**: Each row uses format "**Row X**: [Natural language sentence with VERBATIM column header names and VERBATIM cell values]"
+- **IMPORTANT**: Each row contains a flowing sentence with the exact column header names and exact cell values, making keyword search easy
 - **ALWAYS LOOK FOR TABLES**: Actively search for and identify tables in FileSearch results to provide comprehensive context
 - **TABLE-FIRST APPROACH**: When answering questions, prioritize finding relevant tables that support your response
 - **REFERENCE TABLES**: Always mention and reference specific tables when they contain relevant data

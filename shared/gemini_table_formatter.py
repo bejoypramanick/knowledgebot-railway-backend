@@ -121,28 +121,37 @@ OUTPUT FORMAT (Structured Markdown):
 - [Column 2]: [Brief natural language explanation of what this column represents and its meaning in the context of this table]
 - [Continue for all columns...]
 
-**Row 1 (first row, 1st entry)**: [Natural language sentence describing the data, e.g., "The population in the year 1289 was 3,000 with an annual percentage change of +9.63%"]
+**Row 1 (first row, 1st entry)**: [Natural language sentence that MUST include the VERBATIM column header name and VERBATIM cell value for every column, e.g., "Year: 1289, Population: 3,000, with an annual percentage change (±% p.a.) of +9.63%"]
 
-**Row 2 (second row, 2nd entry)**: [Natural language sentence describing the data, e.g., "In 1348, the population reached 7,000 showing a growth rate of +12.5%"]
+**Row 2 (second row, 2nd entry)**: [Natural language sentence that MUST include the VERBATIM column header name and VERBATIM cell value for every column, e.g., "Year: 1348, Population: 7,000, showing a growth rate (±% p.a.) of +12.5%"]
 
 [Continue for all rows...]
 
+CRITICAL: VERBATIM COLUMN HEADERS AND CELL VALUES IN EVERY ROW
+Each row description MUST contain:
+1. The EXACT column header name as it appears in the table (verbatim, not paraphrased)
+2. The EXACT cell value as it appears in the table (verbatim, not rounded or summarized)
+This is essential because RAG search uses keyword matching to find specific rows.
+If a user searches for a column name or cell value, it MUST appear verbatim in the row description.
+
 NATURAL LANGUAGE FORMATTING EXAMPLES:
-Instead of: **Row 2** | Year: 1289 | Population: 3,000 | Change: +9.63%
-Write as: **Row 2 (second row, 2nd entry)**: The population in the year 1289 was 3,000 with an annual percentage change of +9.63%
+Instead of: **Row 2** | Year: 1289 | Population: 3,000 | ±% p.a.: +9.63%
+Write as: **Row 2 (second row, 2nd entry)**: Year: 1289, Population: 3,000, with an annual percentage change (±% p.a.) of +9.63%
 
 Instead of: **Row 3** | Battery: Li-ion | Capacity: 2500mAh | Cycles: 1000
-Write as: **Row 3 (third row, 3rd entry)**: The Li-ion battery has a capacity of 2500mAh and can handle 1000 charge cycles
+Write as: **Row 3 (third row, 3rd entry)**: Battery: Li-ion, with a Capacity of 2500mAh and Cycles: 1000 charge cycles
 
 Instead of: **Row 4** | Model: GPT-4 | Accuracy: 95.2% | Speed: 50ms
-Write as: **Row 4 (fourth row, 4th entry)**: The GPT-4 model achieves 95.2% accuracy with a response speed of 50ms
+Write as: **Row 4 (fourth row, 4th entry)**: Model: GPT-4, achieving an Accuracy of 95.2% with a Speed of 50ms
 
 NATURAL LANGUAGE GUIDELINES:
 - Create flowing sentences that sound natural when read aloud
 - Use connecting words like "with", "and", "showing", "achieving", "reaching"
 - Incorporate units and context (e.g., "per year", "charge cycles", "response time")
 - Make relationships between data points clear and meaningful
-- Avoid robotic repetition of column names
+- MUST include the VERBATIM column header name for every data point (e.g., "Year:", "Population:", "Capacity:", "Model:")
+- MUST include the VERBATIM cell value exactly as it appears (e.g., "3,000" not "three thousand", "Li-ion" not "lithium ion")
+- Column headers act as keywords that enable RAG search to locate the correct row when users search by column name or value
 
 NESTED TABLE HANDLING:
 If the original table has nested/hierarchical structure, FLATTEN it like this:
@@ -153,15 +162,17 @@ REQUIREMENTS:
 - Use markdown format, NOT JSON
 - Include summary at top for context
 - Include column summaries that explain each column's meaning in natural language phrases
-- **CRITICAL: Convert each row into NATURAL LANGUAGE sentences instead of repeating column names**
-- **NATURAL LANGUAGE FORMAT**: Transform data into readable sentences that flow naturally
-- **AVOID REPETITIVE STRUCTURE**: Don't repeat "Year: X | Population: Y" format - instead write "The population in year X was Y"
+- **CRITICAL: Each row MUST be a natural language sentence that includes VERBATIM column header names and VERBATIM cell values**
+- **VERBATIM HEADERS**: Every column header must appear by name in the row description (e.g., "Year:", "Battery:", "Model:")
+- **VERBATIM VALUES**: Every cell value must appear exactly as in the original table (e.g., "2500mAh" not "2.5Ah", "Li-ion" not "lithium ion")
+- **RAG-SEARCHABLE**: Column headers and cell values serve as keywords for RAG search — omitting them means users cannot find the row by searching for a column name or value
+- **NATURAL LANGUAGE FORMAT**: Transform data into readable sentences that flow naturally while preserving verbatim headers and values
 - **CONTEXTUAL SENTENCES**: Create meaningful sentences that explain the relationship between data points
-- Format each row as: **Row X (position)**: [Natural language sentence describing all the data in that row]
+- Format each row as: **Row X (position)**: [Natural language sentence with verbatim column headers and cell values]
 - Each sentence should incorporate all relevant data from the row in a flowing, readable manner
 - Number each row with BOTH number AND spelled-out position
 - List all columns in "Columns:" line
-- Make it easy to read and search - explicit row naming helps RAG find specific rows
+- Make it easy to read and search - explicit row naming AND verbatim column headers help RAG find specific rows
 - Column summaries should be concise but descriptive, explaining what each column represents
 - Do NOT include raw docling metadata
 - Do NOT include explanations, only the formatted markdown output
