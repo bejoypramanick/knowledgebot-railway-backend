@@ -147,6 +147,11 @@ CREATE TABLE IF NOT EXISTS public.chat_sessions (
 	total_message_token_count int4 DEFAULT 0 NULL,
 	total_prompt_token_count int4 DEFAULT 0 NULL,
 	total_completion_token_count int4 DEFAULT 0 NULL,
+	total_system_prompt_token_count int4 DEFAULT 0 NULL,
+	total_history_token_count int4 DEFAULT 0 NULL,
+	total_tool_def_token_count int4 DEFAULT 0 NULL,
+	total_user_msg_token_count int4 DEFAULT 0 NULL,
+	total_bot_response_token_count int4 DEFAULT 0 NULL,
 	duration_minutes numeric GENERATED ALWAYS AS (
 		ROUND(EXTRACT(EPOCH FROM (
 			COALESCE(ended_at, last_activity_at) - started_at

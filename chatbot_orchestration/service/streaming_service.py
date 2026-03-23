@@ -1766,6 +1766,11 @@ class StreamingService:
                                 total_message_token_count = total_message_token_count + :msg_tokens,
                                 total_prompt_token_count = total_prompt_token_count + :prompt_tokens,
                                 total_completion_token_count = total_completion_token_count + :completion_tokens,
+                                total_system_prompt_token_count = total_system_prompt_token_count + :sp_tok,
+                                total_history_token_count = total_history_token_count + :hist_tok,
+                                total_tool_def_token_count = total_tool_def_token_count + :td_tok,
+                                total_user_msg_token_count = total_user_msg_token_count + :user_msg_tok,
+                                total_bot_response_token_count = total_bot_response_token_count + :bot_resp_tok,
                                 updated_at = NOW()
                             WHERE id = CAST(:session_id AS UUID)
                         """),
@@ -1777,6 +1782,11 @@ class StreamingService:
                             "msg_tokens": total_msg_tokens,
                             "prompt_tokens": input_tokens,
                             "completion_tokens": output_tokens,
+                            "sp_tok": sp_tokens,
+                            "hist_tok": hist_tokens,
+                            "td_tok": td_tokens,
+                            "user_msg_tok": user_message_tokens,
+                            "bot_resp_tok": bot_message_tokens,
                         }
                     )
 

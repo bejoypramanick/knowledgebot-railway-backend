@@ -28,3 +28,10 @@ ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS user_msg_token_count int4 DEF
 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS bot_response_char_count int4 DEFAULT 0;
 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS bot_response_word_count int4 DEFAULT 0;
 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS bot_response_token_count int4 DEFAULT 0;
+
+-- Session-level aggregates for prompt component breakdown
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS total_system_prompt_token_count int4 DEFAULT 0;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS total_history_token_count int4 DEFAULT 0;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS total_tool_def_token_count int4 DEFAULT 0;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS total_user_msg_token_count int4 DEFAULT 0;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS total_bot_response_token_count int4 DEFAULT 0;
