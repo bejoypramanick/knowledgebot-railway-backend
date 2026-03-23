@@ -80,19 +80,45 @@ class TokenDAO:
                 logger.log_db_query(session_query, {"session_id": session_id}, session_record)
 
                 uuid_session_id = str(session_record.id) if session_record else None
-                integer_message_id = None
+                # PG18: session_id/message_id are UUIDs — use the passed message_id
+                # and ensure it's a string if not None
+                uuid_message_id = str(message_id) if message_id else None
 
                 logger.info(f"🔍 Updating llm_providers - provider: {provider}, total_tokens: {total_tokens}")
                 # First, update the llm_providers table with total tokens
                 await self.update_llm_usage(provider, total_tokens)
 
                 # Then, log the detailed token usage
+                # Calculate cost_cents Based on Gemini 2.5 Flash Lite pricing
+                # Input: $0.10/1M, Output: $0.40/1M, Cache Read: $0.01/1M, Cache Write: $0.10/1M
+                cache_read = 0
+                cache_write = 0
+                if request_metadata:
+                    cache_read = request_metadata.get('cache_read_tokens', 0)
+                    cache_write = request_metadata.get('cache_write_tokens', 0)
+                
+                # prompt_tokens includes cache_read
+                standard_input = max(0, prompt_tokens - cache_read)
+                cost_usd = (
+                    (standard_input * 0.10) + 
+                    (cache_read * 0.01) + 
+                    (completion_tokens * 0.40) + 
+                    (cache_write * 0.10)
+                ) / 1_000_000.0
+                
+                # Store in cents. We use high precision (float) in Python, but DB int4 will truncate.
+                # In the future, we might want to store in millicents or use NUMERIC.
+                cost_cents = round(cost_usd * 100.0)
+
                 query = """
                     INSERT INTO token_usage_log (
                         session_id, message_id, provider, model, prompt_tokens,
-                        completion_tokens, total_tokens, api_call_type, request_metadata
-                    ) VALUES (:session_id, :message_id, :provider, :model, :prompt_tokens,
-                              :completion_tokens, :total_tokens, :api_call_type, :request_metadata)
+                        completion_tokens, total_tokens, cost_cents, api_call_type, request_metadata
+                    ) VALUES (
+                        CAST(:session_id AS UUID), CAST(:message_id AS UUID), 
+                        :provider, :model, :prompt_tokens,
+                        :completion_tokens, :total_tokens, :cost_cents, :api_call_type, :request_metadata
+                    )
                 """
                 
                 # Convert request_metadata dict to JSON string for PostgreSQL
@@ -101,12 +127,13 @@ class TokenDAO:
                 
                 params = {
                     "session_id": uuid_session_id,
-                    "message_id": integer_message_id,
+                    "message_id": uuid_message_id,
                     "provider": provider,
                     "model": model,
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
+                    "cost_cents": cost_cents,
                     "api_call_type": api_call_type,
                     "request_metadata": metadata_json
                 }

@@ -60,6 +60,9 @@ async def _fetch_all_data():
             SELECT id, original_filename, display_name, file_extension, processing_status,
                    file_size, char_count,
                    filestore_character_count, filestore_word_count, filestore_token_count,
+                   total_tables_count, total_table_rows_input,
+                   total_table_chars_input, total_table_chars_output,
+                   total_table_input_tokens, total_table_output_tokens,
                    processed_by_docling, created_at
             FROM file_uploads WHERE created_at >= :since ORDER BY created_at DESC
         """), {"since": since})).fetchall()]
@@ -68,6 +71,9 @@ async def _fetch_all_data():
             SELECT id, original_url, title, processing_status, pages_scraped,
                    file_size, char_count,
                    filestore_character_count, filestore_word_count, filestore_token_count,
+                   total_tables_count, total_table_rows_input,
+                   total_table_chars_input, total_table_chars_output,
+                   total_table_input_tokens, total_table_output_tokens,
                    parent_id, depth, created_at
             FROM scraped_websites WHERE created_at >= :since ORDER BY created_at DESC
         """), {"since": since})).fetchall()]
@@ -96,12 +102,42 @@ async def _fetch_all_data():
             ORDER BY session_id, user_message_id, step_number
         """), {"since": since})).fetchall()]
 
-    return {"sessions": sessions, "messages": messages, "files": files, "websites": websites, "chat_messages": chat_messages, "run_steps": run_steps}
+        token_usage_log = [_row_to_dict(r) for r in (await db.execute(text("""
+            SELECT id, session_id, message_id, provider, model,
+                   prompt_tokens, completion_tokens, total_tokens,
+                   cost_cents, api_call_type, request_metadata, created_at
+            FROM token_usage_log
+            WHERE created_at >= :since
+            ORDER BY created_at DESC
+        """), {"since": since})).fetchall()]
+
+        tables_metadata = [_row_to_dict(r) for r in (await db.execute(text("""
+            SELECT tm.id, tm.file_upload_id, tm.scraped_website_id,
+                   tm.table_index, tm.table_column_count_input, tm.table_row_count_input,
+                   tm.table_character_count_input, tm.table_word_count_input,
+                   tm.table_word_count_output, tm.table_character_count_output,
+                   tm.table_input_token_count, tm.table_output_token_count,
+                   tm.created_at,
+                   COALESCE(fu.original_filename, sw.original_url) as source_name,
+                   CASE WHEN tm.file_upload_id IS NOT NULL THEN 'file' ELSE 'web' END as source_type
+            FROM tables_metadata tm
+            LEFT JOIN file_uploads fu ON tm.file_upload_id = fu.id
+            LEFT JOIN scraped_websites sw ON tm.scraped_website_id = sw.id
+            WHERE tm.created_at >= :since
+            ORDER BY tm.created_at DESC
+        """), {"since": since})).fetchall()]
+
+    return {
+        "sessions": sessions, "messages": messages, "files": files,
+        "websites": websites, "chat_messages": chat_messages,
+        "run_steps": run_steps, "token_usage_log": token_usage_log,
+        "tables_metadata": tables_metadata
+    }
 
 
 @router.get("/usage", response_class=HTMLResponse)
 async def usage_report(request: Request):
-    """Single endpoint. All data embedded, JS handles filtering/charts/downloads."""
+    """Single endpoint. All data embedded, JS handles filtering/downloads."""
     data = await _fetch_all_data()
     data_json = json.dumps(data, default=str)
 
@@ -111,7 +147,6 @@ async def usage_report(request: Request):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Usage Report</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root {
@@ -133,11 +168,7 @@ h1{font-size:28px;margin-bottom:4px}
 .kpi .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
 .kpi .value{font-size:28px;font-weight:700}
 .kpi .sub{font-size:12px;color:var(--muted);margin-top:4px}
-.accent{color:var(--accent)}.green{color:var(--green)}.orange{color:var(--orange)}.cyan{color:var(--cyan)}
-.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(580px,1fr));gap:20px;margin-bottom:32px}
-.chart-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px}
-.chart-card h3{font-size:15px;margin-bottom:12px;color:var(--muted)}
-.chart-card canvas{max-height:300px}
+.accent{color:var(--accent)}.green{color:var(--green)}.orange{color:var(--orange)}.cyan{color:var(--cyan)}.red{color:var(--red)}
 .section{margin-bottom:32px}
 .section h2{font-size:20px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -146,6 +177,7 @@ td{padding:10px 12px;border-bottom:1px solid var(--border)}
 tr:hover td{background:rgba(79,70,229,.04)}
 .mono{font-family:'SF Mono','Fira Code',monospace;font-size:12px}
 .token-cell{font-weight:600;color:var(--accent)}
+.cost-cell{font-weight:600;color:var(--green)}
 .badge{padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600}
 .badge-active,.badge-completed{background:rgba(34,197,94,.15);color:var(--green)}
 .badge-closed,.badge-archived{background:rgba(156,163,175,.15);color:var(--muted)}
@@ -182,6 +214,13 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 .legend dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}
 .legend dt{font-weight:600;color:var(--accent);white-space:nowrap}
 .legend dd{color:var(--text);margin:0}
+.cost-summary{background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:1px solid #86efac;border-radius:12px;padding:20px;margin-bottom:32px}
+.cost-summary h2{font-size:20px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #86efac;color:#166534}
+.cost-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.cost-item{background:#fff;border:1px solid #bbf7d0;border-radius:8px;padding:16px}
+.cost-item .cost-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.cost-item .cost-value{font-size:24px;font-weight:700;color:#166534}
+.cost-item .cost-detail{font-size:11px;color:var(--muted);margin-top:4px}
 </style>
 </head>
 <body>
@@ -202,7 +241,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 </div>
 
 <div class="legend" id="legend-panel">
-<h3>Metric Definitions <span style="font-size:12px;color:var(--muted);font-weight:400;cursor:pointer" onclick="document.getElementById('legend-detail').style.display=document.getElementById('legend-detail').style.display==='none'?'block':'none'">[show/hide]</span></h3>
+<h3>Metric Definitions & Pricing <span style="font-size:12px;color:var(--muted);font-weight:400;cursor:pointer" onclick="document.getElementById('legend-detail').style.display=document.getElementById('legend-detail').style.display==='none'?'block':'none'">[show/hide]</span></h3>
 <div id="legend-detail" class="legend-grid" style="display:none">
   <div class="legend-section">
     <h4>Chat Message Metrics (per message)</h4>
@@ -210,7 +249,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
       <dt>Characters</dt><dd>Total characters in the message text, including spaces, punctuation, and emojis</dd>
       <dt>Words</dt><dd>Total words in the message text (split by whitespace)</dd>
       <dt>Msg Tokens</dt><dd>Gemini tokens for ONLY the message text itself (via count_tokens API). A "hi" = ~1 token</dd>
-      <dt>Prompt Tokens</dt><dd>Total tokens sent TO Gemini for this turn: system prompt + conversation history + tool definitions + the user message. Only set on user messages. This is the billable input</dd>
+      <dt>Prompt Tokens</dt><dd>Total tokens sent TO Gemini for this turn: system prompt + conversation history + tool definitions + the user message. This is the billable input</dd>
       <dt>Completion Tokens</dt><dd>Total tokens generated BY Gemini as the response. Only set on bot messages. This is the billable output</dd>
     </dl>
   </div>
@@ -219,9 +258,37 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     <dl>
       <dt>System Prompt</dt><dd>The persona instructions + RAG enforcement rules sent at the start of every turn. Chars/words/tokens counted separately via count_tokens API</dd>
       <dt>History</dt><dd>All prior user + bot messages in the conversation, serialized as text. Grows with each turn. Chars/words/tokens counted separately</dd>
-      <dt>Tools + Multi-turn</dt><dd>Derived as: Total Prompt − System Prompt − History − User Msg. Includes the full Gemini tool schema, tool call/return context in multi-turn runs, and repeated prompt overhead when tools are invoked</dd>
+      <dt>Tools + Multi-turn</dt><dd>Derived as: Total Prompt - System Prompt - History - User Msg. Includes the full Gemini tool schema, tool call/return context in multi-turn runs, and repeated prompt overhead when tools are invoked</dd>
       <dt>User Msg</dt><dd>Just the current user message text. Chars/words/tokens counted separately. Same as Msg Tokens but stored in dedicated columns</dd>
       <dt>Bot Response</dt><dd>Just the bot's generated response text. Chars/words/tokens stored on the assistant message row</dd>
+    </dl>
+  </div>
+  <div class="legend-section">
+    <h4>Gemini 2.5 Flash Lite Pricing (Paid Tier, per 1M tokens)</h4>
+    <dl>
+      <dt>Input (text/image/video)</dt><dd>$0.10 / 1M tokens</dd>
+      <dt>Output</dt><dd>$0.40 / 1M tokens</dd>
+      <dt>Cached Input (text/image/video)</dt><dd>$0.01 / 1M tokens (90% discount)</dd>
+      <dt>Cache Storage</dt><dd>$1.00 / hour / 1M tokens</dd>
+      <dt>Table Formatting (Flash)</dt><dd>Input: $0.10 / 1M, Output: $0.40 / 1M (same model)</dd>
+    </dl>
+  </div>
+  <div class="legend-section">
+    <h4>Token Usage Log</h4>
+    <dl>
+      <dt>API Call Type</dt><dd>Type of Gemini API call: rag (chat), table_formatting, count_tokens, etc.</dd>
+      <dt>Cache Read Tokens</dt><dd>Tokens served from Gemini's explicit context cache (system prompt + tool schema). Billed at 90% discount ($0.01/1M)</dd>
+      <dt>Cache Write Tokens</dt><dd>Tokens written to cache on first request (billed at standard input rate + storage per hour)</dd>
+      <dt>request_metadata</dt><dd>JSONB field storing cache_read_tokens, cache_write_tokens, and other details</dd>
+    </dl>
+  </div>
+  <div class="legend-section">
+    <h4>Table Formatting Metrics (Gemini Flash)</h4>
+    <dl>
+      <dt>Tables Count</dt><dd>Number of tables detected in the document by docling</dd>
+      <dt>Table Input Tokens</dt><dd>Tokens sent to Gemini Flash for table formatting (raw docling table data + metadata)</dd>
+      <dt>Table Output Tokens</dt><dd>Tokens generated by Gemini Flash as formatted table JSON</dd>
+      <dt>Cost</dt><dd>Computed using same model pricing as chat (Gemini 2.5 Flash Lite rates)</dd>
     </dl>
   </div>
   <div class="legend-section">
@@ -235,50 +302,44 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     </dl>
   </div>
   <div class="legend-section">
-    <h4>File Upload Metrics</h4>
+    <h4>File Upload & Website Metrics</h4>
     <dl>
       <dt>File Size</dt><dd>Size of the original uploaded file in bytes</dd>
-      <dt>Markdown Chars</dt><dd>Characters in the processed Markdown sent to Gemini FileSearch (after docling conversion + Gemini table formatting)</dd>
-      <dt>Markdown Words</dt><dd>Words in the processed Markdown sent to Gemini FileSearch</dd>
-      <dt>Markdown Tokens</dt><dd>Gemini tokens for the processed Markdown (via count_tokens API). This is what Gemini indexes for RAG search</dd>
-    </dl>
-  </div>
-  <div class="legend-section">
-    <h4>Scraped Website Metrics</h4>
-    <dl>
-      <dt>Pages</dt><dd>Number of web pages successfully crawled and processed</dd>
-      <dt>Markdown Chars</dt><dd>Characters in the processed Markdown sent to Gemini FileSearch (after trafilatura text extraction + Gemini table formatting)</dd>
-      <dt>Markdown Words</dt><dd>Words in the processed Markdown sent to Gemini FileSearch</dd>
-      <dt>Markdown Tokens</dt><dd>Gemini tokens for the processed Markdown (via count_tokens API). This is what Gemini indexes for RAG search</dd>
+      <dt>Markdown Chars/Words/Tokens</dt><dd>Processed content sent to Gemini FileSearch (after docling + Gemini table formatting)</dd>
+      <dt>Table Input/Output Tokens</dt><dd>Gemini tokens consumed for formatting tables within the document</dd>
     </dl>
   </div>
 </div>
 </div>
+
+<!-- Cost Summary -->
+<div class="cost-summary" id="cost-summary"></div>
 
 <div class="kpi-grid" id="kpis"></div>
 
-<div class="chart-grid">
-  <div class="chart-card"><h3>Daily Message Volume</h3><canvas id="dailyMsgChart"></canvas></div>
-  <div class="chart-card"><h3>Daily Token Consumption</h3><canvas id="dailyTokenChart"></canvas></div>
-  <div class="chart-card"><h3>Messages by Role</h3><canvas id="roleChart"></canvas></div>
-  <div class="chart-card"><h3>Avg Tokens per Message by Role</h3><canvas id="avgTokenChart"></canvas></div>
-  <div class="chart-card"><h3>Top 10 Sessions by Token Usage</h3><canvas id="topSessionsChart"></canvas></div>
-  <div class="chart-card"><h3>File & Website Token Distribution</h3><canvas id="fileTokenChart"></canvas></div>
-</div>
-
 <div class="section"><h2>Chat Sessions <span style="font-size:13px;color:var(--muted);font-weight:400">(click to expand messages)</span></h2><div class="table-wrap" style="max-height:700px"><table>
-  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages (user + bot + human agent) in this session">Msgs</th><th title="Sum of all characters from every message in this session (spaces, punctuation, emojis included)">Chars</th><th title="Sum of all words from every message in this session">Words</th><th title="Sum of Gemini tokens for ONLY the message text of each message (count_tokens API). Represents actual content size">Msg Tokens</th><th title="Sum of total tokens sent TO Gemini across all turns (system prompt + history + tools + user message). This is the billable input">Prompt Tokens</th><th title="Sum of tokens generated BY Gemini across all turns. This is the billable output">Completion Tokens</th><th title="Sum of system prompt tokens across all turns">Sys Prompt Tok</th><th title="Sum of conversation history tokens across all turns">History Tok</th><th title="Sum of tool definition tokens across all turns">Tool Def Tok</th><th title="Sum of user message text tokens across all turns">User Msg Tok</th><th title="Sum of bot response text tokens across all turns">Bot Resp Tok</th><th>Duration</th><th>Status</th></tr></thead>
+  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages (user + bot + human agent) in this session">Msgs</th><th title="Sum of all characters from every message in this session">Chars</th><th title="Sum of all words from every message in this session">Words</th><th title="Sum of Gemini tokens for ONLY the message text of each message (count_tokens API)">Msg Tokens</th><th title="Sum of total tokens sent TO Gemini across all turns (billable input)">Prompt Tokens</th><th title="Sum of tokens generated BY Gemini across all turns (billable output)">Completion Tokens</th><th title="Sum of system prompt tokens across all turns">Sys Prompt Tok</th><th title="Sum of conversation history tokens across all turns">History Tok</th><th title="Sum of tool definition tokens across all turns">Tool Def Tok</th><th title="Sum of user message text tokens across all turns">User Msg Tok</th><th title="Sum of bot response text tokens across all turns">Bot Resp Tok</th><th title="Estimated cost using Gemini 2.5 Flash Lite pricing">Est. Cost</th><th>Duration</th><th>Status</th></tr></thead>
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
 <div class="section"><h2>File Uploads</h2><div class="table-wrap"><table>
-  <thead><tr><th>Filename</th><th>Ext</th><th title="Size of the original uploaded file in bytes">File Size</th><th title="Characters in the processed Markdown sent to Gemini FileSearch (after docling + table formatting)">Markdown Chars</th><th title="Words in the processed Markdown sent to Gemini FileSearch">Markdown Words</th><th title="Gemini tokens for the processed Markdown (count_tokens API) - what Gemini indexes for RAG">Markdown Tokens</th><th>Status</th><th>Date</th></tr></thead>
+  <thead><tr><th>Filename</th><th>Ext</th><th title="Size of the original uploaded file in bytes">File Size</th><th title="Characters in the processed Markdown sent to Gemini FileSearch">Markdown Chars</th><th title="Words in the processed Markdown sent to Gemini FileSearch">Markdown Words</th><th title="Gemini tokens for the processed Markdown (count_tokens API)">Markdown Tokens</th><th title="Number of tables formatted by Gemini">Tables</th><th title="Tokens sent to Gemini for table formatting">Table Input Tok</th><th title="Tokens generated by Gemini for table formatting">Table Output Tok</th><th title="Estimated cost for table formatting">Table Format Cost</th><th>Status</th><th>Date</th></tr></thead>
   <tbody id="files-table"></tbody>
 </table></div></div>
 
 <div class="section"><h2>Scraped Websites</h2><div class="table-wrap"><table>
-  <thead><tr><th>URL</th><th>Title</th><th title="Number of web pages successfully crawled and processed">Pages</th><th title="Characters in the processed Markdown sent to Gemini FileSearch (after trafilatura + table formatting)">Markdown Chars</th><th title="Words in the processed Markdown sent to Gemini FileSearch">Markdown Words</th><th title="Gemini tokens for the processed Markdown (count_tokens API) - what Gemini indexes for RAG">Markdown Tokens</th><th>Status</th><th>Date</th></tr></thead>
+  <thead><tr><th>URL</th><th>Title</th><th title="Number of web pages successfully crawled">Pages</th><th title="Characters in the processed Markdown sent to Gemini FileSearch">Markdown Chars</th><th title="Words in the processed Markdown sent to Gemini FileSearch">Markdown Words</th><th title="Gemini tokens for the processed Markdown (count_tokens API)">Markdown Tokens</th><th title="Number of tables formatted by Gemini">Tables</th><th title="Tokens sent to Gemini for table formatting">Table Input Tok</th><th title="Tokens generated by Gemini for table formatting">Table Output Tok</th><th title="Estimated cost for table formatting">Table Format Cost</th><th>Status</th><th>Date</th></tr></thead>
   <tbody id="websites-table"></tbody>
+</table></div></div>
+
+<div class="section"><h2>Table Formatting Detail <span style="font-size:13px;color:var(--muted);font-weight:400">(Gemini Flash per-table costs)</span></h2><div class="table-wrap"><table>
+  <thead><tr><th>Source</th><th>Type</th><th>Table #</th><th>Cols</th><th>Rows</th><th>Input Chars</th><th>Output Chars</th><th>Input Tokens</th><th>Output Tokens</th><th>Est. Cost</th><th>Date</th></tr></thead>
+  <tbody id="tables-meta-table"></tbody>
+</table></div></div>
+
+<div class="section"><h2>Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(all Gemini API calls with cache details)</span></h2><div class="table-wrap" style="max-height:500px"><table>
+  <thead><tr><th>API Call Type</th><th>Model</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total Tokens</th><th>Cache Read</th><th>Cache Write</th><th title="Estimated cost using Gemini 2.5 Flash Lite pricing">Est. Cost</th><th>Session</th><th>Date</th></tr></thead>
+  <tbody id="token-log-table"></tbody>
 </table></div></div>
 
 </div>
@@ -287,7 +348,32 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 // === DATA ===
 const RAW = """ + data_json + """;
 let currentDays = 30;
-let charts = {};
+
+// === GEMINI 2.5 FLASH LITE PRICING (Paid Tier, per 1M tokens, USD) ===
+const PRICING = {
+  input_per_1m: 0.10,        // $0.10 per 1M input tokens (text/image/video)
+  output_per_1m: 0.40,       // $0.40 per 1M output tokens
+  cache_read_per_1m: 0.01,   // $0.01 per 1M cached input tokens (90% discount)
+  cache_write_per_1m: 0.10,  // Same as input rate (cache write = standard input cost)
+  cache_storage_per_hr: 1.00 // $1.00 per hour per 1M tokens stored
+};
+
+// Cost calculation helpers
+function calcInputCost(tokens) { return (tokens / 1_000_000) * PRICING.input_per_1m; }
+function calcOutputCost(tokens) { return (tokens / 1_000_000) * PRICING.output_per_1m; }
+function calcCacheReadCost(tokens) { return (tokens / 1_000_000) * PRICING.cache_read_per_1m; }
+function calcCacheWriteCost(tokens) { return (tokens / 1_000_000) * PRICING.cache_write_per_1m; }
+function calcSessionCost(promptTokens, completionTokens) {
+  return calcInputCost(promptTokens) + calcOutputCost(completionTokens);
+}
+function calcTableCost(inputTokens, outputTokens) {
+  return calcInputCost(inputTokens) + calcOutputCost(outputTokens);
+}
+function fmtCost(usd) {
+  if(usd >= 0.01) return '$' + usd.toFixed(4);
+  if(usd > 0) return '$' + usd.toFixed(6);
+  return '$0.00';
+}
 
 // === HELPERS ===
 const fmt = n => (n||0).toLocaleString();
@@ -300,6 +386,17 @@ const trunc = (s,n) => s && s.length>n ? s.substring(0,n)+'...' : (s||'-');
 function filterByDate(arr, days, dateField='created_at') {
   const c = cutoff(days);
   return arr.filter(r => (r[dateField]||'') >= c);
+}
+
+// Extract cache tokens from request_metadata JSONB
+function getCacheTokens(meta) {
+  if(!meta) return {read:0, write:0};
+  let obj = meta;
+  if(typeof meta === 'string') { try { obj = JSON.parse(meta); } catch(e) { return {read:0,write:0}; } }
+  return {
+    read: obj.cache_read_tokens || 0,
+    write: obj.cache_write_tokens || 0
+  };
 }
 
 // === SET DAYS ===
@@ -318,11 +415,13 @@ function render() {
   const messages = filterByDate(RAW.messages, days, 'day');
   const files = filterByDate(RAW.files, days);
   const websites = filterByDate(RAW.websites, days);
+  const tokenLog = filterByDate(RAW.token_usage_log||[], days);
+  const tablesMeta = filterByDate(RAW.tables_metadata||[], days);
 
   document.getElementById('subtitle').textContent =
-    `Last ${days} days \u00b7 Generated ${new Date().toISOString().replace('T',' ').substring(0,16)} UTC`;
+    `Last ${days} days \\u00b7 Generated ${new Date().toISOString().replace('T',' ').substring(0,16)} UTC`;
 
-  // KPIs
+  // === AGGREGATE CALCULATIONS ===
   const totalSessions = sessions.length;
   const totalMsgs = sessions.reduce((a,r) => a+(r.message_count||0), 0);
   const totalPromptTokens = sessions.reduce((a,r) => a+(r.total_prompt_token_count||0), 0);
@@ -331,83 +430,85 @@ function render() {
   const totalChars = sessions.reduce((a,r) => a+(r.total_character_count||0), 0);
   const totalFiles = files.length;
   const fileTokens = files.reduce((a,r) => a+(r.filestore_token_count||0), 0);
-  const fileChars = files.reduce((a,r) => a+(r.filestore_character_count||0), 0);
   const totalWebsites = websites.length;
   const webTokens = websites.reduce((a,r) => a+(r.filestore_token_count||0), 0);
 
-  document.getElementById('kpis').innerHTML = `
-    <div class="kpi"><div class="label">Total Sessions</div><div class="value accent">${fmt(totalSessions)}</div><div class="sub">${fmt(totalMsgs)} messages total</div></div>
-    <div class="kpi"><div class="label">Prompt Tokens (Billable Input)</div><div class="value green">${fmt(totalPromptTokens)}</div><div class="sub">Total tokens sent TO Gemini (system prompt + history + tools + message)</div></div>
-    <div class="kpi"><div class="label">Completion Tokens (Billable Output)</div><div class="value cyan">${fmt(totalCompletionTokens)}</div><div class="sub">Total tokens generated BY Gemini as responses</div></div>
-    <div class="kpi"><div class="label">Message-Only Tokens</div><div class="value accent">${fmt(totalMsgTokens)}</div><div class="sub">Tokens for just message text (${fmt(totalChars)} characters)</div></div>
-    <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmt(fileTokens)} markdown tokens indexed</div></div>
-    <div class="kpi"><div class="label">Websites Scraped</div><div class="value green">${fmt(totalWebsites)}</div><div class="sub">${fmt(webTokens)} markdown tokens indexed</div></div>
+  // Table formatting totals
+  const totalTableInputTokens = tablesMeta.reduce((a,r) => a+(r.table_input_token_count||0), 0);
+  const totalTableOutputTokens = tablesMeta.reduce((a,r) => a+(r.table_output_token_count||0), 0);
+
+  // Token log cache totals
+  let totalCacheReadTokens = 0, totalCacheWriteTokens = 0;
+  tokenLog.forEach(r => {
+    const c = getCacheTokens(r.request_metadata);
+    totalCacheReadTokens += c.read;
+    totalCacheWriteTokens += c.write;
+  });
+
+  // === COST CALCULATIONS ===
+  // Note: totalPromptTokens in DB includes totalCacheReadTokens.
+  // We must subtract cached tokens to get the standard (non-cached) input tokens.
+  const standardInputTokens = Math.max(0, totalPromptTokens - totalCacheReadTokens);
+  
+  const chatInputCost = calcInputCost(standardInputTokens);
+  const chatOutputCost = calcOutputCost(totalCompletionTokens);
+  const chatCost = chatInputCost + chatOutputCost;
+  const cacheReadCost = calcCacheReadCost(totalCacheReadTokens);
+  const cacheWriteCost = calcCacheWriteCost(totalCacheWriteTokens);
+  const tableFormatCost = calcTableCost(totalTableInputTokens, totalTableOutputTokens);
+  const totalEstCost = chatCost + cacheReadCost + cacheWriteCost + tableFormatCost;
+
+  // === COST SUMMARY ===
+  document.getElementById('cost-summary').innerHTML = `
+    <h2>Estimated Cost Summary (Gemini 2.5 Flash Lite Paid Tier)</h2>
+    <div class="cost-grid">
+      <div class="cost-item">
+        <div class="cost-label">Total Estimated Cost</div>
+        <div class="cost-value">${fmtCost(totalEstCost)}</div>
+        <div class="cost-detail">All Gemini API usage combined</div>
+      </div>
+      <div class="cost-item">
+        <div class="cost-label">Chat Input (Standard)</div>
+        <div class="cost-value" style="font-size:20px">${fmtCost(chatInputCost)}</div>
+        <div class="cost-detail">${fmt(standardInputTokens)} non-cached tokens @ $0.10/1M</div>
+      </div>
+      <div class="cost-item">
+        <div class="cost-label">Chat Output (Completion)</div>
+        <div class="cost-value" style="font-size:20px">${fmtCost(chatOutputCost)}</div>
+        <div class="cost-detail">${fmt(totalCompletionTokens)} tokens @ $0.40/1M</div>
+      </div>
+      <div class="cost-item">
+        <div class="cost-label">Cache Read (90% discount)</div>
+        <div class="cost-value" style="font-size:20px">${fmtCost(cacheReadCost)}</div>
+        <div class="cost-detail">${fmt(totalCacheReadTokens)} tokens @ $0.01/1M</div>
+      </div>
+      <div class="cost-item">
+        <div class="cost-label">Cache Write</div>
+        <div class="cost-value" style="font-size:20px">${fmtCost(cacheWriteCost)}</div>
+        <div class="cost-detail">${fmt(totalCacheWriteTokens)} tokens @ $0.10/1M</div>
+      </div>
+      <div class="cost-item">
+        <div class="cost-label">Table Formatting</div>
+        <div class="cost-value" style="font-size:20px">${fmtCost(tableFormatCost)}</div>
+        <div class="cost-detail">${fmt(totalTableInputTokens)} in + ${fmt(totalTableOutputTokens)} out tokens</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-size:11px;color:#6b7280">
+      Pricing: Input $0.10/1M | Output $0.40/1M | Cached Input $0.01/1M | Cache Storage $1.00/hr/1M tokens (not tracked here).
+      FileSearch upload/storage costs are billed separately by Google and not tracked in this report.
+    </div>
   `;
 
-  // Daily chart data
-  const dailyMap = {};
-  messages.forEach(r => {
-    const d = r.day;
-    if(!dailyMap[d]) dailyMap[d]={userMsgs:0,botMsgs:0,userTokens:0,botTokens:0};
-    if(r.role==='user'){dailyMap[d].userMsgs=r.msg_count;dailyMap[d].userTokens=r.total_tokens}
-    else if(r.role==='assistant'){dailyMap[d].botMsgs=r.msg_count;dailyMap[d].botTokens=r.total_tokens}
-  });
-  const dLabels=Object.keys(dailyMap), dUserM=dLabels.map(k=>dailyMap[k].userMsgs), dBotM=dLabels.map(k=>dailyMap[k].botMsgs);
-  const dUserT=dLabels.map(k=>dailyMap[k].userTokens), dBotT=dLabels.map(k=>dailyMap[k].botTokens);
-
-  // Role breakdown
-  const roleMap = {};
-  messages.forEach(r => {
-    if(!roleMap[r.role]) roleMap[r.role]={count:0,tokens:0,chars:0,words:0,avgTokens:0,n:0};
-    const rm=roleMap[r.role]; rm.count+=r.msg_count; rm.tokens+=r.total_tokens; rm.chars+=r.total_chars; rm.words+=r.total_words;
-    rm.avgTokens=((rm.avgTokens*rm.n)+r.avg_tokens)/(rm.n+1); rm.n++;
-  });
-  const rLabels=Object.keys(roleMap), rCounts=rLabels.map(k=>roleMap[k].count), rAvgT=rLabels.map(k=>Math.round(roleMap[k].avgTokens));
-
-  // Top sessions
-  const topS = [...sessions].filter(r=>r.total_token_count>0).sort((a,b)=>(b.total_token_count||0)-(a.total_token_count||0)).slice(0,10);
-  const tLabels=topS.map(r=>String(r.id).substring(0,8)+'...'), tTokens=topS.map(r=>r.total_token_count||0), tWords=topS.map(r=>r.total_word_count||0);
-
-  // File+Website tokens combined
-  const fsItems = [
-    ...files.filter(r=>r.filestore_token_count>0).map(r=>({name:trunc(r.original_filename,25),tokens:r.filestore_token_count,type:'file'})),
-    ...websites.filter(r=>r.filestore_token_count>0).map(r=>({name:trunc(r.original_url,30),tokens:r.filestore_token_count,type:'web'}))
-  ].sort((a,b)=>b.tokens-a.tokens).slice(0,15);
-  const fLabels=fsItems.map(r=>r.name), fTokens=fsItems.map(r=>r.tokens);
-  const fColors=fsItems.map(r=>r.type==='file'?'rgba(249,115,22,.7)':'rgba(6,182,212,.7)');
-
-  // === CHARTS ===
-  Object.values(charts).forEach(c=>c.destroy());
-  charts={};
-
-  Chart.defaults.color='#9ca3af'; Chart.defaults.borderColor='#2a2d3a';
-
-  charts.dailyMsg = new Chart(document.getElementById('dailyMsgChart'),{type:'bar',data:{labels:dLabels,datasets:[
-    {label:'User Messages',data:dUserM,backgroundColor:'rgba(99,102,241,.7)',borderRadius:4},
-    {label:'Bot Responses',data:dBotM,backgroundColor:'rgba(34,197,94,.7)',borderRadius:4}
-  ]},options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{beginAtZero:true}}}});
-
-  charts.dailyToken = new Chart(document.getElementById('dailyTokenChart'),{type:'line',data:{labels:dLabels,datasets:[
-    {label:'Input Tokens (User)',data:dUserT,borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.1)',fill:true,tension:.3},
-    {label:'Output Tokens (Bot)',data:dBotT,borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.1)',fill:true,tension:.3}
-  ]},options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{beginAtZero:true}}}});
-
-  charts.role = new Chart(document.getElementById('roleChart'),{type:'doughnut',data:{labels:rLabels,datasets:[
-    {data:rCounts,backgroundColor:['#6366f1','#22c55e','#f97316','#06b6d4','#ec4899']}
-  ]},options:{responsive:true,plugins:{legend:{position:'right'}}}});
-
-  charts.avgToken = new Chart(document.getElementById('avgTokenChart'),{type:'bar',data:{labels:rLabels,datasets:[
-    {label:'Avg Tokens',data:rAvgT,backgroundColor:['#8b5cf6','#06b6d4','#f97316','#22c55e','#ec4899'],borderRadius:6}
-  ]},options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true}}}});
-
-  charts.topSessions = new Chart(document.getElementById('topSessionsChart'),{type:'bar',data:{labels:tLabels,datasets:[
-    {label:'Tokens',data:tTokens,backgroundColor:'rgba(99,102,241,.8)',borderRadius:4},
-    {label:'Words',data:tWords,backgroundColor:'rgba(6,182,212,.6)',borderRadius:4}
-  ]},options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{beginAtZero:true}}}});
-
-  charts.fileToken = new Chart(document.getElementById('fileTokenChart'),{type:'bar',data:{labels:fLabels,datasets:[
-    {label:'Filestore Tokens',data:fTokens,backgroundColor:fColors,borderRadius:4}
-  ]},options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true}}}});
+  // === KPIs ===
+  document.getElementById('kpis').innerHTML = `
+    <div class="kpi"><div class="label">Total Sessions</div><div class="value accent">${fmt(totalSessions)}</div><div class="sub">${fmt(totalMsgs)} messages total</div></div>
+    <div class="kpi"><div class="label">Standard Input Tokens</div><div class="value green">${fmt(standardInputTokens)}</div><div class="sub">${fmtCost(chatInputCost)} @ $0.10/1M</div></div>
+    <div class="kpi"><div class="label">Output Tokens (Completion)</div><div class="value cyan">${fmt(totalCompletionTokens)}</div><div class="sub">${fmtCost(chatOutputCost)} @ $0.40/1M</div></div>
+    <div class="kpi"><div class="label">Cache Read Tokens</div><div class="value accent2">${fmt(totalCacheReadTokens)}</div><div class="sub">${fmtCost(cacheReadCost)} @ $0.01/1M (90% off)</div></div>
+    <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">${fmtCost(cacheWriteCost)} @ $0.10/1M</div></div>
+    <div class="kpi"><div class="label">Table Formatting</div><div class="value orange">${fmt(totalTableInputTokens + totalTableOutputTokens)}</div><div class="sub">${fmtCost(tableFormatCost)} (${tablesMeta.length} tables)</div></div>
+    <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmt(fileTokens)} tokens indexed</div></div>
+  `;
 
   // === HELPERS FOR MESSAGES ===
   const chatMsgs = filterByDate(RAW.chat_messages||[], days);
@@ -420,13 +521,13 @@ function render() {
     if(!msgBySession[m.session_id]) msgBySession[m.session_id] = [];
     msgBySession[m.session_id].push(m);
   });
-  // Sort messages within each session by created_at ascending (chronological)
   Object.values(msgBySession).forEach(arr => arr.sort((a,b) => (a.created_at||'').localeCompare(b.created_at||'')));
 
-  // === SESSIONS TABLE (expandable) ===
+  // === SESSIONS TABLE ===
   const sessionsEl = document.getElementById('sessions-table');
   sessionsEl.innerHTML = '';
   sessions.slice(0,100).forEach(r => {
+    const cost = calcSessionCost(r.total_prompt_token_count||0, r.total_completion_token_count||0);
     const sessionRow = document.createElement('tr');
     sessionRow.className = 'session-row';
     sessionRow.dataset.sessionId = r.id;
@@ -442,25 +543,76 @@ function render() {
       <td class="token-cell">${fmt(r.total_tool_def_token_count)}</td>
       <td class="token-cell">${fmt(r.total_user_msg_token_count)}</td>
       <td class="token-cell">${fmt(r.total_bot_response_token_count)}</td>
+      <td class="cost-cell">${fmtCost(cost)}</td>
       <td>${r.duration_minutes||'-'}</td>
       <td>${badge(r.archive_status)}</td>`;
     sessionRow.onclick = function() { toggleSession(this, r.id); };
     sessionsEl.appendChild(sessionRow);
   });
 
-  // === OTHER TABLES ===
-  document.getElementById('files-table').innerHTML = files.slice(0,100).map(r=>`<tr>
+  // === FILES TABLE ===
+  document.getElementById('files-table').innerHTML = files.slice(0,100).map(r => {
+    const tCost = calcTableCost(r.total_table_input_tokens||0, r.total_table_output_tokens||0);
+    return `<tr>
     <td title="${r.original_filename}">${trunc(r.original_filename,35)}</td><td>${r.file_extension||'-'}</td>
     <td>${fmt(r.file_size)}</td><td>${fmt(r.filestore_character_count)}</td><td>${fmt(r.filestore_word_count)}</td>
-    <td class="token-cell">${fmt(r.filestore_token_count)}</td><td>${badge(r.processing_status)}</td>
-    <td>${fmtDate(r.created_at)}</td></tr>`).join('');
+    <td class="token-cell">${fmt(r.filestore_token_count)}</td>
+    <td>${r.total_tables_count||0}</td>
+    <td class="token-cell">${fmt(r.total_table_input_tokens)}</td>
+    <td class="token-cell">${fmt(r.total_table_output_tokens)}</td>
+    <td class="cost-cell">${fmtCost(tCost)}</td>
+    <td>${badge(r.processing_status)}</td>
+    <td>${fmtDate(r.created_at)}</td></tr>`;
+  }).join('');
 
-  document.getElementById('websites-table').innerHTML = websites.slice(0,100).map(r=>`<tr>
+  // === WEBSITES TABLE ===
+  document.getElementById('websites-table').innerHTML = websites.slice(0,100).map(r => {
+    const tCost = calcTableCost(r.total_table_input_tokens||0, r.total_table_output_tokens||0);
+    return `<tr>
     <td title="${r.original_url}">${trunc(r.original_url,40)}${r.parent_id?' (child)':''}</td>
     <td>${trunc(r.title,30)}</td><td>${r.pages_scraped||0}</td>
     <td>${fmt(r.filestore_character_count)}</td><td>${fmt(r.filestore_word_count)}</td>
-    <td class="token-cell">${fmt(r.filestore_token_count)}</td><td>${badge(r.processing_status)}</td>
-    <td>${fmtDate(r.created_at)}</td></tr>`).join('');
+    <td class="token-cell">${fmt(r.filestore_token_count)}</td>
+    <td>${r.total_tables_count||0}</td>
+    <td class="token-cell">${fmt(r.total_table_input_tokens)}</td>
+    <td class="token-cell">${fmt(r.total_table_output_tokens)}</td>
+    <td class="cost-cell">${fmtCost(tCost)}</td>
+    <td>${badge(r.processing_status)}</td>
+    <td>${fmtDate(r.created_at)}</td></tr>`;
+  }).join('');
+
+  // === TABLES METADATA TABLE ===
+  document.getElementById('tables-meta-table').innerHTML = tablesMeta.slice(0,200).map(r => {
+    const cost = calcTableCost(r.table_input_token_count||0, r.table_output_token_count||0);
+    return `<tr>
+    <td title="${r.source_name}">${trunc(r.source_name,35)}</td>
+    <td><span class="badge badge-${r.source_type==='file'?'processing':'active'}">${r.source_type}</span></td>
+    <td>${r.table_index}</td>
+    <td>${r.table_column_count_input||0}</td><td>${r.table_row_count_input||0}</td>
+    <td>${fmt(r.table_character_count_input)}</td><td>${fmt(r.table_character_count_output)}</td>
+    <td class="token-cell">${fmt(r.table_input_token_count)}</td>
+    <td class="token-cell">${fmt(r.table_output_token_count)}</td>
+    <td class="cost-cell">${fmtCost(cost)}</td>
+    <td>${fmtDate(r.created_at)}</td></tr>`;
+  }).join('');
+
+  // === TOKEN USAGE LOG TABLE ===
+  document.getElementById('token-log-table').innerHTML = tokenLog.slice(0,200).map(r => {
+    const cache = getCacheTokens(r.request_metadata);
+    const cost = calcInputCost(r.prompt_tokens||0) + calcOutputCost(r.completion_tokens||0)
+               + calcCacheReadCost(cache.read) + calcCacheWriteCost(cache.write);
+    return `<tr>
+    <td><span class="badge badge-${r.api_call_type==='rag'?'active':'processing'}">${r.api_call_type||'-'}</span></td>
+    <td style="font-size:11px">${r.model||'-'}</td>
+    <td class="token-cell">${fmt(r.prompt_tokens)}</td>
+    <td class="token-cell">${fmt(r.completion_tokens)}</td>
+    <td class="token-cell">${fmt(r.total_tokens)}</td>
+    <td class="token-cell">${cache.read ? fmt(cache.read) : '-'}</td>
+    <td class="token-cell">${cache.write ? fmt(cache.write) : '-'}</td>
+    <td class="cost-cell">${fmtCost(cost)}</td>
+    <td class="mono" style="font-size:10px">${r.session_id ? r.session_id.substring(0,8)+'...' : '-'}</td>
+    <td>${fmtDateTime(r.created_at)}</td></tr>`;
+  }).join('');
 }
 
 // === RENDER AGENT RUN STEPS FOR A USER MESSAGE ===
@@ -505,7 +657,6 @@ function renderRunSteps(userMsgId, sessionId) {
 function toggleSession(rowEl, sessionId) {
   const isOpen = rowEl.classList.contains('open');
 
-  // Remove any existing expanded message rows for this session
   let next = rowEl.nextElementSibling;
   while(next && next.classList.contains('msg-row')) {
     const toRemove = next;
@@ -527,7 +678,7 @@ function toggleSession(rowEl, sessionId) {
   if(msgs.length === 0) {
     const emptyRow = document.createElement('tr');
     emptyRow.className = 'msg-row';
-    emptyRow.innerHTML = `<td colspan="15" style="color:var(--muted);font-style:italic;padding-left:32px">No messages found for this session</td>`;
+    emptyRow.innerHTML = `<td colspan="16" style="color:var(--muted);font-style:italic;padding-left:32px">No messages found for this session</td>`;
     rowEl.after(emptyRow);
     return;
   }
@@ -535,21 +686,26 @@ function toggleSession(rowEl, sessionId) {
   const roleName = r => r==='assistant'?'Bot':r==='user'?'User':r==='human_agent'?'Human Agent':(r||'Unknown');
   const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
 
-  // Insert message rows chronologically with merged-cell breakdown
   let insertAfter = rowEl;
   msgs.forEach((m, idx) => {
-    // === Main message row ===
     const msgRow = document.createElement('tr');
     msgRow.className = 'msg-row';
-    msgRow.innerHTML = `<td colspan="15" style="padding-left:24px">
+
+    // Per-message cost
+    let msgCost = 0;
+    if(m.role==='user') msgCost = calcInputCost(m.prompt_token_count||0);
+    else if(m.role==='assistant') msgCost = calcOutputCost(m.completion_token_count||0);
+
+    msgRow.innerHTML = `<td colspan="16" style="padding-left:24px">
       <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:8px">
         <span class="badge badge-${m.role}" style="flex-shrink:0">${roleName(m.role)}</span>
         <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="flex:1">${escHtml(m.content)}</div>
+        <span class="cost-cell" style="flex-shrink:0;font-size:12px;white-space:nowrap">${fmtCost(msgCost)}</span>
         <span style="flex-shrink:0;font-size:11px;color:var(--muted);white-space:nowrap">${fmtDateTime(m.created_at)}</span>
       </div>
       <table class="bd-table">
         <thead><tr>
-          <th>Component</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>Content (click to expand)</th>
+          <th>Component</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th style="text-align:right">Est. Cost</th><th>Content (click to expand)</th>
         </tr></thead>
         <tbody>
         ${m.role==='user' ? `
@@ -558,6 +714,7 @@ function toggleSession(rowEl, sessionId) {
             <td class="bd-num">${fmt(m.system_prompt_token_count)}</td>
             <td class="bd-num">${fmt(m.system_prompt_word_count)}</td>
             <td class="bd-num">${fmt(m.system_prompt_char_count)}</td>
+            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.system_prompt_token_count||0))}</td>
             <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.system_prompt_text)||'-'}</div></td>
           </tr>
           <tr>
@@ -565,25 +722,30 @@ function toggleSession(rowEl, sessionId) {
             <td class="bd-num">${fmt(m.history_token_count)}</td>
             <td class="bd-num">${fmt(m.history_word_count)}</td>
             <td class="bd-num">${fmt(m.history_char_count)}</td>
+            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.history_token_count||0))}</td>
             <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.history_text)||'<i style="color:var(--muted)">No history (first message)</i>'}</div></td>
           </tr>
           <tr>
             <td class="bd-label">Tools + Multi-turn</td>
             <td class="bd-num">${fmt(m.tool_def_token_count)}</td>
-            <td class="bd-num" colspan="2" style="text-align:left;font-weight:400;font-size:10px;color:var(--muted)">Derived: Total Prompt − Sys Prompt − History − User Msg</td>
-            <td class="bd-text" style="font-size:10px;color:var(--muted)">Includes tool schema, tool call/return context, and repeated prompt across turns</td>
+            <td class="bd-num" colspan="2" style="text-align:left;font-weight:400;font-size:10px;color:var(--muted)">Derived: Total Prompt - others</td>
+            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.tool_def_token_count||0))}</td>
+            <td class="bd-text" style="font-size:10px;color:var(--muted)">Includes tool schema, tool call/return context, repeated prompt across turns</td>
           </tr>
           <tr>
             <td class="bd-label">User Message</td>
             <td class="bd-num">${fmt(m.user_msg_token_count)}</td>
             <td class="bd-num">${fmt(m.user_msg_word_count)}</td>
             <td class="bd-num">${fmt(m.user_msg_char_count)}</td>
+            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.user_msg_token_count||0))}</td>
             <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div></td>
           </tr>
           <tr style="background:rgba(79,70,229,.06);font-weight:600">
             <td class="bd-label">Total (Prompt)</td>
             <td class="bd-num">${fmt(m.prompt_token_count)}</td>
-            <td colspan="3" style="font-size:11px;color:var(--muted)">= Sys Prompt + History + Tools/Multi-turn + User Msg (billable input from Gemini API)</td>
+            <td colspan="2" style="font-size:11px;color:var(--muted)">Billable input from Gemini API</td>
+            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.prompt_token_count||0))}</td>
+            <td></td>
           </tr>
         ` : `
           <tr>
@@ -591,12 +753,15 @@ function toggleSession(rowEl, sessionId) {
             <td class="bd-num">${fmt(m.bot_response_token_count)}</td>
             <td class="bd-num">${fmt(m.bot_response_word_count)}</td>
             <td class="bd-num">${fmt(m.bot_response_char_count)}</td>
+            <td class="bd-num cost-cell">${fmtCost(calcOutputCost(m.bot_response_token_count||0))}</td>
             <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div></td>
           </tr>
           <tr style="background:rgba(79,70,229,.06);font-weight:600">
             <td class="bd-label">Total (Completion)</td>
             <td class="bd-num">${fmt(m.completion_token_count)}</td>
-            <td colspan="3" style="font-size:11px;color:var(--muted)">Billable output — includes tool call generation + final response across all turns</td>
+            <td colspan="2" style="font-size:11px;color:var(--muted)">Billable output — includes tool call generation + final response</td>
+            <td class="bd-num cost-cell">${fmtCost(calcOutputCost(m.completion_token_count||0))}</td>
+            <td></td>
           </tr>
         `}
         </tbody>
@@ -616,87 +781,104 @@ function downloadExcel() {
   const files = filterByDate(RAW.files, days);
   const websites = filterByDate(RAW.websites, days);
   const chatMsgs = filterByDate(RAW.chat_messages||[], days);
+  const tokenLog = filterByDate(RAW.token_usage_log||[], days);
+  const tablesMeta = filterByDate(RAW.tables_metadata||[], days);
 
   const wb = XLSX.utils.book_new();
 
   // Sheet 1: Chat Sessions
-  const sessData = sessions.map(r => ({
-    'Session ID': r.id,
-    'Started At': r.started_at,
-    'Messages': r.message_count||0,
-    'Characters (sum of all message chars)': r.total_character_count||0,
-    'Words (sum of all message words)': r.total_word_count||0,
-    'Msg Tokens (message text only)': r.total_message_token_count||0,
-    'Prompt Tokens (billable input to Gemini)': r.total_prompt_token_count||0,
-    'Completion Tokens (billable output from Gemini)': r.total_completion_token_count||0,
-    'System Prompt Tokens (per-turn sum)': r.total_system_prompt_token_count||0,
-    'History Tokens (per-turn sum)': r.total_history_token_count||0,
-    'Tool Def Tokens (per-turn sum)': r.total_tool_def_token_count||0,
-    'User Msg Tokens (per-turn sum)': r.total_user_msg_token_count||0,
-    'Bot Response Tokens (per-turn sum)': r.total_bot_response_token_count||0,
-    'Duration (min)': r.duration_minutes||'',
-    'Status': r.archive_status||'',
-    'Sentiment': r.sentiment||''
-  }));
+  const sessData = sessions.map(r => {
+    const cost = calcSessionCost(r.total_prompt_token_count||0, r.total_completion_token_count||0);
+    return {
+      'Session ID': r.id,
+      'Started At': r.started_at,
+      'Messages': r.message_count||0,
+      'Characters': r.total_character_count||0,
+      'Words': r.total_word_count||0,
+      'Msg Tokens': r.total_message_token_count||0,
+      'Prompt Tokens (input)': r.total_prompt_token_count||0,
+      'Completion Tokens (output)': r.total_completion_token_count||0,
+      'System Prompt Tokens': r.total_system_prompt_token_count||0,
+      'History Tokens': r.total_history_token_count||0,
+      'Tool Def Tokens': r.total_tool_def_token_count||0,
+      'User Msg Tokens': r.total_user_msg_token_count||0,
+      'Bot Response Tokens': r.total_bot_response_token_count||0,
+      'Est. Input Cost ($)': calcInputCost(r.total_prompt_token_count||0).toFixed(6),
+      'Est. Output Cost ($)': calcOutputCost(r.total_completion_token_count||0).toFixed(6),
+      'Est. Total Cost ($)': cost.toFixed(6),
+      'Duration (min)': r.duration_minutes||'',
+      'Status': r.archive_status||'',
+      'Sentiment': r.sentiment||''
+    };
+  });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sessData), 'Chat Sessions');
 
   // Sheet 2: Chat Messages
-  const msgData = chatMsgs.map(r => ({
-    'Message ID': r.id,
-    'Session ID': r.session_id,
-    'Role': r.role==='assistant'?'Bot':r.role==='user'?'User':r.role==='human_agent'?'Human Agent':r.role,
-    'Message Content': r.content||'',
-    'Characters (in this message)': r.character_count||0,
-    'Words (in this message)': r.word_count||0,
-    'Msg Tokens (this message text only, count_tokens API)': r.message_token_count||0,
-    'Prompt Tokens (full context sent TO Gemini, user msgs only)': r.prompt_token_count||0,
-    'Completion Tokens (generated BY Gemini, bot msgs only)': r.completion_token_count||0,
-    'System Prompt Chars': r.system_prompt_char_count||0,
-    'System Prompt Words': r.system_prompt_word_count||0,
-    'System Prompt Tokens': r.system_prompt_token_count||0,
-    'History Chars': r.history_char_count||0,
-    'History Words': r.history_word_count||0,
-    'History Tokens': r.history_token_count||0,
-    'Tool Def Chars': r.tool_def_char_count||0,
-    'Tool Def Words': r.tool_def_word_count||0,
-    'Tool Def Tokens': r.tool_def_token_count||0,
-    'User Msg Chars': r.user_msg_char_count||0,
-    'User Msg Words': r.user_msg_word_count||0,
-    'User Msg Tokens': r.user_msg_token_count||0,
-    'Bot Response Chars': r.bot_response_char_count||0,
-    'Bot Response Words': r.bot_response_word_count||0,
-    'Bot Response Tokens': r.bot_response_token_count||0,
-    'Created': r.created_at||''
-  }));
+  const msgData = chatMsgs.map(r => {
+    const inCost = r.role==='user' ? calcInputCost(r.prompt_token_count||0) : 0;
+    const outCost = r.role==='assistant' ? calcOutputCost(r.completion_token_count||0) : 0;
+    return {
+      'Message ID': r.id,
+      'Session ID': r.session_id,
+      'Role': r.role==='assistant'?'Bot':r.role==='user'?'User':r.role,
+      'Message Content': r.content||'',
+      'Characters': r.character_count||0,
+      'Words': r.word_count||0,
+      'Msg Tokens': r.message_token_count||0,
+      'Prompt Tokens': r.prompt_token_count||0,
+      'Completion Tokens': r.completion_token_count||0,
+      'System Prompt Tokens': r.system_prompt_token_count||0,
+      'History Tokens': r.history_token_count||0,
+      'Tool Def Tokens': r.tool_def_token_count||0,
+      'User Msg Tokens': r.user_msg_token_count||0,
+      'Bot Response Tokens': r.bot_response_token_count||0,
+      'Est. Cost ($)': (inCost + outCost).toFixed(6),
+      'Created': r.created_at||''
+    };
+  });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(msgData), 'Chat Messages');
 
   // Sheet 3: File Uploads
-  const fileData = files.map(r => ({
-    'Filename': r.original_filename||'',
-    'Extension': r.file_extension||'',
-    'File Size (bytes)': r.file_size||0,
-    'Markdown Chars (processed content sent to Gemini FileSearch)': r.filestore_character_count||0,
-    'Markdown Words (processed content sent to Gemini FileSearch)': r.filestore_word_count||0,
-    'Markdown Tokens (count_tokens API, indexed for RAG)': r.filestore_token_count||0,
-    'Status': r.processing_status||'',
-    'Processed by Docling': r.processed_by_docling?'Yes':'No',
-    'Created': r.created_at||''
-  }));
+  const fileData = files.map(r => {
+    const tCost = calcTableCost(r.total_table_input_tokens||0, r.total_table_output_tokens||0);
+    return {
+      'Filename': r.original_filename||'',
+      'Extension': r.file_extension||'',
+      'File Size (bytes)': r.file_size||0,
+      'Markdown Chars': r.filestore_character_count||0,
+      'Markdown Words': r.filestore_word_count||0,
+      'Markdown Tokens': r.filestore_token_count||0,
+      'Tables Count': r.total_tables_count||0,
+      'Table Input Tokens': r.total_table_input_tokens||0,
+      'Table Output Tokens': r.total_table_output_tokens||0,
+      'Table Format Cost ($)': tCost.toFixed(6),
+      'Status': r.processing_status||'',
+      'Docling': r.processed_by_docling?'Yes':'No',
+      'Created': r.created_at||''
+    };
+  });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(fileData), 'File Uploads');
 
   // Sheet 4: Scraped Websites
-  const webData = websites.map(r => ({
-    'URL': r.original_url||'',
-    'Title': r.title||'',
-    'Pages Crawled': r.pages_scraped||0,
-    'Markdown Chars (processed content sent to Gemini FileSearch)': r.filestore_character_count||0,
-    'Markdown Words (processed content sent to Gemini FileSearch)': r.filestore_word_count||0,
-    'Markdown Tokens (count_tokens API, indexed for RAG)': r.filestore_token_count||0,
-    'Status': r.processing_status||'',
-    'Depth': r.depth||0,
-    'Is Child Page': r.parent_id?'Yes':'No',
-    'Created': r.created_at||''
-  }));
+  const webData = websites.map(r => {
+    const tCost = calcTableCost(r.total_table_input_tokens||0, r.total_table_output_tokens||0);
+    return {
+      'URL': r.original_url||'',
+      'Title': r.title||'',
+      'Pages Crawled': r.pages_scraped||0,
+      'Markdown Chars': r.filestore_character_count||0,
+      'Markdown Words': r.filestore_word_count||0,
+      'Markdown Tokens': r.filestore_token_count||0,
+      'Tables Count': r.total_tables_count||0,
+      'Table Input Tokens': r.total_table_input_tokens||0,
+      'Table Output Tokens': r.total_table_output_tokens||0,
+      'Table Format Cost ($)': tCost.toFixed(6),
+      'Status': r.processing_status||'',
+      'Depth': r.depth||0,
+      'Is Child': r.parent_id?'Yes':'No',
+      'Created': r.created_at||''
+    };
+  });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(webData), 'Scraped Websites');
 
   // Sheet 5: Agent Run Steps
@@ -714,6 +896,71 @@ function downloadExcel() {
     'Created': r.created_at||''
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stepsData), 'Agent Run Steps');
+
+  // Sheet 6: Table Formatting Detail
+  const tablesData = tablesMeta.map(r => {
+    const cost = calcTableCost(r.table_input_token_count||0, r.table_output_token_count||0);
+    return {
+      'Source': r.source_name||'',
+      'Source Type': r.source_type,
+      'Table #': r.table_index,
+      'Columns': r.table_column_count_input||0,
+      'Rows': r.table_row_count_input||0,
+      'Input Chars': r.table_character_count_input||0,
+      'Output Chars': r.table_character_count_output||0,
+      'Input Tokens': r.table_input_token_count||0,
+      'Output Tokens': r.table_output_token_count||0,
+      'Est. Cost ($)': cost.toFixed(6),
+      'Created': r.created_at||''
+    };
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tablesData), 'Table Formatting');
+
+  // Sheet 7: Token Usage Log
+  const logData = tokenLog.map(r => {
+    const cache = getCacheTokens(r.request_metadata);
+    const cost = calcInputCost(Math.max(0, (r.prompt_tokens||0) - cache.read)) 
+               + calcOutputCost(r.completion_tokens||0)
+               + calcCacheReadCost(cache.read) + calcCacheWriteCost(cache.write);
+    return {
+      'API Call Type': r.api_call_type||'',
+      'Provider': r.provider||'',
+      'Model': r.model||'',
+      'Prompt Tokens': r.prompt_tokens||0,
+      'Completion Tokens': r.completion_tokens||0,
+      'Total Tokens': r.total_tokens||0,
+      'Cache Read Tokens': cache.read,
+      'Cache Write Tokens': cache.write,
+      'Est. Cost ($)': cost.toFixed(6),
+      'Session ID': r.session_id||'',
+      'Message ID': r.message_id||'',
+      'Created': r.created_at||''
+    };
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(logData), 'Token Usage Log');
+
+  // Sheet 8: Cost Summary
+  const totalPromptTokens = sessions.reduce((a,r) => a+(r.total_prompt_token_count||0), 0);
+  const totalCompletionTokens = sessions.reduce((a,r) => a+(r.total_completion_token_count||0), 0);
+  const totalTableIn = tablesMeta.reduce((a,r) => a+(r.table_input_token_count||0), 0);
+  const totalTableOut = tablesMeta.reduce((a,r) => a+(r.table_output_token_count||0), 0);
+  let totalCacheRead = 0, totalCacheWrite = 0;
+  tokenLog.forEach(r => { const c = getCacheTokens(r.request_metadata); totalCacheRead += c.read; totalCacheWrite += c.write; });
+  const totalStandardIn = Math.max(0, totalPromptTokens - totalCacheRead);
+  const costSummary = [
+    {'Category': 'Chat Input (Standard)', 'Tokens': totalStandardIn, 'Rate ($/1M)': 0.10, 'Est. Cost ($)': calcInputCost(totalStandardIn).toFixed(6)},
+    {'Category': 'Chat Output (Completion)', 'Tokens': totalCompletionTokens, 'Rate ($/1M)': 0.40, 'Est. Cost ($)': calcOutputCost(totalCompletionTokens).toFixed(6)},
+    {'Category': 'Cache Read (90% off)', 'Tokens': totalCacheRead, 'Rate ($/1M)': 0.01, 'Est. Cost ($)': calcCacheReadCost(totalCacheRead).toFixed(6)},
+    {'Category': 'Cache Write', 'Tokens': totalCacheWrite, 'Rate ($/1M)': 0.10, 'Est. Cost ($)': calcCacheWriteCost(totalCacheWrite).toFixed(6)},
+    {'Category': 'Table Formatting (Input)', 'Tokens': totalTableIn, 'Rate ($/1M)': 0.10, 'Est. Cost ($)': calcInputCost(totalTableIn).toFixed(6)},
+    {'Category': 'Table Formatting (Output)', 'Tokens': totalTableOut, 'Rate ($/1M)': 0.40, 'Est. Cost ($)': calcOutputCost(totalTableOut).toFixed(6)},
+    {'Category': 'TOTAL ESTIMATED COST', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': (calcInputCost(totalStandardIn) + calcOutputCost(totalCompletionTokens) + calcCacheReadCost(totalCacheRead) + calcCacheWriteCost(totalCacheWrite) + calcTableCost(totalTableIn, totalTableOut)).toFixed(6)},
+    {'Category': '', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''},
+    {'Category': 'NOTE: FileSearch upload/storage costs billed separately by Google (not tracked)', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''},
+    {'Category': 'NOTE: Cache storage ($1.00/hr/1M tokens) not tracked in this report', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''},
+    {'Category': 'Pricing: Gemini 2.5 Flash Lite Paid Tier (as of 2025)', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''}
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(costSummary), 'Cost Summary');
 
   XLSX.writeFile(wb, `usage-report-${days}d-${new Date().toISOString().substring(0,10)}.xlsx`);
 }
