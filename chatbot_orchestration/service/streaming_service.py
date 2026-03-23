@@ -1553,7 +1553,13 @@ class StreamingService:
         input_tokens: int,
         output_tokens: int
     ):
-        """Background task: update token_count on the latest user+assistant messages, and session aggregates.
+        """Background task: update token counts on the latest user+assistant messages, and session aggregates.
+
+        Columns updated per message:
+        - token_count: prompt_tokens for user msg, completion_tokens for bot msg (legacy, full context)
+        - message_token_count: tokens for just the message text (via count_tokens API)
+        - prompt_token_count: full prompt tokens from run.usage() (on user msg only)
+        - completion_token_count: completion tokens from run.usage() (on bot msg only)
 
         Retries up to 3 times with 6s delay to handle write-through flush race condition.
         """
@@ -1567,38 +1573,86 @@ class StreamingService:
         bot_char_count = len(response_text)
         bot_word_count = len(response_text.split()) if response_text.strip() else 0
 
+        # Count tokens for just the message text via Gemini count_tokens API
+        user_message_tokens = 0
+        bot_message_tokens = 0
+        try:
+            import os
+            from concurrent.futures import ThreadPoolExecutor
+            loop = asyncio.get_event_loop()
+            token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
+
+            from core.ai import get_genai_client
+            genai_client = get_genai_client()
+            if genai_client:
+                executor = ThreadPoolExecutor(max_workers=2)
+
+                def count_user():
+                    return genai_client.models.count_tokens(model=token_model, contents=user_message)
+
+                def count_bot():
+                    return genai_client.models.count_tokens(model=token_model, contents=response_text)
+
+                user_result, bot_result = await asyncio.gather(
+                    loop.run_in_executor(executor, count_user),
+                    loop.run_in_executor(executor, count_bot)
+                )
+                user_message_tokens = user_result.total_tokens if user_result else 0
+                bot_message_tokens = bot_result.total_tokens if bot_result else 0
+                logger.info(f"📊 [MSG_TOKENS] Message token counts: user={user_message_tokens}, bot={bot_message_tokens}")
+        except Exception as tc_err:
+            logger.warning(f"⚠️ [MSG_TOKENS] Failed to count message tokens: {tc_err}")
+
         for attempt in range(3):
             try:
                 await asyncio.sleep(6)  # Wait for write-through to flush
 
                 async with get_db_session() as db:
-                    # Update token_count on the latest user message (most recent 'user' role)
+                    # Update the latest user message
                     result = await db.execute(
                         text("""
                             UPDATE chat_messages
-                            SET token_count = :token_count, updated_at = NOW()
+                            SET token_count = :token_count,
+                                message_token_count = :message_token_count,
+                                prompt_token_count = :prompt_token_count,
+                                completion_token_count = 0,
+                                updated_at = NOW()
                             WHERE id = (
                                 SELECT id FROM chat_messages
                                 WHERE session_id = CAST(:session_id AS UUID) AND role = 'user'
                                 ORDER BY created_at DESC LIMIT 1
                             )
                         """),
-                        {"session_id": session_id, "token_count": input_tokens}
+                        {
+                            "session_id": session_id,
+                            "token_count": input_tokens,
+                            "message_token_count": user_message_tokens,
+                            "prompt_token_count": input_tokens,
+                        }
                     )
                     user_updated = result.rowcount > 0
 
-                    # Update token_count on the latest assistant message
+                    # Update the latest assistant message
                     result = await db.execute(
                         text("""
                             UPDATE chat_messages
-                            SET token_count = :token_count, updated_at = NOW()
+                            SET token_count = :token_count,
+                                message_token_count = :message_token_count,
+                                prompt_token_count = 0,
+                                completion_token_count = :completion_token_count,
+                                updated_at = NOW()
                             WHERE id = (
                                 SELECT id FROM chat_messages
                                 WHERE session_id = CAST(:session_id AS UUID) AND role = 'assistant'
                                 ORDER BY created_at DESC LIMIT 1
                             )
                         """),
-                        {"session_id": session_id, "token_count": output_tokens}
+                        {
+                            "session_id": session_id,
+                            "token_count": output_tokens,
+                            "message_token_count": bot_message_tokens,
+                            "completion_token_count": output_tokens,
+                        }
                     )
                     bot_updated = result.rowcount > 0
 
@@ -1606,6 +1660,7 @@ class StreamingService:
                     total_char = user_char_count + bot_char_count
                     total_word = user_word_count + bot_word_count
                     total_token = input_tokens + output_tokens
+                    total_msg_tokens = user_message_tokens + bot_message_tokens
 
                     await db.execute(
                         text("""
@@ -1613,6 +1668,9 @@ class StreamingService:
                             SET total_character_count = total_character_count + :chars,
                                 total_word_count = total_word_count + :words,
                                 total_token_count = total_token_count + :tokens,
+                                total_message_token_count = total_message_token_count + :msg_tokens,
+                                total_prompt_token_count = total_prompt_token_count + :prompt_tokens,
+                                total_completion_token_count = total_completion_token_count + :completion_tokens,
                                 updated_at = NOW()
                             WHERE id = CAST(:session_id AS UUID)
                         """),
@@ -1620,16 +1678,19 @@ class StreamingService:
                             "session_id": session_id,
                             "chars": total_char,
                             "words": total_word,
-                            "tokens": total_token
+                            "tokens": total_token,
+                            "msg_tokens": total_msg_tokens,
+                            "prompt_tokens": input_tokens,
+                            "completion_tokens": output_tokens,
                         }
                     )
 
                     await db.commit()
 
                     logger.info(f"✅ [USAGE_UPDATE] Updated message & session usage for {session_id[:8]}...")
-                    logger.info(f"   User msg: {user_char_count} chars, {user_word_count} words, {input_tokens} tokens (updated={user_updated})")
-                    logger.info(f"   Bot msg: {bot_char_count} chars, {bot_word_count} words, {output_tokens} tokens (updated={bot_updated})")
-                    logger.info(f"   Session totals += {total_char} chars, {total_word} words, {total_token} tokens")
+                    logger.info(f"   User msg: {user_char_count} chars, {user_word_count} words, msg_tokens={user_message_tokens}, prompt_tokens={input_tokens} (updated={user_updated})")
+                    logger.info(f"   Bot msg: {bot_char_count} chars, {bot_word_count} words, msg_tokens={bot_message_tokens}, completion_tokens={output_tokens} (updated={bot_updated})")
+                    logger.info(f"   Session totals += {total_char} chars, {total_word} words, {total_token} tokens, {total_msg_tokens} msg_tokens")
                     return
 
             except Exception as e:

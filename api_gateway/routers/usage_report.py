@@ -36,6 +36,7 @@ async def _fetch_all_data():
         sessions = [_row_to_dict(r) for r in (await db.execute(text("""
             SELECT id, started_at, last_activity_at, message_count,
                    total_character_count, total_word_count, total_token_count,
+                   total_message_token_count, total_prompt_token_count, total_completion_token_count,
                    archive_status, sentiment, duration_minutes, created_at
             FROM chat_sessions WHERE created_at >= :since ORDER BY created_at DESC
         """), {"since": since})).fetchall()]
@@ -71,7 +72,9 @@ async def _fetch_all_data():
 
         chat_messages = [_row_to_dict(r) for r in (await db.execute(text("""
             SELECT cm.id, cm.session_id, cm.role, cm.content,
-                   cm.character_count, cm.word_count, cm.token_count, cm.created_at
+                   cm.character_count, cm.word_count, cm.token_count,
+                   cm.message_token_count, cm.prompt_token_count, cm.completion_token_count,
+                   cm.created_at
             FROM chat_messages cm
             WHERE cm.created_at >= :since
             ORDER BY cm.created_at DESC
@@ -141,7 +144,8 @@ tr:hover td{background:rgba(99,102,241,.05)}
 .session-row.open td:first-child::before{transform:rotate(90deg)}
 .msg-row{background:rgba(99,102,241,.03)}
 .msg-row td{padding:8px 12px 8px 32px;font-size:12px;border-bottom:1px solid rgba(42,45,58,.5)}
-.msg-bubble{white-space:pre-wrap;word-break:break-word;line-height:1.5;max-width:600px}
+.msg-bubble{white-space:pre-wrap;word-break:break-word;line-height:1.5;max-width:600px;cursor:pointer}
+.msg-bubble.msg-collapsed{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;max-height:1.5em}
 .msg-row-header td{padding:6px 12px 6px 32px;font-size:11px;color:var(--muted);background:rgba(99,102,241,.06);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
 .loading{text-align:center;padding:40px;color:var(--muted)}
 .table-wrap{overflow-x:auto;max-height:500px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
@@ -186,7 +190,7 @@ tr:hover td{background:rgba(99,102,241,.05)}
 </div>
 
 <div class="section"><h2>Chat Sessions <span style="font-size:13px;color:var(--muted);font-weight:400">(click to expand messages)</span></h2><div class="table-wrap" style="max-height:700px"><table>
-  <thead><tr><th>Session ID</th><th>Started</th><th>Messages</th><th>Characters</th><th>Words</th><th>Tokens</th><th>Duration</th><th>Status</th></tr></thead>
+  <thead><tr><th>Session ID</th><th>Started</th><th>Msgs</th><th>Chars</th><th>Words</th><th>Msg Tokens</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Duration</th><th>Status</th></tr></thead>
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
@@ -352,7 +356,10 @@ function render() {
       <td class="mono">${r.id}</td>
       <td>${fmtDateTime(r.started_at)}</td><td>${r.message_count||0}</td>
       <td>${fmt(r.total_character_count)}</td><td>${fmt(r.total_word_count)}</td>
-      <td class="token-cell">${fmt(r.total_token_count)}</td><td>${r.duration_minutes||'-'}</td>
+      <td class="token-cell">${fmt(r.total_message_token_count)}</td>
+      <td class="token-cell">${fmt(r.total_prompt_token_count)}</td>
+      <td class="token-cell">${fmt(r.total_completion_token_count)}</td>
+      <td>${r.duration_minutes||'-'}</td>
       <td>${badge(r.archive_status)}</td>`;
     sessionRow.onclick = function() { toggleSession(this, r.id); };
     sessionsEl.appendChild(sessionRow);
@@ -399,7 +406,7 @@ function toggleSession(rowEl, sessionId) {
   if(msgs.length === 0) {
     const emptyRow = document.createElement('tr');
     emptyRow.className = 'msg-row';
-    emptyRow.innerHTML = `<td colspan="8" style="color:var(--muted);font-style:italic;padding-left:32px">No messages found for this session</td>`;
+    emptyRow.innerHTML = `<td colspan="10" style="color:var(--muted);font-style:italic;padding-left:32px">No messages found for this session</td>`;
     rowEl.after(emptyRow);
     return;
   }
@@ -410,10 +417,10 @@ function toggleSession(rowEl, sessionId) {
   // Insert header row
   const headerRow = document.createElement('tr');
   headerRow.className = 'msg-row-header';
-  headerRow.innerHTML = `<td colspan="2">Message ID</td><td>Role</td><td colspan="2">Message Content</td><td>Chars / Words</td><td>Tokens</td><td>Time</td>`;
+  headerRow.innerHTML = `<td colspan="2">Message ID</td><td>Role</td><td colspan="2">Message Content</td><td>Msg Tokens</td><td>Prompt Tokens</td><td>Completion Tokens</td><td>Time</td>`;
   rowEl.after(headerRow);
 
-  // Insert message rows in reverse order so they end up chronological
+  // Insert message rows chronologically
   let insertAfter = headerRow;
   msgs.forEach(m => {
     const msgRow = document.createElement('tr');
@@ -421,9 +428,10 @@ function toggleSession(rowEl, sessionId) {
     msgRow.innerHTML = `
       <td colspan="2" class="mono" style="font-size:11px;color:var(--muted);vertical-align:top">${m.id||'-'}</td>
       <td style="vertical-align:top"><span class="badge badge-${m.role}">${roleName(m.role)}</span></td>
-      <td colspan="2" style="vertical-align:top"><div class="msg-bubble">${escHtml(m.content)}</div></td>
-      <td style="vertical-align:top;white-space:nowrap">${fmt(m.character_count)} / ${fmt(m.word_count)}</td>
-      <td class="token-cell" style="vertical-align:top">${fmt(m.token_count)}</td>
+      <td colspan="2" style="vertical-align:top"><div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse">${escHtml(m.content)}</div></td>
+      <td class="token-cell" style="vertical-align:top">${fmt(m.message_token_count)}</td>
+      <td class="token-cell" style="vertical-align:top">${fmt(m.prompt_token_count)}</td>
+      <td class="token-cell" style="vertical-align:top">${fmt(m.completion_token_count)}</td>
       <td style="vertical-align:top;white-space:nowrap">${fmtDateTime(m.created_at)}</td>`;
     insertAfter.after(msgRow);
     insertAfter = msgRow;
@@ -442,8 +450,8 @@ function downloadCSV() {
   const row = arr => csv += arr.map(v => `"${String(v??'').replace(/"/g,'""')}"`).join(',') + '\\n';
 
   row(['=== CHAT SESSIONS ===']);
-  row(['Session ID','Started At','Messages','Characters','Words','Tokens','Duration (min)','Status','Sentiment']);
-  sessions.forEach(r => row([r.id,r.started_at,r.message_count,r.total_character_count,r.total_word_count,r.total_token_count,r.duration_minutes,r.archive_status,r.sentiment]));
+  row(['Session ID','Started At','Messages','Characters','Words','Msg Tokens','Prompt Tokens','Completion Tokens','Duration (min)','Status','Sentiment']);
+  sessions.forEach(r => row([r.id,r.started_at,r.message_count,r.total_character_count,r.total_word_count,r.total_message_token_count,r.total_prompt_token_count,r.total_completion_token_count,r.duration_minutes,r.archive_status,r.sentiment]));
 
   row([]); row(['=== MESSAGE BREAKDOWN BY ROLE ===']);
   row(['Day','Role','Message Count','Total Characters','Total Words','Total Tokens','Avg Chars','Avg Words','Avg Tokens']);
@@ -455,8 +463,8 @@ function downloadCSV() {
 
   const chatMsgs = filterByDate(RAW.chat_messages||[], days);
   row([]); row(['=== CHAT MESSAGES ===']);
-  row(['Message ID','Session ID','Role','Message Content','Characters','Words','Tokens','Created']);
-  chatMsgs.forEach(r => row([r.id,r.session_id,r.role,r.content,r.character_count,r.word_count,r.token_count,r.created_at]));
+  row(['Message ID','Session ID','Role','Message Content','Characters','Words','Msg Tokens','Prompt Tokens','Completion Tokens','Created']);
+  chatMsgs.forEach(r => row([r.id,r.session_id,r.role,r.content,r.character_count,r.word_count,r.message_token_count,r.prompt_token_count,r.completion_token_count,r.created_at]));
 
   row([]); row(['=== SCRAPED WEBSITES ===']);
   row(['URL','Title','Pages','FS Characters','FS Words','FS Tokens','Status','Depth','Is Child','Created']);

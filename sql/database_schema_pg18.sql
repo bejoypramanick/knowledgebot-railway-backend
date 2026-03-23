@@ -144,6 +144,9 @@ CREATE TABLE IF NOT EXISTS public.chat_sessions (
 	total_character_count int4 DEFAULT 0 NULL,
 	total_word_count int4 DEFAULT 0 NULL,
 	total_token_count int4 DEFAULT 0 NULL,
+	total_message_token_count int4 DEFAULT 0 NULL,
+	total_prompt_token_count int4 DEFAULT 0 NULL,
+	total_completion_token_count int4 DEFAULT 0 NULL,
 	duration_minutes numeric GENERATED ALWAYS AS (
 		ROUND(EXTRACT(EPOCH FROM (
 			COALESCE(ended_at, last_activity_at) - started_at
@@ -190,6 +193,9 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
 	character_count int4 DEFAULT 0 NULL,
 	word_count int4 DEFAULT 0 NULL,
 	token_count int4 DEFAULT 0 NULL,
+	message_token_count int4 DEFAULT 0 NULL,
+	prompt_token_count int4 DEFAULT 0 NULL,
+	completion_token_count int4 DEFAULT 0 NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
