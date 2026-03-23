@@ -31,6 +31,29 @@ class StreamingService:
         from ..dao.chat_dao import ChatDAO
         self.chat_dao = ChatDAO()
 
+    async def _get_user_display_id(self, session_id: str) -> str:
+        """Get the User-N display ID for a session based on its ROW_NUMBER in chat_sessions."""
+        try:
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
+            async with get_db_session() as db_session:
+                result = await db_session.execute(
+                    text("""
+                        SELECT 'User-' || row_num as user_display_id
+                        FROM (
+                            SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC) as row_num
+                            FROM chat_sessions
+                        ) ranked
+                        WHERE id = CAST(:session_id AS UUID)
+                    """),
+                    {"session_id": session_id}
+                )
+                row = result.fetchone()
+                return row[0] if row else "User"
+        except Exception as e:
+            logger.warning(f"Failed to get user_display_id for {session_id}: {e}")
+            return "User"
+
     def _convert_db_messages_to_pydantic_ai(self, db_messages: List[Dict[str, Any]]) -> List[Any]:
         """Convert database messages to Pydantic AI message format."""
         pydantic_messages = []
@@ -373,14 +396,8 @@ class StreamingService:
                                                 "session_id": session_id
                                             })
 
-                                        # Get customer_name/email from Redis session metadata (only real names, not auto-generated)
-                                        session_metadata = redis_session.get('metadata', {})
-                                        customer_name = session_metadata.get('customer_name') if isinstance(session_metadata, dict) else None
-                                        customer_email = session_metadata.get('customer_email') if isinstance(session_metadata, dict) else None
-
-                                        # Skip auto-generated User-{id} names — frontend already has the correct ROW_NUMBER-based User-N
-                                        if customer_name and re.match(r'^User-\d+$', customer_name):
-                                            customer_name = None
+                                        # Get the canonical User-N display ID from PG row number
+                                        user_display_id = await self._get_user_display_id(session_id)
 
                                         # Build session event
                                         session_event = {
@@ -388,8 +405,8 @@ class StreamingService:
                                             "data": {
                                                 "id": session_id,
                                                 "session_uuid": session_id,
-                                                "customer_name": customer_name,
-                                                "customer_email": customer_email,
+                                                "customer_name": user_display_id,
+                                                "user_display_id": user_display_id,
                                                 "status": redis_session.get('archive_status', 'active'),
                                                 "last_message_at": redis_session.get('last_activity_at', datetime.utcnow().isoformat()),
                                                 "created_at": redis_session.get('started_at'),
@@ -543,18 +560,8 @@ class StreamingService:
                 from shared.redis_pubsub_manager import broadcast_event_to_all_agents
                 from datetime import datetime
 
-                # Resolve customer display name for admin chat log
-                customer_display_name = None
-                try:
-                    from shared.redis_chat_store import get_chat_store as _get_store
-                    _store = _get_store()
-                    _redis_session = await _store.get_session(session_id)
-                    if _redis_session:
-                        _meta = _redis_session.get('metadata', {})
-                        if isinstance(_meta, dict):
-                            customer_display_name = _meta.get('customer_name') or _meta.get('customer_email')
-                except Exception:
-                    pass
+                # Get the canonical User-N display ID from PG row number
+                user_display_id = await self._get_user_display_id(session_id)
 
                 user_message_event = {
                     "type": "customer_message",
@@ -563,8 +570,8 @@ class StreamingService:
                     "text": message,
                     "sender": "user",
                     "timestamp": datetime.utcnow().isoformat(),
-                    "user_email": user_email,
-                    "customer_name": customer_display_name
+                    "user_display_id": user_display_id,
+                    "customer_name": user_display_id
                 }
 
                 await broadcast_event_to_all_agents(user_message_event)
