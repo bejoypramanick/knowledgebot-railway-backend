@@ -1516,21 +1516,28 @@ class StreamingService:
             input_tokens = 0
             output_tokens = 0
 
+            cache_read_tokens = 0
+            cache_write_tokens = 0
+
             if run:
                 try:
                     usage = run.usage()
                     if usage:
                         input_tokens = getattr(usage, 'input_tokens', 0) or 0
                         output_tokens = getattr(usage, 'output_tokens', 0) or 0
+                        cache_read_tokens = getattr(usage, 'cache_read_tokens', 0) or 0
+                        cache_write_tokens = getattr(usage, 'cache_write_tokens', 0) or 0
 
                         logger.info(f"✅ Got ACTUAL token counts from Gemini API:")
                         logger.info(f"   Input tokens: {input_tokens}")
                         logger.info(f"   Output tokens: {output_tokens}")
+                        logger.info(f"   Cache read tokens: {cache_read_tokens}")
+                        logger.info(f"   Cache write tokens: {cache_write_tokens}")
                 except Exception as usage_error:
                     logger.warning(f"⚠️ Could not extract usage from run object: {usage_error}")
 
-            total_tokens = input_tokens + output_tokens
-            prompt_tokens = input_tokens
+            total_tokens = input_tokens + output_tokens + cache_read_tokens
+            prompt_tokens = input_tokens + cache_read_tokens  # Total billable prompt including cached
             completion_tokens = output_tokens
             token_source = "ACTUAL (from Gemini API)" if total_tokens > 0 else "ZERO (no run data)"
 
@@ -1569,6 +1576,7 @@ class StreamingService:
                 response_text=response_text,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
                 system_prompt_text=system_prompt_text,
                 history_text=history_text,
                 tool_def_text=tool_def_text
@@ -1584,6 +1592,7 @@ class StreamingService:
         response_text: str,
         input_tokens: int,
         output_tokens: int,
+        cache_read_tokens: int = 0,
         system_prompt_text: str = "",
         history_text: str = "",
         tool_def_text: str = ""
@@ -1665,15 +1674,21 @@ class StreamingService:
                 sp_tokens = results[2].total_tokens if results[2] else 0
                 hist_tokens = results[3].total_tokens if results[3] else 0
 
-                # Derive tool definition tokens from the remainder:
-                # input_tokens (from Gemini API) = sys_prompt + history + tool_defs + user_msg
-                # So: tool_defs = input_tokens - sys_prompt - history - user_msg
-                # Note: input_tokens is aggregate across ALL turns if tools were called,
-                # so this includes tool schema sent in every turn + tool return context.
+                # Derive tool/overhead tokens from the remainder.
+                # When cache is ACTIVE:
+                #   cache_read_tokens = sys prompt + tool schema (cached, billed at 90% discount)
+                #   input_tokens = history + user msg + multi-turn overhead (non-cached)
+                #   Total billable prompt = input_tokens + cache_read_tokens
+                # When cache is INACTIVE:
+                #   input_tokens = sys prompt + tool schema + history + user msg + multi-turn overhead
+                #   cache_read_tokens = 0
+                total_prompt = input_tokens + cache_read_tokens
                 known_tokens = sp_tokens + hist_tokens + user_message_tokens
-                td_tokens = max(0, input_tokens - known_tokens)
+                td_tokens = max(0, total_prompt - known_tokens)
+
                 logger.info(f"📊 [MSG_TOKENS] Message token counts: user={user_message_tokens}, bot={bot_message_tokens}")
-                logger.info(f"📊 [COMPONENT_TOKENS] system_prompt={sp_tokens}, history={hist_tokens}, tool_defs={td_tokens} (derived: {input_tokens} - {known_tokens})")
+                logger.info(f"📊 [COMPONENT_TOKENS] system_prompt={sp_tokens}, history={hist_tokens}, tools_overhead={td_tokens}")
+                logger.info(f"📊 [DERIVATION] total_prompt={total_prompt} (input={input_tokens} + cache_read={cache_read_tokens}) - known={known_tokens} = tools_overhead={td_tokens}")
         except Exception as tc_err:
             logger.warning(f"⚠️ [MSG_TOKENS] Failed to count message tokens: {tc_err}")
 
@@ -1714,9 +1729,9 @@ class StreamingService:
                         """),
                         {
                             "session_id": session_id,
-                            "token_count": input_tokens,
+                            "token_count": input_tokens + cache_read_tokens,
                             "message_token_count": user_message_tokens,
-                            "prompt_token_count": input_tokens,
+                            "prompt_token_count": input_tokens + cache_read_tokens,
                             "sp_char": sp_char,
                             "sp_word": sp_word,
                             "sp_tokens": sp_tokens,
@@ -1769,7 +1784,8 @@ class StreamingService:
                     # Update session aggregates (add this turn's metrics)
                     total_char = user_char_count + bot_char_count
                     total_word = user_word_count + bot_word_count
-                    total_token = input_tokens + output_tokens
+                    total_prompt_with_cache = input_tokens + cache_read_tokens
+                    total_token = total_prompt_with_cache + output_tokens
                     total_msg_tokens = user_message_tokens + bot_message_tokens
 
                     await db.execute(
@@ -1795,7 +1811,7 @@ class StreamingService:
                             "words": total_word,
                             "tokens": total_token,
                             "msg_tokens": total_msg_tokens,
-                            "prompt_tokens": input_tokens,
+                            "prompt_tokens": total_prompt_with_cache,
                             "completion_tokens": output_tokens,
                             "sp_tok": sp_tokens,
                             "hist_tok": hist_tokens,
