@@ -404,6 +404,17 @@ async def process_file_content(
         
         logger.info(f"🔍 [ROUTING] Detected MIME: {detected_mime_type} for {original_filename}")
 
+        # Initialize metrics variables
+        content_for_upload = ""
+        tables_metadata_list = []
+        total_pages = 0
+        processed_by_docling = False
+        docling_processing_time_ms = 0
+        docling_images_extracted = 0
+        docling_images_with_ocr = 0
+        processed_content_s3_key = None
+        char_count = 0
+
         # STEP 4: FORMAT CONVERSION PHASE - Use Docling for all supported formats (returns JSON)
         json_tmp_path = None
         processed_successfully = False
@@ -584,14 +595,27 @@ async def process_file_content(
                     "error": f"Docling processing error: {str(e)}"
                 }
 
-        # Unsupported format
+        # Unsupported format (Raw file)
         else:
-            # Mark as processed successfully and send file raw to Gemini API
+            # For raw files, read content if it's text-based to get metrics, 
+            # otherwise just record the file itself
             from core.config import settings
             if not settings.docling_enabled:
                 logger.info(f"📝 [ROUTING] DOCLING_ENABLED=false, sending {original_filename} raw to Gemini API")
             else:
                 logger.info(f"📝 [ROUTING] File type {detected_mime_type} doesn't require docling processing, sending raw to Gemini API")
+            
+            # Read local file content for metrics if it's a text/markdown file
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    is_text = detected_mime_type in ['text/plain', 'text/markdown', 'text/html', 'application/json']
+                    if is_text or original_filename.lower().endswith(('.txt', '.md', '.json', '.html')):
+                        with open(tmp_path, 'r', encoding='utf-8', errors='replace') as f:
+                            content_for_upload = f.read()
+                            logger.info(f"📝 [METRICS] Read {len(content_for_upload)} chars from raw text file")
+                except Exception as e:
+                    logger.warning(f"⚠️ [METRICS] Could not read raw file for metrics: {e}")
+
             processed_successfully = True
 
         # STEP 6: GEMINI UPLOAD PHASE

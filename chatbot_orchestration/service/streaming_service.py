@@ -1507,10 +1507,10 @@ class StreamingService:
             tool_def_text: Tool definitions text
         """
         try:
-            from ..core.token_tracker import track_gemini_usage
+            from ..core.token_tracker import track_gemini_usage_detailed
             import os
 
-            model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+            model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
 
             # Try to get actual token usage from run object first
             input_tokens = 0
@@ -1552,11 +1552,16 @@ class StreamingService:
             logger.info(f"📊 Token tracking source: {token_source}")
             logger.info(f"   Prompt tokens: {prompt_tokens}")
             logger.info(f"   Completion tokens: {completion_tokens}")
+            logger.info(f"   Cache read tokens: {cache_read_tokens}")
+            logger.info(f"   Cache write tokens: {cache_write_tokens}")
             logger.info(f"   Total tokens: {total_tokens}")
 
-            success = await track_gemini_usage(
+            # Use track_gemini_usage_detailed to record cache tokens in request_metadata
+            success = await track_gemini_usage_detailed(
                 prompt_tokens=prompt_tokens,
-                candidates_tokens=completion_tokens,
+                completion_tokens=completion_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
                 session_id=session_id,
                 api_call_type='agent_stream',
                 model=model_name
