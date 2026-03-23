@@ -1433,7 +1433,25 @@ class StreamingService:
 
             # Track token usage after streaming completes
             try:
-                await self._track_token_usage(session_id, user_email, full_response, tool_call_count, run=run, user_message=message)
+                # Gather prompt component texts for granular breakdown
+                system_prompt_text = agent_manager.get_cached_system_prompt(session_id) or ""
+                # Serialize conversation history to plain text for counting
+                history_text = ""
+                for pmsg in pydantic_messages:
+                    for part in getattr(pmsg, 'parts', []):
+                        part_content = getattr(part, 'content', '')
+                        if part_content and not isinstance(part, SystemPromptPart):
+                            history_text += str(part_content) + "\n"
+                # Tool definitions (FileSearchTool is the only builtin tool)
+                tool_def_text = "FileSearchTool: Search through uploaded knowledge base files to find relevant information for answering user queries."
+
+                await self._track_token_usage(
+                    session_id, user_email, full_response, tool_call_count,
+                    run=run, user_message=message,
+                    system_prompt_text=system_prompt_text,
+                    history_text=history_text,
+                    tool_def_text=tool_def_text
+                )
             except Exception as token_error:
                 logger.error(f"❌ Error tracking token usage: {token_error}")
 
@@ -1466,7 +1484,7 @@ class StreamingService:
             session_state_manager.set_streaming_state(session_id, False)
             logger.info(f"🔄 Streaming state reset for session: {session_id}")
 
-    async def _track_token_usage(self, session_id: str, user_email: str, response_text: str, tool_call_count: int, run=None, user_message: str = ""):
+    async def _track_token_usage(self, session_id: str, user_email: str, response_text: str, tool_call_count: int, run=None, user_message: str = "", system_prompt_text: str = "", history_text: str = "", tool_def_text: str = ""):
         """Track token usage after agent response completes.
 
         Args:
@@ -1476,6 +1494,9 @@ class StreamingService:
             tool_call_count: Number of tool calls made
             run: Pydantic AI run object (optional) - if provided, uses actual token counts from Gemini
             user_message: The original user message text
+            system_prompt_text: The system prompt text for granular breakdown
+            history_text: Serialized conversation history text
+            tool_def_text: Tool definitions text
         """
         try:
             from ..core.token_tracker import track_gemini_usage
@@ -1539,7 +1560,10 @@ class StreamingService:
                 user_message=user_message,
                 response_text=response_text,
                 input_tokens=input_tokens,
-                output_tokens=output_tokens
+                output_tokens=output_tokens,
+                system_prompt_text=system_prompt_text,
+                history_text=history_text,
+                tool_def_text=tool_def_text
             ))
 
         except Exception as e:
@@ -1551,7 +1575,10 @@ class StreamingService:
         user_message: str,
         response_text: str,
         input_tokens: int,
-        output_tokens: int
+        output_tokens: int,
+        system_prompt_text: str = "",
+        history_text: str = "",
+        tool_def_text: str = ""
     ):
         """Background task: update token counts on the latest user+assistant messages, and session aggregates.
 
@@ -1560,6 +1587,11 @@ class StreamingService:
         - message_token_count: tokens for just the message text (via count_tokens API)
         - prompt_token_count: full prompt tokens from run.usage() (on user msg only)
         - completion_token_count: completion tokens from run.usage() (on bot msg only)
+        - system_prompt_*: chars/words/tokens for system prompt component
+        - history_*: chars/words/tokens for conversation history component
+        - tool_def_*: chars/words/tokens for tool definitions component
+        - user_msg_*: chars/words/tokens for user message text
+        - bot_response_*: chars/words/tokens for bot response text
 
         Retries up to 3 times with 6s delay to handle write-through flush race condition.
         """
@@ -1573,9 +1605,20 @@ class StreamingService:
         bot_char_count = len(response_text)
         bot_word_count = len(response_text.split()) if response_text.strip() else 0
 
-        # Count tokens for just the message text via Gemini count_tokens API
+        # Compute char/word counts for prompt components
+        sp_char = len(system_prompt_text)
+        sp_word = len(system_prompt_text.split()) if system_prompt_text.strip() else 0
+        hist_char = len(history_text)
+        hist_word = len(history_text.split()) if history_text.strip() else 0
+        td_char = len(tool_def_text)
+        td_word = len(tool_def_text.split()) if tool_def_text.strip() else 0
+
+        # Count tokens for each component via Gemini count_tokens API
         user_message_tokens = 0
         bot_message_tokens = 0
+        sp_tokens = 0
+        hist_tokens = 0
+        td_tokens = 0
         try:
             import os
             from concurrent.futures import ThreadPoolExecutor
@@ -1585,7 +1628,7 @@ class StreamingService:
             from core.ai import get_genai_client
             genai_client = get_genai_client()
             if genai_client:
-                executor = ThreadPoolExecutor(max_workers=2)
+                executor = ThreadPoolExecutor(max_workers=5)
 
                 def count_user():
                     return genai_client.models.count_tokens(model=token_model, contents=user_message)
@@ -1593,13 +1636,35 @@ class StreamingService:
                 def count_bot():
                     return genai_client.models.count_tokens(model=token_model, contents=response_text)
 
-                user_result, bot_result = await asyncio.gather(
+                def count_system_prompt():
+                    if not system_prompt_text.strip():
+                        return None
+                    return genai_client.models.count_tokens(model=token_model, contents=system_prompt_text)
+
+                def count_history():
+                    if not history_text.strip():
+                        return None
+                    return genai_client.models.count_tokens(model=token_model, contents=history_text)
+
+                def count_tool_defs():
+                    if not tool_def_text.strip():
+                        return None
+                    return genai_client.models.count_tokens(model=token_model, contents=tool_def_text)
+
+                results = await asyncio.gather(
                     loop.run_in_executor(executor, count_user),
-                    loop.run_in_executor(executor, count_bot)
+                    loop.run_in_executor(executor, count_bot),
+                    loop.run_in_executor(executor, count_system_prompt),
+                    loop.run_in_executor(executor, count_history),
+                    loop.run_in_executor(executor, count_tool_defs)
                 )
-                user_message_tokens = user_result.total_tokens if user_result else 0
-                bot_message_tokens = bot_result.total_tokens if bot_result else 0
+                user_message_tokens = results[0].total_tokens if results[0] else 0
+                bot_message_tokens = results[1].total_tokens if results[1] else 0
+                sp_tokens = results[2].total_tokens if results[2] else 0
+                hist_tokens = results[3].total_tokens if results[3] else 0
+                td_tokens = results[4].total_tokens if results[4] else 0
                 logger.info(f"📊 [MSG_TOKENS] Message token counts: user={user_message_tokens}, bot={bot_message_tokens}")
+                logger.info(f"📊 [COMPONENT_TOKENS] system_prompt={sp_tokens}, history={hist_tokens}, tool_defs={td_tokens}")
         except Exception as tc_err:
             logger.warning(f"⚠️ [MSG_TOKENS] Failed to count message tokens: {tc_err}")
 
@@ -1616,6 +1681,18 @@ class StreamingService:
                                 message_token_count = :message_token_count,
                                 prompt_token_count = :prompt_token_count,
                                 completion_token_count = 0,
+                                system_prompt_char_count = :sp_char,
+                                system_prompt_word_count = :sp_word,
+                                system_prompt_token_count = :sp_tokens,
+                                history_char_count = :hist_char,
+                                history_word_count = :hist_word,
+                                history_token_count = :hist_tokens,
+                                tool_def_char_count = :td_char,
+                                tool_def_word_count = :td_word,
+                                tool_def_token_count = :td_tokens,
+                                user_msg_char_count = :user_msg_char,
+                                user_msg_word_count = :user_msg_word,
+                                user_msg_token_count = :user_msg_tokens,
                                 updated_at = NOW()
                             WHERE id = (
                                 SELECT id FROM chat_messages
@@ -1628,6 +1705,18 @@ class StreamingService:
                             "token_count": input_tokens,
                             "message_token_count": user_message_tokens,
                             "prompt_token_count": input_tokens,
+                            "sp_char": sp_char,
+                            "sp_word": sp_word,
+                            "sp_tokens": sp_tokens,
+                            "hist_char": hist_char,
+                            "hist_word": hist_word,
+                            "hist_tokens": hist_tokens,
+                            "td_char": td_char,
+                            "td_word": td_word,
+                            "td_tokens": td_tokens,
+                            "user_msg_char": user_char_count,
+                            "user_msg_word": user_word_count,
+                            "user_msg_tokens": user_message_tokens,
                         }
                     )
                     user_updated = result.rowcount > 0
@@ -1640,6 +1729,9 @@ class StreamingService:
                                 message_token_count = :message_token_count,
                                 prompt_token_count = 0,
                                 completion_token_count = :completion_token_count,
+                                bot_response_char_count = :bot_char,
+                                bot_response_word_count = :bot_word,
+                                bot_response_token_count = :bot_tokens,
                                 updated_at = NOW()
                             WHERE id = (
                                 SELECT id FROM chat_messages
@@ -1652,6 +1744,9 @@ class StreamingService:
                             "token_count": output_tokens,
                             "message_token_count": bot_message_tokens,
                             "completion_token_count": output_tokens,
+                            "bot_char": bot_char_count,
+                            "bot_word": bot_word_count,
+                            "bot_tokens": bot_message_tokens,
                         }
                     )
                     bot_updated = result.rowcount > 0
@@ -1690,6 +1785,7 @@ class StreamingService:
                     logger.info(f"✅ [USAGE_UPDATE] Updated message & session usage for {session_id[:8]}...")
                     logger.info(f"   User msg: {user_char_count} chars, {user_word_count} words, msg_tokens={user_message_tokens}, prompt_tokens={input_tokens} (updated={user_updated})")
                     logger.info(f"   Bot msg: {bot_char_count} chars, {bot_word_count} words, msg_tokens={bot_message_tokens}, completion_tokens={output_tokens} (updated={bot_updated})")
+                    logger.info(f"   Components: sys_prompt={sp_tokens}t/{sp_char}c/{sp_word}w, history={hist_tokens}t/{hist_char}c/{hist_word}w, tools={td_tokens}t/{td_char}c/{td_word}w")
                     logger.info(f"   Session totals += {total_char} chars, {total_word} words, {total_token} tokens, {total_msg_tokens} msg_tokens")
                     return
 
