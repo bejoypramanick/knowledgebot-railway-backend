@@ -107,9 +107,9 @@ async def usage_report(request: Request):
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root {
-  --bg:#0f1117;--card:#1a1d27;--border:#2a2d3a;--text:#e4e4e7;
-  --muted:#9ca3af;--accent:#6366f1;--accent2:#8b5cf6;--green:#22c55e;
-  --orange:#f97316;--red:#ef4444;--blue:#3b82f6;--cyan:#06b6d4;
+  --bg:#ffffff;--card:#f8f9fa;--border:#dee2e6;--text:#212529;
+  --muted:#6c757d;--accent:#4f46e5;--accent2:#7c3aed;--green:#16a34a;
+  --orange:#ea580c;--red:#dc2626;--blue:#2563eb;--cyan:#0891b2;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);padding:24px}
@@ -118,8 +118,8 @@ h1{font-size:28px;margin-bottom:4px}
 .subtitle{color:var(--muted);margin-bottom:24px;font-size:14px}
 .toolbar{display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap;align-items:center}
 .toolbar button,.toolbar select{padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);transition:.2s}
-.toolbar button:hover{border-color:var(--accent);background:#23263a}
-.toolbar .active{border-color:var(--accent);background:rgba(99,102,241,.15);color:var(--accent)}
+.toolbar button:hover{border-color:var(--accent);background:rgba(79,70,229,.08)}
+.toolbar .active{border-color:var(--accent);background:rgba(79,70,229,.12);color:var(--accent)}
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:32px}
 .kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px}
 .kpi .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
@@ -135,7 +135,7 @@ h1{font-size:28px;margin-bottom:4px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;padding:10px 12px;background:var(--card);border-bottom:2px solid var(--border);color:var(--muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px;position:sticky;top:0}
 td{padding:10px 12px;border-bottom:1px solid var(--border)}
-tr:hover td{background:rgba(99,102,241,.05)}
+tr:hover td{background:rgba(79,70,229,.04)}
 .mono{font-family:'SF Mono','Fira Code',monospace;font-size:12px}
 .token-cell{font-weight:600;color:var(--accent)}
 .badge{padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600}
@@ -147,14 +147,22 @@ tr:hover td{background:rgba(99,102,241,.05)}
 .badge-assistant{background:rgba(34,197,94,.15);color:var(--green)}
 .badge-human_agent{background:rgba(249,115,22,.15);color:var(--orange)}
 .session-row{cursor:pointer;transition:.15s}
-.session-row:hover td{background:rgba(99,102,241,.08)}
+.session-row:hover td{background:rgba(79,70,229,.06)}
 .session-row td:first-child::before{content:'\\25B6';margin-right:8px;font-size:10px;color:var(--muted);transition:.2s;display:inline-block}
 .session-row.open td:first-child::before{transform:rotate(90deg)}
-.msg-row{background:rgba(99,102,241,.03)}
-.msg-row td{padding:8px 12px 8px 32px;font-size:12px;border-bottom:1px solid rgba(42,45,58,.5)}
+.msg-row{background:rgba(79,70,229,.02)}
+.msg-row td{padding:8px 12px 8px 32px;font-size:12px;border-bottom:1px solid var(--border)}
 .msg-bubble{white-space:pre-wrap;word-break:break-word;line-height:1.5;max-width:600px;cursor:pointer}
 .msg-bubble.msg-collapsed{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;max-height:1.5em}
-.msg-row-header td{padding:6px 12px 6px 32px;font-size:11px;color:var(--muted);background:rgba(99,102,241,.06);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.msg-row-header td{padding:6px 12px 6px 32px;font-size:11px;color:var(--muted);background:rgba(79,70,229,.06);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.bd-table{width:100%;border-collapse:collapse;font-size:11px;margin:4px 0}
+.bd-table th{text-align:left;padding:4px 8px;background:rgba(79,70,229,.08);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.3px;border:1px solid var(--border)}
+.bd-table td{padding:4px 8px;border:1px solid var(--border);vertical-align:top}
+.bd-table .bd-label{font-weight:600;color:var(--accent);white-space:nowrap;width:120px}
+.bd-table .bd-num{text-align:right;font-weight:600;color:var(--accent);white-space:nowrap;width:70px}
+.bd-table .bd-text{max-width:500px}
+.bd-text-preview{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;max-height:1.4em;cursor:pointer;color:var(--muted);font-size:11px}
+.bd-text-preview.expanded{white-space:pre-wrap;max-width:500px;max-height:none;overflow:visible}
 .loading{text-align:center;padding:40px;color:var(--muted)}
 .table-wrap{overflow-x:auto;max-height:500px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
 th[title]{cursor:help;border-bottom:2px dashed var(--border)}
@@ -453,7 +461,7 @@ function toggleSession(rowEl, sessionId) {
 
   // Remove any existing expanded message rows for this session
   let next = rowEl.nextElementSibling;
-  while(next && (next.classList.contains('msg-row') || next.classList.contains('msg-row-header'))) {
+  while(next && next.classList.contains('msg-row')) {
     const toRemove = next;
     next = next.nextElementSibling;
     toRemove.remove();
@@ -481,52 +489,77 @@ function toggleSession(rowEl, sessionId) {
   const roleName = r => r==='assistant'?'Bot':r==='user'?'User':r==='human_agent'?'Human Agent':(r||'Unknown');
   const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
 
-  // Insert header row
-  const headerRow = document.createElement('tr');
-  headerRow.className = 'msg-row-header';
-  headerRow.innerHTML = `<td colspan="2">Message ID</td><td>Role</td><td colspan="2">Message Content (click to expand)</td><td title="Gemini tokens for ONLY this message text (count_tokens API)">Msg Tokens</td><td title="Total tokens sent TO Gemini including system prompt, history, tools (user msgs only)">Prompt Tokens</td><td title="Tokens generated BY Gemini for this response (bot msgs only)">Completion Tokens</td><td title="System prompt tokens for this turn (user msgs only)">Sys Prompt</td><td title="Conversation history tokens for this turn (user msgs only)">History</td><td title="Tool definition tokens for this turn (user msgs only)">Tool Defs</td><td title="User message text tokens (user msgs only)">User Msg</td><td title="Bot response text tokens (bot msgs only)">Bot Resp</td><td>Time</td>`;
-  rowEl.after(headerRow);
-
-  // Insert message rows chronologically
-  let insertAfter = headerRow;
-  msgs.forEach(m => {
+  // Insert message rows chronologically with merged-cell breakdown
+  let insertAfter = rowEl;
+  msgs.forEach((m, idx) => {
+    // === Main message row ===
     const msgRow = document.createElement('tr');
     msgRow.className = 'msg-row';
-    msgRow.innerHTML = `
-      <td colspan="2" class="mono" style="font-size:11px;color:var(--muted);vertical-align:top">${m.id||'-'}</td>
-      <td style="vertical-align:top"><span class="badge badge-${m.role}">${roleName(m.role)}</span></td>
-      <td colspan="2" style="vertical-align:top"><div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse">${escHtml(m.content)}</div></td>
-      <td class="token-cell" style="vertical-align:top">${fmt(m.message_token_count)}</td>
-      <td class="token-cell" style="vertical-align:top">${fmt(m.prompt_token_count)}</td>
-      <td class="token-cell" style="vertical-align:top">${fmt(m.completion_token_count)}</td>
-      <td class="token-cell" style="vertical-align:top">${m.role==='user'?fmt(m.system_prompt_token_count):'-'}</td>
-      <td class="token-cell" style="vertical-align:top">${m.role==='user'?fmt(m.history_token_count):'-'}</td>
-      <td class="token-cell" style="vertical-align:top">${m.role==='user'?fmt(m.tool_def_token_count):'-'}</td>
-      <td class="token-cell" style="vertical-align:top">${m.role==='user'?fmt(m.user_msg_token_count):'-'}</td>
-      <td class="token-cell" style="vertical-align:top">${m.role==='assistant'?fmt(m.bot_response_token_count):'-'}</td>
-      <td style="vertical-align:top;white-space:nowrap">${fmtDateTime(m.created_at)}</td>`;
+    msgRow.innerHTML = `<td colspan="15" style="padding-left:24px">
+      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:8px">
+        <span class="badge badge-${m.role}" style="flex-shrink:0">${roleName(m.role)}</span>
+        <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="flex:1">${escHtml(m.content)}</div>
+        <span style="flex-shrink:0;font-size:11px;color:var(--muted);white-space:nowrap">${fmtDateTime(m.created_at)}</span>
+      </div>
+      <table class="bd-table">
+        <thead><tr>
+          <th>Component</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>Content (click to expand)</th>
+        </tr></thead>
+        <tbody>
+        ${m.role==='user' ? `
+          <tr>
+            <td class="bd-label">System Prompt</td>
+            <td class="bd-num">${fmt(m.system_prompt_token_count)}</td>
+            <td class="bd-num">${fmt(m.system_prompt_word_count)}</td>
+            <td class="bd-num">${fmt(m.system_prompt_char_count)}</td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.system_prompt_text)||'-'}</div></td>
+          </tr>
+          <tr>
+            <td class="bd-label">Conv. History</td>
+            <td class="bd-num">${fmt(m.history_token_count)}</td>
+            <td class="bd-num">${fmt(m.history_word_count)}</td>
+            <td class="bd-num">${fmt(m.history_char_count)}</td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.history_text)||'<i style="color:var(--muted)">No history (first message)</i>'}</div></td>
+          </tr>
+          <tr>
+            <td class="bd-label">Tool Definitions</td>
+            <td class="bd-num">${fmt(m.tool_def_token_count)}</td>
+            <td class="bd-num">${fmt(m.tool_def_word_count)}</td>
+            <td class="bd-num">${fmt(m.tool_def_char_count)}</td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.tool_def_text)||'-'}</div></td>
+          </tr>
+          <tr>
+            <td class="bd-label">User Message</td>
+            <td class="bd-num">${fmt(m.user_msg_token_count)}</td>
+            <td class="bd-num">${fmt(m.user_msg_word_count)}</td>
+            <td class="bd-num">${fmt(m.user_msg_char_count)}</td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div></td>
+          </tr>
+          <tr style="background:rgba(79,70,229,.06);font-weight:600">
+            <td class="bd-label">Total (Prompt)</td>
+            <td class="bd-num">${fmt(m.prompt_token_count)}</td>
+            <td colspan="3" style="font-size:11px;color:var(--muted)">= sys prompt + history + tools + user msg (billable input)</td>
+          </tr>
+        ` : `
+          <tr>
+            <td class="bd-label">Bot Response</td>
+            <td class="bd-num">${fmt(m.bot_response_token_count)}</td>
+            <td class="bd-num">${fmt(m.bot_response_word_count)}</td>
+            <td class="bd-num">${fmt(m.bot_response_char_count)}</td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div></td>
+          </tr>
+          <tr style="background:rgba(79,70,229,.06);font-weight:600">
+            <td class="bd-label">Total (Completion)</td>
+            <td class="bd-num">${fmt(m.completion_token_count)}</td>
+            <td colspan="3" style="font-size:11px;color:var(--muted)">= Gemini output tokens (billable output)</td>
+          </tr>
+        `}
+        </tbody>
+      </table>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">ID: ${m.id||'-'}</div>
+    </td>`;
     insertAfter.after(msgRow);
     insertAfter = msgRow;
-
-    // Show prompt component text for user messages
-    if(m.role==='user' && (m.system_prompt_text||m.history_text||m.tool_def_text)) {
-      const bdRow = document.createElement('tr');
-      bdRow.className = 'msg-row';
-      bdRow.style.background = 'rgba(99,102,241,.06)';
-      bdRow.innerHTML = `<td colspan="15" style="padding-left:32px;font-size:11px;color:var(--muted)">
-        <div style="margin-bottom:6px"><b>System Prompt</b> (${fmt(m.system_prompt_token_count)} tok / ${fmt(m.system_prompt_word_count)} words / ${fmt(m.system_prompt_char_count)} chars)
-          <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="margin-top:4px;font-size:11px;max-width:900px;white-space:pre-wrap">${escHtml(m.system_prompt_text)}</div>
-        </div>
-        <div style="margin-bottom:6px"><b>Conversation History</b> (${fmt(m.history_token_count)} tok / ${fmt(m.history_word_count)} words / ${fmt(m.history_char_count)} chars)
-          <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="margin-top:4px;font-size:11px;max-width:900px;white-space:pre-wrap">${escHtml(m.history_text)||'<i>No history (first message)</i>'}</div>
-        </div>
-        <div><b>Tool Definitions</b> (${fmt(m.tool_def_token_count)} tok / ${fmt(m.tool_def_word_count)} words / ${fmt(m.tool_def_char_count)} chars)
-          <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="margin-top:4px;font-size:11px;max-width:900px;white-space:pre-wrap">${escHtml(m.tool_def_text)}</div>
-        </div>
-      </td>`;
-      insertAfter.after(bdRow);
-      insertAfter = bdRow;
-    }
   });
 }
 
