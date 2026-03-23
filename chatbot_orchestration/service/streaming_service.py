@@ -1433,7 +1433,7 @@ class StreamingService:
 
             # Track token usage after streaming completes
             try:
-                await self._track_token_usage(session_id, user_email, full_response, tool_call_count, run=run, user_message=message)
+                await self._track_token_usage(session_id, user_email, full_response, tool_call_count, run=run)
             except Exception as token_error:
                 logger.error(f"❌ Error tracking token usage: {token_error}")
 
@@ -1466,10 +1466,15 @@ class StreamingService:
             session_state_manager.set_streaming_state(session_id, False)
             logger.info(f"🔄 Streaming state reset for session: {session_id}")
 
-    async def _track_token_usage(self, session_id: str, user_email: str, response_text: str, tool_call_count: int, run=None, user_message: str = ""):
+    async def _track_token_usage(self, session_id: str, user_email: str, response_text: str, tool_call_count: int, run=None):
         """Track token usage after agent response completes.
-
-        Writes to: token_usage_log (existing), chat_messages (new), chat_sessions (new).
+        
+        Args:
+            session_id: Session ID
+            user_email: User email
+            response_text: Response text
+            tool_call_count: Number of tool calls made
+            run: Pydantic AI run object (optional) - if provided, uses actual token counts from Gemini
         """
         try:
             from ..core.token_tracker import track_gemini_usage
@@ -1477,141 +1482,70 @@ class StreamingService:
 
             model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
 
-            # Extract actual token usage from Pydantic AI run object
-            input_tokens = 0
-            output_tokens = 0
-            cached_tokens = 0
-
+            # Try to get actual token usage from run object first
+            actual_prompt_tokens = 0
+            actual_completion_tokens = 0
+            actual_total_tokens = 0
+            
             if run:
                 try:
+                    # Get actual usage from Pydantic AI run object
                     usage = run.usage()
                     if usage:
-                        input_tokens = getattr(usage, 'input_tokens', 0) or 0
-                        output_tokens = getattr(usage, 'output_tokens', 0) or 0
-                        # Cache read tokens = tokens served from Gemini explicit cache
-                        details = getattr(usage, 'details', None)
-                        if details and isinstance(details, dict):
-                            cached_tokens = details.get('accepted_prediction_tokens', 0) or 0
-                        elif details:
-                            cached_tokens = getattr(details, 'accepted_prediction_tokens', 0) or 0
-                        # Also check top-level cache_read_tokens
-                        if not cached_tokens:
-                            cached_tokens = getattr(usage, 'cache_read_tokens', 0) or 0
-
-                        logger.info(f"✅ Token usage from Gemini API: input={input_tokens}, output={output_tokens}, cached={cached_tokens}")
+                        # Extract token counts from usage object
+                        actual_prompt_tokens = getattr(usage, 'input_tokens', 0) or 0
+                        actual_completion_tokens = getattr(usage, 'output_tokens', 0) or 0
+                        actual_total_tokens = getattr(usage, 'total_tokens', 0) or (actual_prompt_tokens + actual_completion_tokens)
+                        
+                        logger.info(f"✅ Got ACTUAL token counts from Gemini API:")
+                        logger.info(f"   Input tokens: {actual_prompt_tokens}")
+                        logger.info(f"   Output tokens: {actual_completion_tokens}")
+                        logger.info(f"   Total tokens: {actual_total_tokens}")
                 except Exception as usage_error:
                     logger.warning(f"⚠️ Could not extract usage from run object: {usage_error}")
+                    actual_prompt_tokens = 0
+                    actual_completion_tokens = 0
+                    actual_total_tokens = 0
+            
+            # If we got actual tokens, use them; otherwise fall back to estimates
+            if actual_total_tokens > 0:
+                prompt_tokens = actual_prompt_tokens
+                completion_tokens = actual_completion_tokens
+                total_tokens = actual_total_tokens
+                token_source = "ACTUAL (from Gemini API)"
+            else:
+                # Fallback: Estimate token usage based on response length
+                # Gemini token estimation: ~4 chars = 1 token (rough estimate)
+                response_chars = len(response_text)
+                completion_tokens = max(1, response_chars // 4)
+                
+                # Estimate prompt tokens based on conversation history
+                prompt_tokens = 500  # Default estimate for conversation history
+                
+                # Total tokens = prompt + completion
+                total_tokens = prompt_tokens + completion_tokens
+                token_source = "ESTIMATED (from response length)"
 
-            # Fallback to estimates if no actual tokens
-            if input_tokens == 0 and output_tokens == 0:
-                output_tokens = max(1, len(response_text) // 4)
-                input_tokens = 500
-                logger.info(f"📊 Using estimated tokens: input={input_tokens}, output={output_tokens}")
+            logger.info(f"📊 Token tracking source: {token_source}")
+            logger.info(f"   Prompt tokens: {prompt_tokens}")
+            logger.info(f"   Completion tokens: {completion_tokens}")
+            logger.info(f"   Total tokens: {total_tokens}")
 
-            total_tokens = input_tokens + output_tokens
-
-            # Character counts
-            input_chars = len(user_message) if user_message else 0
-            output_chars = len(response_text) if response_text else 0
-            cached_chars = cached_tokens * 4  # ~4 chars per token estimate
-
-            # 1. Track to token_usage_log (existing)
             success = await track_gemini_usage(
-                prompt_tokens=input_tokens,
-                candidates_tokens=output_tokens,
+                prompt_tokens=prompt_tokens,
+                candidates_tokens=completion_tokens,
                 session_id=session_id,
                 api_call_type='agent_stream',
                 model=model_name
             )
-            if success:
-                logger.info(f"✅ Tracked {total_tokens} tokens in token_usage_log")
 
-            # 2. Update chat_messages with usage data (latest assistant message)
-            # 3. Increment chat_sessions totals
-            # Uses a background task with delay to allow write-through to flush first
-            asyncio.create_task(self._update_message_and_session_usage(
-                session_id=session_id,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                input_chars=input_chars,
-                output_chars=output_chars,
-                cached_tokens=cached_tokens,
-                cached_chars=cached_chars
-            ))
+            if success:
+                logger.info(f"✅ Tracked {total_tokens} tokens for session {session_id[:8]}... ({token_source})")
+            else:
+                logger.error(f"❌ Failed to track token usage for session {session_id}")
 
         except Exception as e:
             logger.error(f"❌ Error tracking token usage: {e}", exc_info=True)
-
-    async def _update_message_and_session_usage(
-        self, session_id: str,
-        input_tokens: int, output_tokens: int,
-        input_chars: int, output_chars: int,
-        cached_tokens: int, cached_chars: int
-    ):
-        """Update chat_messages and chat_sessions with usage data.
-
-        Runs as background task with retry to handle write-through flush delay.
-        """
-        from shared.sqlalchemy_db import get_db_session
-        from sqlalchemy import text
-
-        for attempt in range(3):
-            try:
-                if attempt > 0:
-                    await asyncio.sleep(6)  # Wait for write-through flush (5s interval)
-
-                async with get_db_session() as db:
-                    # Update the latest assistant message with token/char data
-                    result = await db.execute(
-                        text("""
-                            UPDATE chat_messages
-                            SET input_tokens = :input_tokens, output_tokens = :output_tokens,
-                                input_chars = :input_chars, output_chars = :output_chars,
-                                cached_tokens = :cached_tokens, cached_chars = :cached_chars
-                            WHERE id = (
-                                SELECT id FROM chat_messages
-                                WHERE session_id = CAST(:session_id AS UUID) AND role = 'assistant'
-                                ORDER BY created_at DESC LIMIT 1
-                            )
-                        """),
-                        {
-                            "session_id": session_id,
-                            "input_tokens": input_tokens, "output_tokens": output_tokens,
-                            "input_chars": input_chars, "output_chars": output_chars,
-                            "cached_tokens": cached_tokens, "cached_chars": cached_chars
-                        }
-                    )
-
-                    if result.rowcount == 0 and attempt < 2:
-                        logger.info(f"⏳ Assistant message not yet in PG for {session_id}, retry {attempt + 1}")
-                        continue
-
-                    # Increment session totals atomically
-                    await db.execute(
-                        text("""
-                            UPDATE chat_sessions
-                            SET total_input_tokens = total_input_tokens + :input_tokens,
-                                total_output_tokens = total_output_tokens + :output_tokens,
-                                total_input_chars = total_input_chars + :input_chars,
-                                total_output_chars = total_output_chars + :output_chars,
-                                total_cached_tokens = total_cached_tokens + :cached_tokens,
-                                total_cached_chars = total_cached_chars + :cached_chars
-                            WHERE id = CAST(:session_id AS UUID)
-                        """),
-                        {
-                            "session_id": session_id,
-                            "input_tokens": input_tokens, "output_tokens": output_tokens,
-                            "input_chars": input_chars, "output_chars": output_chars,
-                            "cached_tokens": cached_tokens, "cached_chars": cached_chars
-                        }
-                    )
-
-                    await db.commit()
-                    logger.info(f"✅ Updated chat_messages + chat_sessions usage for {session_id}")
-                    return
-
-            except Exception as e:
-                logger.warning(f"⚠️ Usage update attempt {attempt + 1} failed for {session_id}: {e}")
 
 # Global streaming service instance
 streaming_service = StreamingService()

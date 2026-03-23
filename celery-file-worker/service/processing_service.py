@@ -251,8 +251,6 @@ async def process_file_content(
     original_file_extension = None
     original_mime_type = None
     char_count = 0
-    filestore_char_count = 0
-    md_file_size = 0
     processed_content_s3_key = None
 
     async def get_file_details_by_task_id(celery_task_id: str) -> Optional[Dict[str, Any]]:
@@ -488,9 +486,7 @@ async def process_file_content(
                     # Log the final merged content being sent to Gemini
                     logger.info(f"📤 [DOCLING_TO_GEMINI] Final merged content for Gemini FileStore:")
                     logger.info(f"    Content Format: Markdown with formatted tables")
-                    filestore_char_count = len(content_for_upload)
-                    md_file_size = len(content_for_upload.encode('utf-8'))
-                    logger.info(f"    Total Size: {filestore_char_count} characters ({md_file_size} bytes)")
+                    logger.info(f"    Total Size: {len(content_for_upload)} characters")
                     logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.md")
                     logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === BEGIN MERGED CONTENT ===")
                     # Log full content in chunks to avoid log truncation
@@ -767,9 +763,7 @@ async def process_file_content(
                     docling_images_with_ocr=docling_images_with_ocr,
                     original_file_extension=original_file_extension,
                     original_mime_type=original_mime_type,
-                    processed_content_s3_key=processed_content_s3_key,
-                    filestore_char_count=filestore_char_count,
-                    md_file_size=md_file_size
+                    processed_content_s3_key=processed_content_s3_key
                 )
 
                 if not success:

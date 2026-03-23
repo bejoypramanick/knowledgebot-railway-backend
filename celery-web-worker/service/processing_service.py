@@ -1118,7 +1118,6 @@ class ProcessingService:
                 return job_context.website_id
 
             # This is a child page - record it as such
-            _child_md = page_data.markdown or ''
             child_page_id = await self.scraping_dao.record_child_page(
                 parent_id=job_context.website_id,
                 page_url=page_data.page_url,
@@ -1131,9 +1130,7 @@ class ProcessingService:
                 title=page_data.title,
                 description=page_data.description,
                 crawl_session_id=page_data.session_id,
-                processed_content_s3_key=processed_content_s3_key,
-                filestore_char_count=len(_child_md),
-                md_file_size=len(_child_md.encode('utf-8'))
+                processed_content_s3_key=processed_content_s3_key
             )
 
             # Cache citation URL mappings in Redis for fast lookup during chat
@@ -1188,10 +1185,6 @@ class ProcessingService:
         """Update parent website record with single page data"""
         logger.info(f"💾 [UPDATE_WEBSITE] Updating website {website_id} with page data")
 
-        # Compute Gemini FileSearch upload metrics from the markdown content
-        filestore_char_count = len(page_data.markdown) if page_data.markdown else 0
-        md_file_size = len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0
-
         return await self.scraping_dao.update_website_with_page_data(
             website_id=website_id,
             gemini_file_name=upload_result.document_name,
@@ -1203,9 +1196,7 @@ class ProcessingService:
             crawl_session_id=page_data.session_id,
             file_search_metadata=upload_result.file_search_metadata,
             mark_completed=mark_completed,
-            processed_content_s3_key=processed_content_s3_key,
-            filestore_char_count=filestore_char_count,
-            md_file_size=md_file_size
+            processed_content_s3_key=processed_content_s3_key
         )
 
     # ==================== UTILITIES ====================
