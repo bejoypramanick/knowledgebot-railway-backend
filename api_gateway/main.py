@@ -262,8 +262,8 @@ async def chat_confusion_detector(request: Request):
 
 # Include Routers
 app.include_router(auth_router, prefix="/api/v1/gateway")  # Auth endpoints at gateway prefix
-app.include_router(api_router, prefix="/api/v1/gateway")
-app.include_router(usage_report_router, prefix="/api/v1/gateway")  # Usage report (protected)  
+app.include_router(usage_report_router, prefix="/api/v1/gateway")  # Usage report (must be before catch-all proxy)
+app.include_router(api_router, prefix="/api/v1/gateway")  # Catch-all proxy router (must be last)  
 logger.info(f"🔧 Auth router included at /api/v1/gateway prefix")
 logger.info(f"🔧 API Gateway router included with /api/v1/gateway prefix")
 logger.info("📋 Note: Service endpoints will be proxied via HTTP calls to separate containers") 
