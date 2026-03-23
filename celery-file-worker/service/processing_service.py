@@ -251,6 +251,8 @@ async def process_file_content(
     original_file_extension = None
     original_mime_type = None
     char_count = 0
+    total_pages = 0
+    tables_metadata_list = []
     processed_content_s3_key = None
 
     async def get_file_details_by_task_id(celery_task_id: str) -> Optional[Dict[str, Any]]:
@@ -481,7 +483,7 @@ async def process_file_content(
                     from shared.gemini_table_formatter import process_docling_content
 
                     logger.info(f"🔄 [DOCLING_PROCESS] Using unified docling processing pipeline...")
-                    content_for_upload, tables_metadata_list = await process_docling_content(json_content)
+                    content_for_upload, tables_metadata_list, total_pages = await process_docling_content(json_content)
 
                     # Log the final merged content being sent to Gemini
                     logger.info(f"📤 [DOCLING_TO_GEMINI] Final merged content for Gemini FileStore:")
@@ -784,7 +786,8 @@ async def process_file_content(
                     processed_content_s3_key=processed_content_s3_key,
                     filestore_character_count=filestore_character_count,
                     filestore_word_count=filestore_word_count,
-                    filestore_token_count=filestore_token_count
+                    filestore_token_count=filestore_token_count,
+                    total_pages=total_pages
                 )
 
                 if not success:

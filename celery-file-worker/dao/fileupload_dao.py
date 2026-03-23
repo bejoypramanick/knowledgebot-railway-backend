@@ -64,7 +64,8 @@ class FileUploadDAO:
         processed_content_s3_key: str = None,
         filestore_character_count: int = 0,
         filestore_word_count: int = 0,
-        filestore_token_count: int = 0
+        filestore_token_count: int = 0,
+        total_pages: int = 0
     ) -> bool:
         """
         Update file record with all processing data after successful upload.
@@ -97,6 +98,7 @@ class FileUploadDAO:
                 filestore_character_count = :filestore_character_count,
                 filestore_word_count = :filestore_word_count,
                 filestore_token_count = :filestore_token_count,
+                total_pages = :total_pages,
                 processing_status = 'completed',
                 updated_at = NOW()
             WHERE id = :file_id
@@ -120,6 +122,7 @@ class FileUploadDAO:
             "filestore_character_count": filestore_character_count,
             "filestore_word_count": filestore_word_count,
             "filestore_token_count": filestore_token_count,
+            "total_pages": total_pages,
             "file_id": file_id
         }
 

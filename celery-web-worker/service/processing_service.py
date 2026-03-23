@@ -708,7 +708,7 @@ class ProcessingService:
             # Use hybrid processing: trafilatura for text + docling for tables
             # This ensures clean article text is extracted while preserving table intelligence
             logger.info(f"🔄 [HYBRID_PROCESS] Using hybrid processing (trafilatura + docling)...")
-            markdown_content, tables_metadata_list = await process_html_hybrid(html_content, json_content)
+            markdown_content, tables_metadata_list, total_pages = await process_html_hybrid(html_content, json_content)
 
             # 7. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"

@@ -263,6 +263,7 @@ CREATE TABLE IF NOT EXISTS public.file_uploads (
 	filestore_character_count int4 DEFAULT 0 NULL,
 	filestore_word_count int4 DEFAULT 0 NULL,
 	filestore_token_count int4 DEFAULT 0 NULL,
+	total_pages int4 DEFAULT 0 NULL,
 	total_tables_count int4 DEFAULT 0 NULL,
 	total_table_rows_input int4 DEFAULT 0 NULL,
 	total_table_chars_input int4 DEFAULT 0 NULL,

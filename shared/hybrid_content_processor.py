@@ -19,7 +19,7 @@ logger = get_otel_logger("hybrid_content_processor", "shared")
 async def process_html_hybrid(
     html_content: str,
     docling_json: str
-) -> Tuple[str, List[Dict[str, Any]]]:
+) -> Tuple[str, List[Dict[str, Any]], int]:
     """
     Process HTML using hybrid approach:
     1. Extract tables ONLY from docling (no text items)
@@ -33,8 +33,8 @@ async def process_html_hybrid(
         docling_json: Docling JSON output (tables only)
 
     Returns:
-        Tuple of (final_markdown, tables_metadata) where tables_metadata is a list of
-        per-table metric dicts from Gemini formatting
+        Tuple of (final_markdown, tables_metadata, total_pages) where tables_metadata is a list of
+        per-table metric dicts from Gemini formatting, and total_pages is the page count from docling
     """
     logger.info("=" * 80)
     logger.info("[HYBRID] === HYBRID HTML PROCESSING ===")
@@ -45,6 +45,10 @@ async def process_html_hybrid(
     logger.info(f"[HYBRID] Input HTML hash: {html_hash} ({len(html_content)} bytes)")
     logger.info(f"[HYBRID] ✓ Trafilatura will receive this exact HTML")
     logger.info(f"[HYBRID] ✓ Docling processed this same HTML (from S3)")
+
+    # Step 0: Extract total page count from docling
+    from shared.gemini_table_formatter import extract_total_pages_from_docling
+    total_pages = extract_total_pages_from_docling(docling_json)
 
     # Step 1: Extract ONLY tables from docling (no text items)
     logger.info("[HYBRID] Step 1: Extracting tables from docling JSON (tables only)...")
@@ -87,7 +91,7 @@ async def process_html_hybrid(
     logger.info(f"[HYBRID]   ✓ NO duplication (trafilatura excluded tables)")
     logger.info("=" * 80)
 
-    return final_content, tables_metadata
+    return final_content, tables_metadata, total_pages
 
 
 def extract_text_with_trafilatura(html_content: str) -> Optional[str]:

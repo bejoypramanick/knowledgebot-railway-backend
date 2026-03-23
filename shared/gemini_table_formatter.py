@@ -416,6 +416,43 @@ def merge_content_with_formatted_tables(
     return merged
 
 
+def extract_total_pages_from_docling(json_content: str) -> int:
+    """
+    Extract total page count from docling JSON by finding the max page_no
+    across all texts and tables prov entries.
+
+    Args:
+        json_content: Raw JSON string from docling conversion
+
+    Returns:
+        Total number of pages (0 if unable to determine)
+    """
+    try:
+        doc = json.loads(json_content) if isinstance(json_content, str) else json_content
+        if not isinstance(doc, dict):
+            return 0
+
+        max_page = 0
+        # Check texts
+        for item in doc.get('texts', []):
+            for prov in item.get('prov', []):
+                page_no = prov.get('page_no', prov.get('page', 0))
+                if isinstance(page_no, int) and page_no > max_page:
+                    max_page = page_no
+        # Check tables
+        for item in doc.get('tables', []):
+            for prov in item.get('prov', []):
+                page_no = prov.get('page_no', prov.get('page', 0))
+                if isinstance(page_no, int) and page_no > max_page:
+                    max_page = page_no
+
+        logger.info(f"📄 [PAGE_COUNT] Extracted total pages from docling: {max_page}")
+        return max_page
+    except Exception as e:
+        logger.warning(f"⚠️ [PAGE_COUNT] Failed to extract page count: {e}")
+        return 0
+
+
 async def process_docling_content(json_content: str) -> tuple:
     """
     Unified function for processing docling JSON content.
@@ -431,7 +468,7 @@ async def process_docling_content(json_content: str) -> tuple:
         json_content: Raw JSON string from docling conversion
 
     Returns:
-        Tuple of (merged_content: str, tables_metadata: list[dict])
+        Tuple of (merged_content: str, tables_metadata: list[dict], total_pages: int)
     """
     logger.info("=" * 80)
     logger.info("[DOCLING_PROCESS] === UNIFIED DOCLING PROCESSING ===")
@@ -474,6 +511,10 @@ async def process_docling_content(json_content: str) -> tuple:
     except Exception as e:
         logger.warning(f"[DOCLING_PROCESS] Could not inspect raw JSON: {e}")
 
+    # 0. Extract total page count
+    total_pages = extract_total_pages_from_docling(json_content)
+    logger.info(f"[DOCLING_PROCESS] Total pages: {total_pages}")
+
     # 1. Extract tables
     logger.info("[DOCLING_PROCESS] Step 1: Extracting tables...")
     tables = extract_tables_from_docling_json(json_content)
@@ -507,4 +548,4 @@ async def process_docling_content(json_content: str) -> tuple:
     logger.info(f"[DOCLING_PROCESS] === PROCESSING COMPLETE ===")
     logger.info("=" * 80)
 
-    return merged_content, tables_metadata
+    return merged_content, tables_metadata, total_pages
