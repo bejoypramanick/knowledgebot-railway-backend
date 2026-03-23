@@ -72,8 +72,9 @@ class SessionStateManager:
             # Ensure session exists in Redis (lazy creation)
             # Pass customer_email from metadata so chat log shows the user identity
             session_metadata = {}
-            if metadata and metadata.get("user_email"):
-                session_metadata["customer_email"] = metadata["user_email"]
+            user_email = metadata.get("user_email") if metadata else None
+            if user_email and user_email != "anonymous@example.com":
+                session_metadata["customer_email"] = user_email
             session_data = await store.get_or_create_session(
                 session_uuid=session_id,
                 metadata=session_metadata if session_metadata else None
