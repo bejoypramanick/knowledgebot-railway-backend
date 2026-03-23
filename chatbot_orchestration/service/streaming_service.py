@@ -1452,6 +1452,13 @@ class StreamingService:
                     history_text=history_text,
                     tool_def_text=tool_def_text
                 )
+
+                # Save per-step breakdown from agent run
+                if run:
+                    try:
+                        asyncio.create_task(self._save_agent_run_steps(session_id, run))
+                    except Exception as steps_err:
+                        logger.warning(f"⚠️ Failed to save agent run steps: {steps_err}")
             except Exception as token_error:
                 logger.error(f"❌ Error tracking token usage: {token_error}")
 
@@ -1809,6 +1816,155 @@ class StreamingService:
                 logger.warning(f"⚠️ [USAGE_UPDATE] Attempt {attempt + 1}/3 failed for {session_id[:8]}...: {e}")
 
         logger.error(f"❌ [USAGE_UPDATE] All 3 attempts failed for {session_id[:8]}...")
+
+    async def _save_agent_run_steps(self, session_id: str, run):
+        """Save per-step breakdown of the agent run to agent_run_steps table.
+
+        Iterates run.all_messages() and records each part (system prompt, user prompt,
+        text response, tool call, tool return, thinking) as a separate row with
+        char/word/token counts.
+        """
+        import asyncio
+        await asyncio.sleep(8)  # Wait for write-through + message update to finish
+
+        try:
+            all_messages = run.all_messages()
+            if not all_messages:
+                return
+
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
+            import os
+            from concurrent.futures import ThreadPoolExecutor
+            from ..core.ai import get_genai_client
+
+            # Get user_message_id (latest user message in this session)
+            user_message_id = None
+            async with get_db_session() as db:
+                result = await db.execute(
+                    text("""
+                        SELECT id FROM chat_messages
+                        WHERE session_id = CAST(:sid AS UUID) AND role = 'user'
+                        ORDER BY created_at DESC LIMIT 1
+                    """),
+                    {"sid": session_id}
+                )
+                row = result.fetchone()
+                if row:
+                    user_message_id = str(row[0])
+
+            # Collect steps from all_messages
+            steps = []
+            step_num = 0
+            for msg in all_messages:
+                msg_type = type(msg).__name__  # ModelRequest or ModelResponse
+                step_type = 'model_request' if msg_type == 'ModelRequest' else 'model_response'
+
+                for part in getattr(msg, 'parts', []):
+                    step_num += 1
+                    part_type_name = type(part).__name__
+                    content = ''
+                    tool_name = None
+
+                    if part_type_name == 'SystemPromptPart':
+                        part_label = 'system_prompt'
+                        content = getattr(part, 'content', '') or ''
+                    elif part_type_name == 'UserPromptPart':
+                        part_label = 'user_prompt'
+                        content = str(getattr(part, 'content', '') or '')
+                    elif part_type_name == 'TextPart':
+                        part_label = 'text'
+                        content = getattr(part, 'content', '') or ''
+                    elif part_type_name == 'ThinkingPart':
+                        part_label = 'thinking'
+                        content = getattr(part, 'content', '') or ''
+                    elif part_type_name in ('ToolCallPart', 'BuiltinToolCallPart'):
+                        part_label = 'tool_call'
+                        tool_name = getattr(part, 'tool_name', 'unknown')
+                        args = getattr(part, 'args', None)
+                        content = f"Tool: {tool_name}\nArgs: {str(args)[:500]}" if args else f"Tool: {tool_name}"
+                    elif part_type_name in ('ToolReturnPart', 'BuiltinToolReturnPart'):
+                        part_label = 'tool_return'
+                        tool_name = getattr(part, 'tool_name', 'unknown')
+                        ret_content = getattr(part, 'content', '')
+                        content = str(ret_content)[:5000] if ret_content else ''
+                    else:
+                        part_label = part_type_name.lower()
+                        content = str(getattr(part, 'content', '') or '')
+
+                    content_str = str(content)
+                    steps.append({
+                        'step_number': step_num,
+                        'step_type': step_type,
+                        'part_type': part_label,
+                        'tool_name': tool_name,
+                        'content_preview': content_str[:1000],
+                        'char_count': len(content_str),
+                        'word_count': len(content_str.split()) if content_str.strip() else 0,
+                        'full_content': content_str,  # for token counting
+                    })
+
+            if not steps:
+                return
+
+            # Count tokens for each step in parallel
+            genai_client = get_genai_client()
+            token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
+            if genai_client:
+                loop = asyncio.get_event_loop()
+                executor = ThreadPoolExecutor(max_workers=min(len(steps), 8))
+
+                async def count_step_tokens(text_content):
+                    if not text_content.strip():
+                        return 0
+                    try:
+                        result = await loop.run_in_executor(
+                            executor,
+                            lambda: genai_client.models.count_tokens(model=token_model, contents=text_content)
+                        )
+                        return result.total_tokens if result else 0
+                    except Exception:
+                        return 0
+
+                token_results = await asyncio.gather(
+                    *[count_step_tokens(s['full_content']) for s in steps]
+                )
+                for i, tok in enumerate(token_results):
+                    steps[i]['token_count'] = tok
+
+            # Insert all steps
+            async with get_db_session() as db:
+                for s in steps:
+                    await db.execute(
+                        text("""
+                            INSERT INTO agent_run_steps
+                                (session_id, user_message_id, step_number, step_type, part_type,
+                                 tool_name, content_preview, char_count, word_count, token_count)
+                            VALUES
+                                (CAST(:sid AS UUID), CAST(:mid AS UUID), :step, :stype, :ptype,
+                                 :tool, :preview, :chars, :words, :tokens)
+                        """),
+                        {
+                            "sid": session_id,
+                            "mid": user_message_id,
+                            "step": s['step_number'],
+                            "stype": s['step_type'],
+                            "ptype": s['part_type'],
+                            "tool": s.get('tool_name'),
+                            "preview": s['content_preview'],
+                            "chars": s['char_count'],
+                            "words": s['word_count'],
+                            "tokens": s.get('token_count', 0),
+                        }
+                    )
+                await db.commit()
+
+            logger.info(f"✅ [RUN_STEPS] Saved {len(steps)} agent run steps for session {session_id[:8]}...")
+            for s in steps:
+                logger.info(f"   Step {s['step_number']}: {s['step_type']}/{s['part_type']} - {s.get('token_count',0)} tokens, {s['char_count']} chars")
+
+        except Exception as e:
+            logger.warning(f"⚠️ [RUN_STEPS] Failed to save agent run steps: {e}")
 
 # Global streaming service instance
 streaming_service = StreamingService()

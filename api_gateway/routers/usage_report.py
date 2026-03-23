@@ -88,7 +88,15 @@ async def _fetch_all_data():
             ORDER BY cm.created_at DESC
         """), {"since": since})).fetchall()]
 
-    return {"sessions": sessions, "messages": messages, "files": files, "websites": websites, "chat_messages": chat_messages}
+        run_steps = [_row_to_dict(r) for r in (await db.execute(text("""
+            SELECT id, session_id, user_message_id, step_number, step_type, part_type,
+                   tool_name, content_preview, char_count, word_count, token_count, created_at
+            FROM agent_run_steps
+            WHERE created_at >= :since
+            ORDER BY session_id, user_message_id, step_number
+        """), {"since": since})).fetchall()]
+
+    return {"sessions": sessions, "messages": messages, "files": files, "websites": websites, "chat_messages": chat_messages, "run_steps": run_steps}
 
 
 @router.get("/usage", response_class=HTMLResponse)
@@ -455,6 +463,44 @@ function render() {
     <td>${fmtDate(r.created_at)}</td></tr>`).join('');
 }
 
+// === RENDER AGENT RUN STEPS FOR A USER MESSAGE ===
+function renderRunSteps(userMsgId, sessionId) {
+  const steps = (RAW.run_steps||[]).filter(s => s.user_message_id === userMsgId);
+  if(steps.length === 0) return '';
+  const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
+  const partLabel = p => ({
+    'system_prompt':'System Prompt','user_prompt':'User Prompt','text':'Text Response',
+    'tool_call':'Tool Call','tool_return':'Tool Return','thinking':'Thinking'
+  }[p]||p);
+  const partColor = p => ({
+    'system_prompt':'var(--accent)','user_prompt':'var(--blue)','text':'var(--green)',
+    'tool_call':'var(--orange)','tool_return':'var(--cyan)','thinking':'var(--accent2)'
+  }[p]||'var(--muted)');
+  const totalTokens = steps.reduce((a,s) => a + (s.token_count||0), 0);
+  let html = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+    <div style="background:rgba(79,70,229,.08);padding:6px 10px;font-size:11px;font-weight:600;color:var(--accent);cursor:pointer" onclick="const t=this.nextElementSibling;t.style.display=t.style.display==='none'?'':'none'">
+      Agent Run Steps (${steps.length} steps, ${fmt(totalTokens)} total tokens) [show/hide]
+    </div>
+    <div style="display:none">
+    <table class="bd-table" style="margin:0">
+      <thead><tr><th>#</th><th>Direction</th><th>Part Type</th><th>Tool</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>Content (click to expand)</th></tr></thead>
+      <tbody>`;
+  steps.forEach(s => {
+    html += `<tr>
+      <td style="font-weight:600">${s.step_number}</td>
+      <td><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:${s.step_type==='model_request'?'rgba(37,99,235,.1)':'rgba(22,163,74,.1)'};color:${s.step_type==='model_request'?'var(--blue)':'var(--green)'}">${s.step_type==='model_request'?'INPUT':'OUTPUT'}</span></td>
+      <td style="color:${partColor(s.part_type)};font-weight:600">${partLabel(s.part_type)}</td>
+      <td style="font-size:11px">${s.tool_name||'-'}</td>
+      <td class="bd-num">${fmt(s.token_count)}</td>
+      <td class="bd-num">${fmt(s.word_count)}</td>
+      <td class="bd-num">${fmt(s.char_count)}</td>
+      <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(s.content_preview)}</div></td>
+    </tr>`;
+  });
+  html += `</tbody></table></div></div>`;
+  return html;
+}
+
 // === EXPAND/COLLAPSE SESSION MESSAGES ===
 function toggleSession(rowEl, sessionId) {
   const isOpen = rowEl.classList.contains('open');
@@ -538,7 +584,7 @@ function toggleSession(rowEl, sessionId) {
           <tr style="background:rgba(79,70,229,.06);font-weight:600">
             <td class="bd-label">Total (Prompt)</td>
             <td class="bd-num">${fmt(m.prompt_token_count)}</td>
-            <td colspan="3" style="font-size:11px;color:var(--muted)">= sys prompt + history + tools + user msg (billable input)</td>
+            <td colspan="3" style="font-size:11px;color:var(--muted)">Billable input — includes all model turns (see Agent Run Steps below)</td>
           </tr>
         ` : `
           <tr>
@@ -551,11 +597,12 @@ function toggleSession(rowEl, sessionId) {
           <tr style="background:rgba(79,70,229,.06);font-weight:600">
             <td class="bd-label">Total (Completion)</td>
             <td class="bd-num">${fmt(m.completion_token_count)}</td>
-            <td colspan="3" style="font-size:11px;color:var(--muted)">= Gemini output tokens (billable output)</td>
+            <td colspan="3" style="font-size:11px;color:var(--muted)">Billable output — includes tool call generation + final response across all turns</td>
           </tr>
         `}
         </tbody>
       </table>
+      ${m.role==='user' ? renderRunSteps(m.id, sessionId) : ''}
       <div style="font-size:10px;color:var(--muted);margin-top:2px">ID: ${m.id||'-'}</div>
     </td>`;
     insertAfter.after(msgRow);
@@ -652,6 +699,22 @@ function downloadExcel() {
     'Created': r.created_at||''
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(webData), 'Scraped Websites');
+
+  // Sheet 5: Agent Run Steps
+  const stepsData = (RAW.run_steps||[]).map(r => ({
+    'Session ID': r.session_id,
+    'User Message ID': r.user_message_id||'',
+    'Step #': r.step_number,
+    'Direction': r.step_type==='model_request'?'INPUT':'OUTPUT',
+    'Part Type': r.part_type,
+    'Tool Name': r.tool_name||'',
+    'Tokens': r.token_count||0,
+    'Words': r.word_count||0,
+    'Chars': r.char_count||0,
+    'Content Preview': r.content_preview||'',
+    'Created': r.created_at||''
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stepsData), 'Agent Run Steps');
 
   XLSX.writeFile(wb, `usage-report-${days}d-${new Date().toISOString().substring(0,10)}.xlsx`);
 }
