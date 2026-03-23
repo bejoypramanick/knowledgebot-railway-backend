@@ -29,6 +29,7 @@ from api_gateway.core.auth_middleware import get_current_user, SessionAuthMiddle
 # Import routers and config
 from api_gateway.routers import router as api_router
 from api_gateway.routers.auth_router import router as auth_router
+from api_gateway.routers.usage_report import router as usage_report_router
 # Note: Service routers run in separate containers on Railway, so we can't import them directly
 # We'll use HTTP proxy calls to communicate with other services
 from api_gateway.utils.middleware import (add_security_headers_middleware,
@@ -261,7 +262,8 @@ async def chat_confusion_detector(request: Request):
 
 # Include Routers
 app.include_router(auth_router, prefix="/api/v1/gateway")  # Auth endpoints at gateway prefix
-app.include_router(api_router, prefix="/api/v1/gateway")  
+app.include_router(api_router, prefix="/api/v1/gateway")
+app.include_router(usage_report_router, prefix="/api/v1/gateway")  # Usage report (protected)  
 logger.info(f"🔧 Auth router included at /api/v1/gateway prefix")
 logger.info(f"🔧 API Gateway router included with /api/v1/gateway prefix")
 logger.info("📋 Note: Service endpoints will be proxied via HTTP calls to separate containers") 
