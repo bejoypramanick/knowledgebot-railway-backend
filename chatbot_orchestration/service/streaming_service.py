@@ -1625,7 +1625,7 @@ class StreamingService:
             loop = asyncio.get_event_loop()
             token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
 
-            from core.ai import get_genai_client
+            from ..core.ai import get_genai_client
             genai_client = get_genai_client()
             if genai_client:
                 executor = ThreadPoolExecutor(max_workers=5)
