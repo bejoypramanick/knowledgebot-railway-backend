@@ -273,15 +273,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
       <dt>Table Formatting (Flash)</dt><dd>Input: $0.10 / 1M, Output: $0.40 / 1M (same model)</dd>
     </dl>
   </div>
-  <div class="legend-section">
-    <h4>Token Usage Log</h4>
-    <dl>
-      <dt>API Call Type</dt><dd>Type of Gemini API call: rag (chat), table_formatting, count_tokens, etc.</dd>
-      <dt>Cache Read Tokens</dt><dd>Tokens served from Gemini's explicit context cache (system prompt + tool schema). Billed at 90% discount ($0.01/1M)</dd>
-      <dt>Cache Write Tokens</dt><dd>Tokens written to cache on first request (billed at standard input rate + storage per hour)</dd>
-      <dt>request_metadata</dt><dd>JSONB field storing cache_read_tokens, cache_write_tokens, and other details</dd>
-    </dl>
-  </div>
+  <!-- Token Usage Log legend removed as requested -->
   <div class="legend-section">
     <h4>Table Formatting Metrics (Gemini Flash)</h4>
     <dl>
@@ -337,10 +329,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
   <tbody id="tables-meta-table"></tbody>
 </table></div></div>
 
-<div class="section"><h2>Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(all Gemini API calls with cache details)</span></h2><div class="table-wrap" style="max-height:500px"><table>
-  <thead><tr><th>API Call Type</th><th>Model</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total Tokens</th><th>Cache Read</th><th>Cache Write</th><th title="Estimated cost using Gemini 2.5 Flash Lite pricing">Est. Cost</th><th>Session</th><th>Date</th></tr></thead>
-  <tbody id="token-log-table"></tbody>
-</table></div></div>
+<!-- Token Usage Log section removed as requested -->
 
 </div>
 
@@ -594,24 +583,6 @@ function render() {
     <td class="token-cell">${fmt(r.table_output_token_count)}</td>
     <td class="cost-cell">${fmtCost(cost)}</td>
     <td>${fmtDate(r.created_at)}</td></tr>`;
-  }).join('');
-
-  // === TOKEN USAGE LOG TABLE ===
-  document.getElementById('token-log-table').innerHTML = tokenLog.slice(0,200).map(r => {
-    const cache = getCacheTokens(r.request_metadata);
-    const cost = calcInputCost(r.prompt_tokens||0) + calcOutputCost(r.completion_tokens||0)
-               + calcCacheReadCost(cache.read) + calcCacheWriteCost(cache.write);
-    return `<tr>
-    <td><span class="badge badge-${r.api_call_type==='rag'?'active':'processing'}">${r.api_call_type||'-'}</span></td>
-    <td style="font-size:11px">${r.model||'-'}</td>
-    <td class="token-cell">${fmt(r.prompt_tokens)}</td>
-    <td class="token-cell">${fmt(r.completion_tokens)}</td>
-    <td class="token-cell">${fmt(r.total_tokens)}</td>
-    <td class="token-cell">${cache.read ? fmt(cache.read) : '-'}</td>
-    <td class="token-cell">${cache.write ? fmt(cache.write) : '-'}</td>
-    <td class="cost-cell">${fmtCost(cost)}</td>
-    <td class="mono" style="font-size:10px">${r.session_id ? r.session_id.substring(0,8)+'...' : '-'}</td>
-    <td>${fmtDateTime(r.created_at)}</td></tr>`;
   }).join('');
 }
 
@@ -916,28 +887,7 @@ function downloadExcel() {
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tablesData), 'Table Formatting');
 
-  // Sheet 7: Token Usage Log
-  const logData = tokenLog.map(r => {
-    const cache = getCacheTokens(r.request_metadata);
-    const cost = calcInputCost(Math.max(0, (r.prompt_tokens||0) - cache.read)) 
-               + calcOutputCost(r.completion_tokens||0)
-               + calcCacheReadCost(cache.read) + calcCacheWriteCost(cache.write);
-    return {
-      'API Call Type': r.api_call_type||'',
-      'Provider': r.provider||'',
-      'Model': r.model||'',
-      'Prompt Tokens': r.prompt_tokens||0,
-      'Completion Tokens': r.completion_tokens||0,
-      'Total Tokens': r.total_tokens||0,
-      'Cache Read Tokens': cache.read,
-      'Cache Write Tokens': cache.write,
-      'Est. Cost ($)': cost.toFixed(6),
-      'Session ID': r.session_id||'',
-      'Message ID': r.message_id||'',
-      'Created': r.created_at||''
-    };
-  });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(logData), 'Token Usage Log');
+  // excel sheet for token log removed as requested
 
   // Sheet 8: Cost Summary
   const totalPromptTokens = sessions.reduce((a,r) => a+(r.total_prompt_token_count||0), 0);
