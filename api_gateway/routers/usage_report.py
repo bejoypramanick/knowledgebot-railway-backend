@@ -69,7 +69,15 @@ async def _fetch_all_data():
             FROM scraped_websites WHERE created_at >= :since ORDER BY created_at DESC
         """), {"since": since})).fetchall()]
 
-    return {"sessions": sessions, "messages": messages, "files": files, "websites": websites}
+        chat_messages = [_row_to_dict(r) for r in (await db.execute(text("""
+            SELECT cm.id, cm.session_id, cm.role, cm.content,
+                   cm.character_count, cm.word_count, cm.token_count, cm.created_at
+            FROM chat_messages cm
+            WHERE cm.created_at >= :since
+            ORDER BY cm.created_at DESC
+        """), {"since": since})).fetchall()]
+
+    return {"sessions": sessions, "messages": messages, "files": files, "websites": websites, "chat_messages": chat_messages}
 
 
 @router.get("/usage", response_class=HTMLResponse)
@@ -124,6 +132,12 @@ tr:hover td{background:rgba(99,102,241,.05)}
 .badge-closed,.badge-archived{background:rgba(156,163,175,.15);color:var(--muted)}
 .badge-processing,.badge-pending{background:rgba(249,115,22,.15);color:var(--orange)}
 .badge-failed,.badge-cancelled,.badge-deleted{background:rgba(239,68,68,.15);color:var(--red)}
+.badge-user{background:rgba(99,102,241,.15);color:var(--accent)}
+.badge-assistant{background:rgba(34,197,94,.15);color:var(--green)}
+.badge-human_agent{background:rgba(249,115,22,.15);color:var(--orange)}
+.msg-content{max-width:500px;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.5;max-height:80px;overflow:hidden;cursor:pointer;position:relative}
+.msg-content.expanded{max-height:none}
+.msg-content:not(.expanded)::after{content:'';position:absolute;bottom:0;left:0;right:0;height:20px;background:linear-gradient(transparent,var(--card))}
 .loading{text-align:center;padding:40px;color:var(--muted)}
 .table-wrap{overflow-x:auto;max-height:500px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
 @media print{
@@ -169,6 +183,26 @@ tr:hover td{background:rgba(99,102,241,.05)}
 <div class="section"><h2>Chat Sessions</h2><div class="table-wrap"><table>
   <thead><tr><th>Session ID</th><th>Started</th><th>Messages</th><th>Characters</th><th>Words</th><th>Tokens</th><th>Duration</th><th>Status</th></tr></thead>
   <tbody id="sessions-table"></tbody>
+</table></div></div>
+
+<div class="section"><h2>Chat Messages</h2>
+<div class="toolbar" style="margin-bottom:12px">
+  <select id="msg-role-filter" onchange="render()" style="min-width:140px">
+    <option value="all">All Roles</option>
+    <option value="user">User</option>
+    <option value="assistant">Bot</option>
+    <option value="human_agent">Human Agent</option>
+  </select>
+  <select id="msg-session-filter" onchange="render()" style="min-width:200px">
+    <option value="all">All Sessions</option>
+  </select>
+  <input type="text" id="msg-search" onkeyup="render()" placeholder="Search messages..." style="padding:8px 16px;border-radius:8px;font-size:13px;border:1px solid var(--border);background:var(--card);color:var(--text);min-width:200px">
+  <span style="flex:1"></span>
+  <span id="msg-count" style="color:var(--muted);font-size:13px"></span>
+</div>
+<div class="table-wrap" style="max-height:600px"><table>
+  <thead><tr><th style="width:100px">Session</th><th style="width:90px">Role</th><th>Message</th><th>Chars</th><th>Words</th><th>Tokens</th><th>Time</th></tr></thead>
+  <tbody id="messages-table"></tbody>
 </table></div></div>
 
 <div class="section"><h2>File Uploads</h2><div class="table-wrap"><table>
@@ -328,6 +362,41 @@ function render() {
     <td>${fmt(r.filestore_character_count)}</td><td>${fmt(r.filestore_word_count)}</td>
     <td class="token-cell">${fmt(r.filestore_token_count)}</td><td>${badge(r.processing_status)}</td>
     <td>${fmtDate(r.created_at)}</td></tr>`).join('');
+
+  // Chat Messages table with filters
+  const chatMsgs = filterByDate(RAW.chat_messages||[], days);
+  const roleFilter = document.getElementById('msg-role-filter').value;
+  const sessionFilter = document.getElementById('msg-session-filter').value;
+  const searchTerm = (document.getElementById('msg-search').value||'').toLowerCase();
+
+  // Populate session dropdown (only once or when days change)
+  const sessionSelect = document.getElementById('msg-session-filter');
+  const uniqueSessions = [...new Set(chatMsgs.map(m=>m.session_id))];
+  const currentSessionVal = sessionSelect.value;
+  if(sessionSelect.options.length <= 1 || sessionSelect.dataset.days !== String(days)) {
+    sessionSelect.innerHTML = '<option value="all">All Sessions</option>' +
+      uniqueSessions.map(s=>`<option value="${s}">${String(s).substring(0,8)}...</option>`).join('');
+    sessionSelect.value = currentSessionVal;
+    sessionSelect.dataset.days = String(days);
+  }
+
+  const roleName = r => r==='assistant'?'Bot':r==='user'?'User':r==='human_agent'?'Human Agent':(r||'Unknown');
+  const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
+
+  let filtered = chatMsgs;
+  if(roleFilter!=='all') filtered = filtered.filter(m=>m.role===roleFilter);
+  if(sessionFilter!=='all') filtered = filtered.filter(m=>m.session_id===sessionFilter);
+  if(searchTerm) filtered = filtered.filter(m=>(m.content||'').toLowerCase().includes(searchTerm));
+
+  document.getElementById('msg-count').textContent = `${filtered.length} of ${chatMsgs.length} messages`;
+
+  document.getElementById('messages-table').innerHTML = filtered.slice(0,500).map(r=>`<tr>
+    <td class="mono">${String(r.session_id||'').substring(0,8)}...</td>
+    <td><span class="badge badge-${r.role}">${roleName(r.role)}</span></td>
+    <td><div class="msg-content" onclick="this.classList.toggle('expanded')">${escHtml(r.content)}</div></td>
+    <td>${fmt(r.character_count)}</td><td>${fmt(r.word_count)}</td>
+    <td class="token-cell">${fmt(r.token_count)}</td>
+    <td>${fmtDateTime(r.created_at)}</td></tr>`).join('');
 }
 
 // === CSV DOWNLOAD (client-side) ===
@@ -352,6 +421,11 @@ function downloadCSV() {
   row([]); row(['=== FILE UPLOADS ===']);
   row(['Filename','Extension','File Size','FS Characters','FS Words','FS Tokens','Status','Docling','Created']);
   files.forEach(r => row([r.original_filename,r.file_extension,r.file_size,r.filestore_character_count,r.filestore_word_count,r.filestore_token_count,r.processing_status,r.processed_by_docling,r.created_at]));
+
+  const chatMsgs = filterByDate(RAW.chat_messages||[], days);
+  row([]); row(['=== CHAT MESSAGES ===']);
+  row(['Message ID','Session ID','Role','Message Content','Characters','Words','Tokens','Created']);
+  chatMsgs.forEach(r => row([r.id,r.session_id,r.role,r.content,r.character_count,r.word_count,r.token_count,r.created_at]));
 
   row([]); row(['=== SCRAPED WEBSITES ===']);
   row(['URL','Title','Pages','FS Characters','FS Words','FS Tokens','Status','Depth','Is Child','Created']);
