@@ -201,7 +201,7 @@ tr:hover td{background:rgba(99,102,241,.05)}
   <span id="msg-count" style="color:var(--muted);font-size:13px"></span>
 </div>
 <div class="table-wrap" style="max-height:600px"><table>
-  <thead><tr><th style="width:100px">Session</th><th style="width:90px">Role</th><th>Message</th><th>Chars</th><th>Words</th><th>Tokens</th><th>Time</th></tr></thead>
+  <thead><tr><th>Message ID</th><th>Session ID</th><th style="width:90px">Role</th><th>Message</th><th>Chars</th><th>Words</th><th>Tokens</th><th>Time</th></tr></thead>
   <tbody id="messages-table"></tbody>
 </table></div></div>
 
@@ -344,7 +344,7 @@ function render() {
 
   // === TABLES ===
   document.getElementById('sessions-table').innerHTML = sessions.slice(0,100).map(r=>`<tr>
-    <td class="mono">${String(r.id).substring(0,8)}...</td>
+    <td class="mono">${r.id}</td>
     <td>${fmtDateTime(r.started_at)}</td><td>${r.message_count||0}</td>
     <td>${fmt(r.total_character_count)}</td><td>${fmt(r.total_word_count)}</td>
     <td class="token-cell">${fmt(r.total_token_count)}</td><td>${r.duration_minutes||'-'}</td>
@@ -375,7 +375,7 @@ function render() {
   const currentSessionVal = sessionSelect.value;
   if(sessionSelect.options.length <= 1 || sessionSelect.dataset.days !== String(days)) {
     sessionSelect.innerHTML = '<option value="all">All Sessions</option>' +
-      uniqueSessions.map(s=>`<option value="${s}">${String(s).substring(0,8)}...</option>`).join('');
+      uniqueSessions.map(s=>`<option value="${s}">${s}</option>`).join('');
     sessionSelect.value = currentSessionVal;
     sessionSelect.dataset.days = String(days);
   }
@@ -391,7 +391,8 @@ function render() {
   document.getElementById('msg-count').textContent = `${filtered.length} of ${chatMsgs.length} messages`;
 
   document.getElementById('messages-table').innerHTML = filtered.slice(0,500).map(r=>`<tr>
-    <td class="mono">${String(r.session_id||'').substring(0,8)}...</td>
+    <td class="mono">${r.id||'-'}</td>
+    <td class="mono">${r.session_id||'-'}</td>
     <td><span class="badge badge-${r.role}">${roleName(r.role)}</span></td>
     <td><div class="msg-content" onclick="this.classList.toggle('expanded')">${escHtml(r.content)}</div></td>
     <td>${fmt(r.character_count)}</td><td>${fmt(r.word_count)}</td>
