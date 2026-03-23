@@ -135,9 +135,14 @@ tr:hover td{background:rgba(99,102,241,.05)}
 .badge-user{background:rgba(99,102,241,.15);color:var(--accent)}
 .badge-assistant{background:rgba(34,197,94,.15);color:var(--green)}
 .badge-human_agent{background:rgba(249,115,22,.15);color:var(--orange)}
-.msg-content{max-width:500px;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.5;max-height:80px;overflow:hidden;cursor:pointer;position:relative}
-.msg-content.expanded{max-height:none}
-.msg-content:not(.expanded)::after{content:'';position:absolute;bottom:0;left:0;right:0;height:20px;background:linear-gradient(transparent,var(--card))}
+.session-row{cursor:pointer;transition:.15s}
+.session-row:hover td{background:rgba(99,102,241,.08)}
+.session-row td:first-child::before{content:'\\25B6';margin-right:8px;font-size:10px;color:var(--muted);transition:.2s;display:inline-block}
+.session-row.open td:first-child::before{transform:rotate(90deg)}
+.msg-row{background:rgba(99,102,241,.03)}
+.msg-row td{padding:8px 12px 8px 32px;font-size:12px;border-bottom:1px solid rgba(42,45,58,.5)}
+.msg-bubble{white-space:pre-wrap;word-break:break-word;line-height:1.5;max-width:600px}
+.msg-row-header td{padding:6px 12px 6px 32px;font-size:11px;color:var(--muted);background:rgba(99,102,241,.06);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
 .loading{text-align:center;padding:40px;color:var(--muted)}
 .table-wrap{overflow-x:auto;max-height:500px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
 @media print{
@@ -180,29 +185,9 @@ tr:hover td{background:rgba(99,102,241,.05)}
   <div class="chart-card"><h3>File & Website Token Distribution</h3><canvas id="fileTokenChart"></canvas></div>
 </div>
 
-<div class="section"><h2>Chat Sessions</h2><div class="table-wrap"><table>
+<div class="section"><h2>Chat Sessions <span style="font-size:13px;color:var(--muted);font-weight:400">(click to expand messages)</span></h2><div class="table-wrap" style="max-height:700px"><table>
   <thead><tr><th>Session ID</th><th>Started</th><th>Messages</th><th>Characters</th><th>Words</th><th>Tokens</th><th>Duration</th><th>Status</th></tr></thead>
   <tbody id="sessions-table"></tbody>
-</table></div></div>
-
-<div class="section"><h2>Chat Messages</h2>
-<div class="toolbar" style="margin-bottom:12px">
-  <select id="msg-role-filter" onchange="render()" style="min-width:140px">
-    <option value="all">All Roles</option>
-    <option value="user">User</option>
-    <option value="assistant">Bot</option>
-    <option value="human_agent">Human Agent</option>
-  </select>
-  <select id="msg-session-filter" onchange="render()" style="min-width:200px">
-    <option value="all">All Sessions</option>
-  </select>
-  <input type="text" id="msg-search" onkeyup="render()" placeholder="Search messages..." style="padding:8px 16px;border-radius:8px;font-size:13px;border:1px solid var(--border);background:var(--card);color:var(--text);min-width:200px">
-  <span style="flex:1"></span>
-  <span id="msg-count" style="color:var(--muted);font-size:13px"></span>
-</div>
-<div class="table-wrap" style="max-height:600px"><table>
-  <thead><tr><th>Message ID</th><th>Session ID</th><th style="width:90px">Role</th><th>Message</th><th>Chars</th><th>Words</th><th>Tokens</th><th>Time</th></tr></thead>
-  <tbody id="messages-table"></tbody>
 </table></div></div>
 
 <div class="section"><h2>File Uploads</h2><div class="table-wrap"><table>
@@ -342,14 +327,38 @@ function render() {
     {label:'Filestore Tokens',data:fTokens,backgroundColor:fColors,borderRadius:4}
   ]},options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true}}}});
 
-  // === TABLES ===
-  document.getElementById('sessions-table').innerHTML = sessions.slice(0,100).map(r=>`<tr>
-    <td class="mono">${r.id}</td>
-    <td>${fmtDateTime(r.started_at)}</td><td>${r.message_count||0}</td>
-    <td>${fmt(r.total_character_count)}</td><td>${fmt(r.total_word_count)}</td>
-    <td class="token-cell">${fmt(r.total_token_count)}</td><td>${r.duration_minutes||'-'}</td>
-    <td>${badge(r.archive_status)}</td></tr>`).join('');
+  // === HELPERS FOR MESSAGES ===
+  const chatMsgs = filterByDate(RAW.chat_messages||[], days);
+  const roleName = r => r==='assistant'?'Bot':r==='user'?'User':r==='human_agent'?'Human Agent':(r||'Unknown');
+  const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
 
+  // Group messages by session_id
+  const msgBySession = {};
+  chatMsgs.forEach(m => {
+    if(!msgBySession[m.session_id]) msgBySession[m.session_id] = [];
+    msgBySession[m.session_id].push(m);
+  });
+  // Sort messages within each session by created_at ascending (chronological)
+  Object.values(msgBySession).forEach(arr => arr.sort((a,b) => (a.created_at||'').localeCompare(b.created_at||'')));
+
+  // === SESSIONS TABLE (expandable) ===
+  const sessionsEl = document.getElementById('sessions-table');
+  sessionsEl.innerHTML = '';
+  sessions.slice(0,100).forEach(r => {
+    const sessionRow = document.createElement('tr');
+    sessionRow.className = 'session-row';
+    sessionRow.dataset.sessionId = r.id;
+    sessionRow.innerHTML = `
+      <td class="mono">${r.id}</td>
+      <td>${fmtDateTime(r.started_at)}</td><td>${r.message_count||0}</td>
+      <td>${fmt(r.total_character_count)}</td><td>${fmt(r.total_word_count)}</td>
+      <td class="token-cell">${fmt(r.total_token_count)}</td><td>${r.duration_minutes||'-'}</td>
+      <td>${badge(r.archive_status)}</td>`;
+    sessionRow.onclick = function() { toggleSession(this, r.id); };
+    sessionsEl.appendChild(sessionRow);
+  });
+
+  // === OTHER TABLES ===
   document.getElementById('files-table').innerHTML = files.slice(0,100).map(r=>`<tr>
     <td title="${r.original_filename}">${trunc(r.original_filename,35)}</td><td>${r.file_extension||'-'}</td>
     <td>${fmt(r.file_size)}</td><td>${fmt(r.filestore_character_count)}</td><td>${fmt(r.filestore_word_count)}</td>
@@ -362,42 +371,63 @@ function render() {
     <td>${fmt(r.filestore_character_count)}</td><td>${fmt(r.filestore_word_count)}</td>
     <td class="token-cell">${fmt(r.filestore_token_count)}</td><td>${badge(r.processing_status)}</td>
     <td>${fmtDate(r.created_at)}</td></tr>`).join('');
+}
 
-  // Chat Messages table with filters
-  const chatMsgs = filterByDate(RAW.chat_messages||[], days);
-  const roleFilter = document.getElementById('msg-role-filter').value;
-  const sessionFilter = document.getElementById('msg-session-filter').value;
-  const searchTerm = (document.getElementById('msg-search').value||'').toLowerCase();
+// === EXPAND/COLLAPSE SESSION MESSAGES ===
+function toggleSession(rowEl, sessionId) {
+  const isOpen = rowEl.classList.contains('open');
 
-  // Populate session dropdown (only once or when days change)
-  const sessionSelect = document.getElementById('msg-session-filter');
-  const uniqueSessions = [...new Set(chatMsgs.map(m=>m.session_id))];
-  const currentSessionVal = sessionSelect.value;
-  if(sessionSelect.options.length <= 1 || sessionSelect.dataset.days !== String(days)) {
-    sessionSelect.innerHTML = '<option value="all">All Sessions</option>' +
-      uniqueSessions.map(s=>`<option value="${s}">${s}</option>`).join('');
-    sessionSelect.value = currentSessionVal;
-    sessionSelect.dataset.days = String(days);
+  // Remove any existing expanded message rows for this session
+  let next = rowEl.nextElementSibling;
+  while(next && (next.classList.contains('msg-row') || next.classList.contains('msg-row-header'))) {
+    const toRemove = next;
+    next = next.nextElementSibling;
+    toRemove.remove();
+  }
+
+  if(isOpen) {
+    rowEl.classList.remove('open');
+    return;
+  }
+
+  rowEl.classList.add('open');
+
+  const chatMsgs = RAW.chat_messages || [];
+  const msgs = chatMsgs.filter(m => m.session_id === sessionId)
+    .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+
+  if(msgs.length === 0) {
+    const emptyRow = document.createElement('tr');
+    emptyRow.className = 'msg-row';
+    emptyRow.innerHTML = `<td colspan="8" style="color:var(--muted);font-style:italic;padding-left:32px">No messages found for this session</td>`;
+    rowEl.after(emptyRow);
+    return;
   }
 
   const roleName = r => r==='assistant'?'Bot':r==='user'?'User':r==='human_agent'?'Human Agent':(r||'Unknown');
   const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
 
-  let filtered = chatMsgs;
-  if(roleFilter!=='all') filtered = filtered.filter(m=>m.role===roleFilter);
-  if(sessionFilter!=='all') filtered = filtered.filter(m=>m.session_id===sessionFilter);
-  if(searchTerm) filtered = filtered.filter(m=>(m.content||'').toLowerCase().includes(searchTerm));
+  // Insert header row
+  const headerRow = document.createElement('tr');
+  headerRow.className = 'msg-row-header';
+  headerRow.innerHTML = `<td colspan="2">Message ID</td><td>Role</td><td colspan="2">Message Content</td><td>Chars / Words</td><td>Tokens</td><td>Time</td>`;
+  rowEl.after(headerRow);
 
-  document.getElementById('msg-count').textContent = `${filtered.length} of ${chatMsgs.length} messages`;
-
-  document.getElementById('messages-table').innerHTML = filtered.slice(0,500).map(r=>`<tr>
-    <td class="mono">${r.id||'-'}</td>
-    <td class="mono">${r.session_id||'-'}</td>
-    <td><span class="badge badge-${r.role}">${roleName(r.role)}</span></td>
-    <td><div class="msg-content" onclick="this.classList.toggle('expanded')">${escHtml(r.content)}</div></td>
-    <td>${fmt(r.character_count)}</td><td>${fmt(r.word_count)}</td>
-    <td class="token-cell">${fmt(r.token_count)}</td>
-    <td>${fmtDateTime(r.created_at)}</td></tr>`).join('');
+  // Insert message rows in reverse order so they end up chronological
+  let insertAfter = headerRow;
+  msgs.forEach(m => {
+    const msgRow = document.createElement('tr');
+    msgRow.className = 'msg-row';
+    msgRow.innerHTML = `
+      <td colspan="2" class="mono" style="font-size:11px;color:var(--muted);vertical-align:top">${m.id||'-'}</td>
+      <td style="vertical-align:top"><span class="badge badge-${m.role}">${roleName(m.role)}</span></td>
+      <td colspan="2" style="vertical-align:top"><div class="msg-bubble">${escHtml(m.content)}</div></td>
+      <td style="vertical-align:top;white-space:nowrap">${fmt(m.character_count)} / ${fmt(m.word_count)}</td>
+      <td class="token-cell" style="vertical-align:top">${fmt(m.token_count)}</td>
+      <td style="vertical-align:top;white-space:nowrap">${fmtDateTime(m.created_at)}</td>`;
+    insertAfter.after(msgRow);
+    insertAfter = msgRow;
+  });
 }
 
 // === CSV DOWNLOAD (client-side) ===
