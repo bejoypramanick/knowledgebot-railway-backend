@@ -29,6 +29,11 @@ ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS bot_response_char_count int4 
 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS bot_response_word_count int4 DEFAULT 0;
 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS bot_response_token_count int4 DEFAULT 0;
 
+-- Raw text content for each prompt component (stored on user message rows)
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS system_prompt_text text DEFAULT '';
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS history_text text DEFAULT '';
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS tool_def_text text DEFAULT '';
+
 -- Session-level aggregates for prompt component breakdown
 ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS total_system_prompt_token_count int4 DEFAULT 0;
 ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS total_history_token_count int4 DEFAULT 0;

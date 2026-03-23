@@ -1693,6 +1693,9 @@ class StreamingService:
                                 user_msg_char_count = :user_msg_char,
                                 user_msg_word_count = :user_msg_word,
                                 user_msg_token_count = :user_msg_tokens,
+                                system_prompt_text = :sp_text,
+                                history_text = :hist_text,
+                                tool_def_text = :td_text,
                                 updated_at = NOW()
                             WHERE id = (
                                 SELECT id FROM chat_messages
@@ -1717,6 +1720,9 @@ class StreamingService:
                             "user_msg_char": user_char_count,
                             "user_msg_word": user_word_count,
                             "user_msg_tokens": user_message_tokens,
+                            "sp_text": system_prompt_text,
+                            "hist_text": history_text,
+                            "td_text": tool_def_text,
                         }
                     )
                     user_updated = result.rowcount > 0

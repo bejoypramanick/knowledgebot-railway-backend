@@ -81,6 +81,7 @@ async def _fetch_all_data():
                    cm.tool_def_char_count, cm.tool_def_word_count, cm.tool_def_token_count,
                    cm.user_msg_char_count, cm.user_msg_word_count, cm.user_msg_token_count,
                    cm.bot_response_char_count, cm.bot_response_word_count, cm.bot_response_token_count,
+                   cm.system_prompt_text, cm.history_text, cm.tool_def_text,
                    cm.created_at
             FROM chat_messages cm
             WHERE cm.created_at >= :since
@@ -507,30 +508,22 @@ function toggleSession(rowEl, sessionId) {
     insertAfter.after(msgRow);
     insertAfter = msgRow;
 
-    // Show prompt component breakdown for user messages (or bot response breakdown for assistant)
-    const hasBreakdown = m.role==='user' && (m.system_prompt_token_count||m.history_token_count||m.tool_def_token_count||m.user_msg_token_count);
-    const hasBotBreakdown = m.role==='assistant' && (m.bot_response_token_count||m.bot_response_char_count);
-    if(hasBreakdown || hasBotBreakdown) {
+    // Show prompt component text for user messages
+    if(m.role==='user' && (m.system_prompt_text||m.history_text||m.tool_def_text)) {
       const bdRow = document.createElement('tr');
       bdRow.className = 'msg-row';
       bdRow.style.background = 'rgba(99,102,241,.06)';
-      if(m.role==='user') {
-        bdRow.innerHTML = `<td colspan="15" style="padding-left:32px;font-size:11px;color:var(--muted)">
-          <b>Prompt Breakdown:</b>
-          <span style="margin-left:8px">System Prompt: <b>${fmt(m.system_prompt_token_count)} tok</b> / ${fmt(m.system_prompt_word_count)} words / ${fmt(m.system_prompt_char_count)} chars</span>
-          <span style="margin-left:12px">|</span>
-          <span style="margin-left:12px">History: <b>${fmt(m.history_token_count)} tok</b> / ${fmt(m.history_word_count)} words / ${fmt(m.history_char_count)} chars</span>
-          <span style="margin-left:12px">|</span>
-          <span style="margin-left:12px">Tool Defs: <b>${fmt(m.tool_def_token_count)} tok</b> / ${fmt(m.tool_def_word_count)} words / ${fmt(m.tool_def_char_count)} chars</span>
-          <span style="margin-left:12px">|</span>
-          <span style="margin-left:12px">User Msg: <b>${fmt(m.user_msg_token_count)} tok</b> / ${fmt(m.user_msg_word_count)} words / ${fmt(m.user_msg_char_count)} chars</span>
-        </td>`;
-      } else {
-        bdRow.innerHTML = `<td colspan="15" style="padding-left:32px;font-size:11px;color:var(--muted)">
-          <b>Response Breakdown:</b>
-          <span style="margin-left:8px">Bot Response: <b>${fmt(m.bot_response_token_count)} tok</b> / ${fmt(m.bot_response_word_count)} words / ${fmt(m.bot_response_char_count)} chars</span>
-        </td>`;
-      }
+      bdRow.innerHTML = `<td colspan="15" style="padding-left:32px;font-size:11px;color:var(--muted)">
+        <div style="margin-bottom:6px"><b>System Prompt</b> (${fmt(m.system_prompt_token_count)} tok / ${fmt(m.system_prompt_word_count)} words / ${fmt(m.system_prompt_char_count)} chars)
+          <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="margin-top:4px;font-size:11px;max-width:900px;white-space:pre-wrap">${escHtml(m.system_prompt_text)}</div>
+        </div>
+        <div style="margin-bottom:6px"><b>Conversation History</b> (${fmt(m.history_token_count)} tok / ${fmt(m.history_word_count)} words / ${fmt(m.history_char_count)} chars)
+          <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="margin-top:4px;font-size:11px;max-width:900px;white-space:pre-wrap">${escHtml(m.history_text)||'<i>No history (first message)</i>'}</div>
+        </div>
+        <div><b>Tool Definitions</b> (${fmt(m.tool_def_token_count)} tok / ${fmt(m.tool_def_word_count)} words / ${fmt(m.tool_def_char_count)} chars)
+          <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="margin-top:4px;font-size:11px;max-width:900px;white-space:pre-wrap">${escHtml(m.tool_def_text)}</div>
+        </div>
+      </td>`;
       insertAfter.after(bdRow);
       insertAfter = bdRow;
     }
