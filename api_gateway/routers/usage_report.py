@@ -1,7 +1,7 @@
 """
 Usage Report - Single Endpoint
 GET /reports/usage → self-contained HTML report.
-All filtering, CSV download, PDF download handled client-side.
+All filtering and Excel download handled client-side.
 Protected by session auth middleware.
 """
 
@@ -101,7 +101,6 @@ async def usage_report(request: Request):
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Usage Report</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root {
@@ -164,14 +163,6 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 .legend dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}
 .legend dt{font-weight:600;color:var(--accent);white-space:nowrap}
 .legend dd{color:var(--text);margin:0}
-@media print{
-  body{background:#fff;color:#1a1a1a;padding:12px}
-  .toolbar{display:none}
-  .kpi,.chart-card{border:1px solid #ddd;background:#fff}
-  .kpi .value{color:#1a1a1a}
-  .accent,.token-cell{color:#4f46e5!important}
-  th{background:#f5f5f5}td{border-color:#eee}
-}
 </style>
 </head>
 <body>
@@ -189,8 +180,6 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
   <button onclick="setDays(365)" id="btn-365">All Time</button>
   <span style="flex:1"></span>
   <button onclick="downloadExcel()">Download Excel</button>
-  <button onclick="downloadPDF()">Download PDF</button>
-  <button onclick="window.print()">Print</button>
 </div>
 
 <div class="legend" id="legend-panel">
@@ -624,18 +613,6 @@ function downloadExcel() {
   XLSX.writeFile(wb, `usage-report-${days}d-${new Date().toISOString().substring(0,10)}.xlsx`);
 }
 
-// === PDF DOWNLOAD ===
-function downloadPDF() {
-  const el = document.getElementById('report-content');
-  html2pdf().set({
-    margin:[10,10,10,10],
-    filename:`usage-report-${currentDays}d.pdf`,
-    image:{type:'jpeg',quality:.98},
-    html2canvas:{scale:2,useCORS:true,backgroundColor:'#0f1117'},
-    jsPDF:{unit:'mm',format:'a3',orientation:'landscape'},
-    pagebreak:{mode:['avoid-all','css','legacy']}
-  }).from(el).save();
-}
 
 // === INIT ===
 render();
