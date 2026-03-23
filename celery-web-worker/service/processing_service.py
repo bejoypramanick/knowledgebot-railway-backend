@@ -1060,6 +1060,28 @@ class ProcessingService:
             """Record single page in database"""
             metrics = calculate_metrics(page_data.markdown)
 
+            # Compute filestore metrics from the markdown content sent to Gemini
+            md_content = page_data.markdown or ""
+            filestore_character_count = len(md_content)
+            filestore_word_count = len(md_content.split()) if md_content.strip() else 0
+            filestore_token_count = 0
+
+            # Count tokens via Gemini API
+            try:
+                from core.ai import get_genai_client as get_web_genai_client
+                import os
+                token_client = get_web_genai_client()
+                if token_client:
+                    token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
+                    token_response = token_client.models.count_tokens(
+                        model=token_model,
+                        contents=md_content
+                    )
+                    filestore_token_count = token_response.total_tokens
+                    logger.info(f"📊 [TOKEN_COUNT] Gemini token count for {page_data.page_url}: {filestore_token_count}")
+            except Exception as tc_err:
+                logger.warning(f"⚠️ [TOKEN_COUNT] Failed to count tokens for {page_data.page_url}: {tc_err}")
+
             if await self._isSinglePageMode(page_data.page_url, job_context.root_url, crawl_config):
                 logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
 
@@ -1072,7 +1094,10 @@ class ProcessingService:
                     file_size=metrics.get('file_size_bytes', 0),
                     char_count=metrics.get('char_count', 0),
                     mark_completed=True,  # Single-page mode - mark as completed
-                    processed_content_s3_key=processed_content_s3_key
+                    processed_content_s3_key=processed_content_s3_key,
+                    filestore_character_count=filestore_character_count,
+                    filestore_word_count=filestore_word_count,
+                    filestore_token_count=filestore_token_count
                 )
 
                 # Cache citation URL mappings in Redis for fast lookup during chat
@@ -1102,7 +1127,10 @@ class ProcessingService:
                     file_size=metrics.get('file_size_bytes', 0),
                     char_count=metrics.get('char_count', 0),
                     mark_completed=False,  # Multi-page mode - keep status as 'processing'
-                    processed_content_s3_key=processed_content_s3_key
+                    processed_content_s3_key=processed_content_s3_key,
+                    filestore_character_count=filestore_character_count,
+                    filestore_word_count=filestore_word_count,
+                    filestore_token_count=filestore_token_count
                 )
 
                 # Cache citation URL mappings in Redis for fast lookup during chat
@@ -1125,12 +1153,15 @@ class ProcessingService:
                 gemini_file_uri=upload_result.gemini_file_uri,
                 file_search_metadata=upload_result.file_search_metadata,
                 user_role_id=job_context.user_role_id,
-                file_size=calculate_metrics(page_data.markdown).get('file_size_bytes', 0),
-                char_count=calculate_metrics(page_data.markdown).get('char_count', 0),
+                file_size=metrics.get('file_size_bytes', 0),
+                char_count=metrics.get('char_count', 0),
                 title=page_data.title,
                 description=page_data.description,
                 crawl_session_id=page_data.session_id,
-                processed_content_s3_key=processed_content_s3_key
+                processed_content_s3_key=processed_content_s3_key,
+                filestore_character_count=filestore_character_count,
+                filestore_word_count=filestore_word_count,
+                filestore_token_count=filestore_token_count
             )
 
             # Cache citation URL mappings in Redis for fast lookup during chat
@@ -1180,7 +1211,10 @@ class ProcessingService:
         file_size: int,
         char_count: int,
         mark_completed: bool = True,
-        processed_content_s3_key: str = None
+        processed_content_s3_key: str = None,
+        filestore_character_count: int = 0,
+        filestore_word_count: int = 0,
+        filestore_token_count: int = 0
     ) -> bool:
         """Update parent website record with single page data"""
         logger.info(f"💾 [UPDATE_WEBSITE] Updating website {website_id} with page data")
@@ -1196,7 +1230,10 @@ class ProcessingService:
             crawl_session_id=page_data.session_id,
             file_search_metadata=upload_result.file_search_metadata,
             mark_completed=mark_completed,
-            processed_content_s3_key=processed_content_s3_key
+            processed_content_s3_key=processed_content_s3_key,
+            filestore_character_count=filestore_character_count,
+            filestore_word_count=filestore_word_count,
+            filestore_token_count=filestore_token_count
         )
 
     # ==================== UTILITIES ====================

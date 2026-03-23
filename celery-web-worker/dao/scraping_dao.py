@@ -272,7 +272,10 @@ class ScrapingDAO:
         title: str = None,
         description: str = None,
         crawl_session_id: str = None,
-        processed_content_s3_key: str = None
+        processed_content_s3_key: str = None,
+        filestore_character_count: int = 0,
+        filestore_word_count: int = 0,
+        filestore_token_count: int = 0
     ) -> Optional[str]:
         """
         Record a child page immediately after it's uploaded to Gemini.
@@ -313,12 +316,14 @@ class ScrapingDAO:
                 gemini_file_name, gemini_file_uri, metadata, depth, user_role_id,
                 file_size, char_count, title, description, crawl_session_id,
                 pages_scraped, processed_content_s3_key,
+                filestore_character_count, filestore_word_count, filestore_token_count,
                 created_at, updated_at
             ) VALUES (
                 :parent_id, :page_url, :processing_status,
                 :gemini_file_name, :gemini_file_uri, CAST(:metadata AS jsonb), :depth, :user_role_id,
                 :file_size, :char_count, :title, :description, :crawl_session_id,
                 :pages_scraped, :processed_content_s3_key,
+                :filestore_character_count, :filestore_word_count, :filestore_token_count,
                 NOW(), NOW()
             ) RETURNING id
         """
@@ -338,7 +343,10 @@ class ScrapingDAO:
             "description": description,
             "crawl_session_id": crawl_session_id,
             "pages_scraped": 1,
-            "processed_content_s3_key": processed_content_s3_key
+            "processed_content_s3_key": processed_content_s3_key,
+            "filestore_character_count": filestore_character_count,
+            "filestore_word_count": filestore_word_count,
+            "filestore_token_count": filestore_token_count
         }
 
         try:
@@ -441,13 +449,16 @@ class ScrapingDAO:
         crawl_session_id: str,
         file_search_metadata: Dict[str, Any],
         mark_completed: bool = True,
-        processed_content_s3_key: str = None
+        processed_content_s3_key: str = None,
+        filestore_character_count: int = 0,
+        filestore_word_count: int = 0,
+        filestore_token_count: int = 0
     ) -> bool:
         """
         Update parent website record with single page data.
-        
+
         Args:
-            mark_completed: If True, marks status as 'completed'. 
+            mark_completed: If True, marks status as 'completed'.
                           If False, keeps current status (for multi-page crawls where parent should stay 'processing')
 
         Returns: True on success, False on failure
@@ -479,6 +490,9 @@ class ScrapingDAO:
                     pages_scraped = :pages_scraped,
                     metadata = metadata || CAST(:metadata AS jsonb),
                     processed_content_s3_key = :processed_content_s3_key,
+                    filestore_character_count = :filestore_character_count,
+                    filestore_word_count = :filestore_word_count,
+                    filestore_token_count = :filestore_token_count,
                     processing_status = 'completed',
                     updated_at = NOW()
                 WHERE id = :website_id
@@ -498,6 +512,9 @@ class ScrapingDAO:
                     pages_scraped = :pages_scraped,
                     metadata = metadata || CAST(:metadata AS jsonb),
                     processed_content_s3_key = :processed_content_s3_key,
+                    filestore_character_count = :filestore_character_count,
+                    filestore_word_count = :filestore_word_count,
+                    filestore_token_count = :filestore_token_count,
                     updated_at = NOW()
                 WHERE id = :website_id
                 RETURNING OLD.metadata AS previous_metadata, OLD.processing_status AS old_status, NEW.processing_status AS new_status
@@ -514,6 +531,9 @@ class ScrapingDAO:
             "pages_scraped": 1,
             "metadata": json.dumps(file_search_metadata),
             "processed_content_s3_key": processed_content_s3_key,
+            "filestore_character_count": filestore_character_count,
+            "filestore_word_count": filestore_word_count,
+            "filestore_token_count": filestore_token_count,
             "website_id": website_id
         }
 

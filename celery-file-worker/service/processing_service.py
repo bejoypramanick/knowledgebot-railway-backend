@@ -742,6 +742,24 @@ async def process_file_content(
                 if hasattr(uploaded_file, 'uri'):
                     document_uri = uploaded_file.uri
                 
+                # Compute filestore metrics from the markdown content sent to Gemini
+                filestore_character_count = len(content_for_upload) if content_for_upload else 0
+                filestore_word_count = len(content_for_upload.split()) if content_for_upload and content_for_upload.strip() else 0
+                filestore_token_count = 0
+
+                # Count tokens via Gemini API
+                try:
+                    import os
+                    token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
+                    token_response = genai_client.models.count_tokens(
+                        model=token_model,
+                        contents=content_for_upload
+                    )
+                    filestore_token_count = token_response.total_tokens
+                    logger.info(f"📊 [TOKEN_COUNT] Gemini token count for {original_filename}: {filestore_token_count}")
+                except Exception as tc_err:
+                    logger.warning(f"⚠️ [TOKEN_COUNT] Failed to count tokens: {tc_err}")
+
                 # Update with all processing data
                 success = await dao.update_file_with_processing_data(
                     file_id=file_id,
@@ -763,7 +781,10 @@ async def process_file_content(
                     docling_images_with_ocr=docling_images_with_ocr,
                     original_file_extension=original_file_extension,
                     original_mime_type=original_mime_type,
-                    processed_content_s3_key=processed_content_s3_key
+                    processed_content_s3_key=processed_content_s3_key,
+                    filestore_character_count=filestore_character_count,
+                    filestore_word_count=filestore_word_count,
+                    filestore_token_count=filestore_token_count
                 )
 
                 if not success:

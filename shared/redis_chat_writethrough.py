@@ -187,15 +187,22 @@ class ChatWriteThroughService:
                         else:
                             created_at = created_at_str
 
+                        # Compute character_count and word_count from message content
+                        msg_content = msg.get("content", "")
+                        char_count = len(msg_content)
+                        word_count = len(msg_content.split()) if msg_content.strip() else 0
+
                         await db.execute(
                             text("""
-                                INSERT INTO chat_messages (session_id, role, content, created_at, updated_at)
-                                VALUES (:session_id, :role, :content, :created_at, NOW())
+                                INSERT INTO chat_messages (session_id, role, content, character_count, word_count, created_at, updated_at)
+                                VALUES (:session_id, :role, :content, :character_count, :word_count, :created_at, NOW())
                             """),
                             {
                                 "session_id": db_id,
                                 "role": msg["role"],
-                                "content": msg["content"],
+                                "content": msg_content,
+                                "character_count": char_count,
+                                "word_count": word_count,
                                 "created_at": created_at
                             }
                         )

@@ -61,7 +61,10 @@ class FileUploadDAO:
         docling_images_with_ocr: int = 0,
         original_file_extension: str = None,
         original_mime_type: str = None,
-        processed_content_s3_key: str = None
+        processed_content_s3_key: str = None,
+        filestore_character_count: int = 0,
+        filestore_word_count: int = 0,
+        filestore_token_count: int = 0
     ) -> bool:
         """
         Update file record with all processing data after successful upload.
@@ -91,6 +94,9 @@ class FileUploadDAO:
                 file_extension = :original_file_extension,
                 mime_type = :original_mime_type,
                 processed_content_s3_key = :processed_content_s3_key,
+                filestore_character_count = :filestore_character_count,
+                filestore_word_count = :filestore_word_count,
+                filestore_token_count = :filestore_token_count,
                 processing_status = 'completed',
                 updated_at = NOW()
             WHERE id = :file_id
@@ -111,6 +117,9 @@ class FileUploadDAO:
             "original_file_extension": original_file_extension,
             "original_mime_type": original_mime_type,
             "processed_content_s3_key": processed_content_s3_key,
+            "filestore_character_count": filestore_character_count,
+            "filestore_word_count": filestore_word_count,
+            "filestore_token_count": filestore_token_count,
             "file_id": file_id
         }
 
