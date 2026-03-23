@@ -215,13 +215,15 @@ def _extract_first_cells_preview(table: Dict[str, Any], table_number: int) -> No
 
 
 async def _format_single_table(genai_client, table: Dict[str, Any], table_number: int,
-                                semaphore: asyncio.Semaphore, executor: ThreadPoolExecutor) -> Optional[str]:
-    """Format a single table with Gemini. Returns markdown string or None on failure."""
+                                semaphore: asyncio.Semaphore, executor: ThreadPoolExecutor) -> Optional[Dict[str, Any]]:
+    """Format a single table with Gemini. Returns dict with markdown + metrics, or None on failure."""
     table_text = json.dumps(table, indent=2, ensure_ascii=False)
     num_rows = table.get('data', {}).get('num_rows', 0)
     num_cols = table.get('data', {}).get('num_cols', 0)
-    logger.info(f"🤖 [GEMINI_TABLE_{table_number}] Formatting table: {num_rows} rows x {num_cols} cols, {len(table_text)} chars")
-    
+    input_chars = len(table_text)
+    input_words = len(table_text.split()) if table_text.strip() else 0
+    logger.info(f"🤖 [GEMINI_TABLE_{table_number}] Formatting table: {num_rows} rows x {num_cols} cols, {input_chars} chars")
+
     # Print first cell of each row for debugging
     _extract_first_cells_preview(table, table_number)
 
@@ -244,8 +246,34 @@ async def _format_single_table(genai_client, table: Dict[str, Any], table_number
             return None
 
         result = response.text.strip()
-        logger.info(f"✅ [GEMINI_TABLE_{table_number}] Formatted: {len(result)} chars")
-        return result
+        output_chars = len(result)
+        output_words = len(result.split()) if result else 0
+
+        # Extract token usage from Gemini response metadata
+        input_tokens = 0
+        output_tokens = 0
+        try:
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                um = response.usage_metadata
+                input_tokens = getattr(um, 'prompt_token_count', 0) or 0
+                output_tokens = getattr(um, 'candidates_token_count', 0) or 0
+                logger.info(f"📊 [GEMINI_TABLE_{table_number}] Tokens: input={input_tokens}, output={output_tokens}")
+        except Exception as te:
+            logger.warning(f"⚠️ [GEMINI_TABLE_{table_number}] Could not extract token usage: {te}")
+
+        logger.info(f"✅ [GEMINI_TABLE_{table_number}] Formatted: {output_chars} chars, {output_words} words")
+        return {
+            "markdown": result,
+            "table_index": table_number,
+            "table_column_count_input": num_cols,
+            "table_row_count_input": num_rows,
+            "table_character_count_input": input_chars,
+            "table_word_count_input": input_words,
+            "table_word_count_output": output_words,
+            "table_character_count_output": output_chars,
+            "table_input_token_count": input_tokens,
+            "table_output_token_count": output_tokens,
+        }
 
     except Exception as e:
         logger.error(f"❌ [GEMINI_TABLE_{table_number}] Failed: {e}")
@@ -294,11 +322,13 @@ async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, A
 
         # Collect results in order, filtering out failures
         all_markdown = []
+        tables_metadata = []
         success_count = 0
         fail_count = 0
         for idx, result in enumerate(results):
             if result:
-                all_markdown.append(result)
+                all_markdown.append(result["markdown"])
+                tables_metadata.append({k: v for k, v in result.items() if k != "markdown"})
                 success_count += 1
             else:
                 fail_count += 1
@@ -307,7 +337,7 @@ async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, A
 
         if not all_markdown:
             logger.error("❌ [GEMINI_TABLES] All tables failed to format")
-            return {"tables_markdown": "", "error": "All tables failed"}
+            return {"tables_markdown": "", "tables_metadata": [], "error": "All tables failed"}
 
         # Combine all formatted tables (order preserved from asyncio.gather)
         combined_markdown = "\n\n".join(all_markdown)
@@ -318,6 +348,7 @@ async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, A
         logger.info("=" * 80)
         return {
             "tables_markdown": combined_markdown,
+            "tables_metadata": tables_metadata,
             "format": "markdown_kv"
         }
 
@@ -385,7 +416,7 @@ def merge_content_with_formatted_tables(
     return merged
 
 
-async def process_docling_content(json_content: str) -> str:
+async def process_docling_content(json_content: str) -> tuple:
     """
     Unified function for processing docling JSON content.
     Both file worker and web worker use this to ensure identical processing.
@@ -400,7 +431,7 @@ async def process_docling_content(json_content: str) -> str:
         json_content: Raw JSON string from docling conversion
 
     Returns:
-        Final markdown content with merged text and formatted tables
+        Tuple of (merged_content: str, tables_metadata: list[dict])
     """
     logger.info("=" * 80)
     logger.info("[DOCLING_PROCESS] === UNIFIED DOCLING PROCESSING ===")
@@ -464,7 +495,8 @@ async def process_docling_content(json_content: str) -> str:
     # 3. Format tables with Gemini
     logger.info("[DOCLING_PROCESS] Step 3: Formatting tables with Gemini...")
     formatted_tables = await format_tables_with_gemini(tables)
-    logger.info(f"[DOCLING_PROCESS] Tables formatting complete")
+    tables_metadata = formatted_tables.get("tables_metadata", [])
+    logger.info(f"[DOCLING_PROCESS] Tables formatting complete ({len(tables_metadata)} table metadata records)")
 
     # 4. Merge content
     logger.info("[DOCLING_PROCESS] Step 4: Merging text and formatted tables...")
@@ -475,4 +507,4 @@ async def process_docling_content(json_content: str) -> str:
     logger.info(f"[DOCLING_PROCESS] === PROCESSING COMPLETE ===")
     logger.info("=" * 80)
 
-    return merged_content
+    return merged_content, tables_metadata

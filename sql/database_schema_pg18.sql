@@ -263,6 +263,12 @@ CREATE TABLE IF NOT EXISTS public.file_uploads (
 	filestore_character_count int4 DEFAULT 0 NULL,
 	filestore_word_count int4 DEFAULT 0 NULL,
 	filestore_token_count int4 DEFAULT 0 NULL,
+	total_tables_count int4 DEFAULT 0 NULL,
+	total_table_rows_input int4 DEFAULT 0 NULL,
+	total_table_chars_input int4 DEFAULT 0 NULL,
+	total_table_chars_output int4 DEFAULT 0 NULL,
+	total_table_input_tokens int4 DEFAULT 0 NULL,
+	total_table_output_tokens int4 DEFAULT 0 NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	is_processing boolean GENERATED ALWAYS AS (processing_status IN ('pending', 'processing')) VIRTUAL,
@@ -312,6 +318,12 @@ CREATE TABLE IF NOT EXISTS public.scraped_websites (
 	filestore_character_count int4 DEFAULT 0 NULL,
 	filestore_word_count int4 DEFAULT 0 NULL,
 	filestore_token_count int4 DEFAULT 0 NULL,
+	total_tables_count int4 DEFAULT 0 NULL,
+	total_table_rows_input int4 DEFAULT 0 NULL,
+	total_table_chars_input int4 DEFAULT 0 NULL,
+	total_table_chars_output int4 DEFAULT 0 NULL,
+	total_table_input_tokens int4 DEFAULT 0 NULL,
+	total_table_output_tokens int4 DEFAULT 0 NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	is_root_page boolean GENERATED ALWAYS AS (parent_id IS NULL) VIRTUAL,
@@ -337,6 +349,33 @@ COMMENT ON TABLE public.scraped_websites IS 'Scraped website content for knowled
 ALTER TABLE public.scraped_websites OWNER TO postgres;
 GRANT ALL ON TABLE public.scraped_websites TO postgres;
 GRANT ALL ON TABLE public.scraped_websites TO pg_database_owner;
+
+-- Per-table metadata from Gemini table formatting
+CREATE TABLE IF NOT EXISTS public.tables_metadata (
+	id uuid DEFAULT uuidv7() NOT NULL,
+	file_upload_id uuid NULL,
+	scraped_website_id uuid NULL,
+	table_index int4 DEFAULT 0,
+	table_column_count_input int4 DEFAULT 0,
+	table_row_count_input int4 DEFAULT 0,
+	table_character_count_input int4 DEFAULT 0,
+	table_word_count_input int4 DEFAULT 0,
+	table_word_count_output int4 DEFAULT 0,
+	table_character_count_output int4 DEFAULT 0,
+	table_input_token_count int4 DEFAULT 0,
+	table_output_token_count int4 DEFAULT 0,
+	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+	CONSTRAINT tables_metadata_pkey PRIMARY KEY (id),
+	CONSTRAINT tables_metadata_file_upload_id_fkey FOREIGN KEY (file_upload_id) REFERENCES public.file_uploads(id) ON DELETE CASCADE,
+	CONSTRAINT tables_metadata_scraped_website_id_fkey FOREIGN KEY (scraped_website_id) REFERENCES public.scraped_websites(id) ON DELETE CASCADE,
+	CONSTRAINT tables_metadata_has_parent CHECK (file_upload_id IS NOT NULL OR scraped_website_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_tables_metadata_file_upload_id ON public.tables_metadata USING btree (file_upload_id);
+CREATE INDEX IF NOT EXISTS idx_tables_metadata_scraped_website_id ON public.tables_metadata USING btree (scraped_website_id);
+COMMENT ON TABLE public.tables_metadata IS 'Per-table metrics from Gemini table formatting during file/web processing';
+ALTER TABLE public.tables_metadata OWNER TO postgres;
+GRANT ALL ON TABLE public.tables_metadata TO postgres;
+GRANT ALL ON TABLE public.tables_metadata TO pg_database_owner;
 
 -- ============================================================================
 -- Configuration & Settings

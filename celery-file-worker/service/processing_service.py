@@ -481,7 +481,7 @@ async def process_file_content(
                     from shared.gemini_table_formatter import process_docling_content
 
                     logger.info(f"🔄 [DOCLING_PROCESS] Using unified docling processing pipeline...")
-                    content_for_upload = await process_docling_content(json_content)
+                    content_for_upload, tables_metadata_list = await process_docling_content(json_content)
 
                     # Log the final merged content being sent to Gemini
                     logger.info(f"📤 [DOCLING_TO_GEMINI] Final merged content for Gemini FileStore:")
@@ -793,6 +793,14 @@ async def process_file_content(
                     raise Exception("Database update failed - file orphaned in Gemini")
 
                 logger.info(f"✅ [DB_UPDATE] Updated file record with all processing data, File ID: {file_id}")
+
+                # Save per-table metadata and update aggregates
+                if tables_metadata_list:
+                    try:
+                        from shared.tables_metadata_dao import save_tables_metadata
+                        await save_tables_metadata(tables_metadata_list, file_upload_id=file_id)
+                    except Exception as tm_err:
+                        logger.warning(f"⚠️ [TABLES_META] Non-blocking error saving table metadata: {tm_err}")
 
                 # STEP 8: S3 CLEANUP PHASE - Delete ALL S3 files after successful Gemini upload
                 # After uploading to Gemini FileSearch, we no longer need S3 files:

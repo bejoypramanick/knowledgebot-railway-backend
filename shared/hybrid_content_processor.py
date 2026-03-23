@@ -11,7 +11,7 @@ import logging
 from shared.otel_logger import get_otel_logger
 from shared.otel_logger import get_otel_logger
 import hashlib
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Dict, Any
 
 logger = get_otel_logger("hybrid_content_processor", "shared")
 
@@ -19,7 +19,7 @@ logger = get_otel_logger("hybrid_content_processor", "shared")
 async def process_html_hybrid(
     html_content: str,
     docling_json: str
-) -> str:
+) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Process HTML using hybrid approach:
     1. Extract tables ONLY from docling (no text items)
@@ -33,7 +33,8 @@ async def process_html_hybrid(
         docling_json: Docling JSON output (tables only)
 
     Returns:
-        Final markdown with text content + formatted tables
+        Tuple of (final_markdown, tables_metadata) where tables_metadata is a list of
+        per-table metric dicts from Gemini formatting
     """
     logger.info("=" * 80)
     logger.info("[HYBRID] === HYBRID HTML PROCESSING ===")
@@ -52,11 +53,13 @@ async def process_html_hybrid(
     logger.info(f"[HYBRID] ✅ Docling found {len(tables)} tables")
 
     # Step 2: Format tables with Gemini
+    tables_metadata = []
     if tables:
         logger.info(f"[HYBRID] Step 2: Formatting {len(tables)} tables with Gemini...")
         from shared.gemini_table_formatter import format_tables_with_gemini
         formatted_tables = await format_tables_with_gemini(tables)
-        logger.info(f"[HYBRID] ✅ Tables formatted by Gemini")
+        tables_metadata = formatted_tables.get("tables_metadata", [])
+        logger.info(f"[HYBRID] ✅ Tables formatted by Gemini ({len(tables_metadata)} metadata records)")
     else:
         logger.info("[HYBRID] No tables to format")
         formatted_tables = {"tables_markdown": ""}
@@ -84,7 +87,7 @@ async def process_html_hybrid(
     logger.info(f"[HYBRID]   ✓ NO duplication (trafilatura excluded tables)")
     logger.info("=" * 80)
 
-    return final_content
+    return final_content, tables_metadata
 
 
 def extract_text_with_trafilatura(html_content: str) -> Optional[str]:

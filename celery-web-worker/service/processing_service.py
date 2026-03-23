@@ -240,7 +240,7 @@ class ProcessingService:
                 # Convert HTML to markdown via docling
                 # HTML is pre-cleaned by crawl4ai (menus, navbars, ads removed)
                 try:
-                    markdown_content, processed_content_s3_key = await self._preparePageAsMarkdown(
+                    markdown_content, processed_content_s3_key, tables_metadata_list = await self._preparePageAsMarkdown(
                         page_data.page_html, page_data.page_url, remove_ads=True
                     )
                 except Exception as docling_error:
@@ -288,7 +288,7 @@ class ProcessingService:
                             logger.warning(f"   ⚠️ [S3_CLEANUP] Error deleting processed markdown: {cleanup_err}")
 
                 # Record to database
-                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config, processed_content_s3_key)
+                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config, processed_content_s3_key, tables_metadata_list)
 
                 # Metrics
                 metrics = calculate_metrics(markdown_content)
@@ -602,14 +602,14 @@ class ProcessingService:
             return False
         return True
 
-    async def _preparePageAsMarkdown(self, html_content: str, page_url: str, remove_ads: bool = True) -> Tuple[str, Optional[str]]:
+    async def _preparePageAsMarkdown(self, html_content: str, page_url: str, remove_ads: bool = True) -> Tuple[str, Optional[str], list]:
         """
         Process HTML with docling queue (same as file worker).
         HTML is pre-cleaned by crawl4ai to remove menus, navbars, ads.
         Extracts: text + tables, with text-based equation reconstruction.
 
         Returns:
-            Tuple of (markdown_content, processed_content_s3_key)
+            Tuple of (markdown_content, processed_content_s3_key, tables_metadata)
         """
         import hashlib
 
@@ -708,7 +708,7 @@ class ProcessingService:
             # Use hybrid processing: trafilatura for text + docling for tables
             # This ensures clean article text is extracted while preserving table intelligence
             logger.info(f"🔄 [HYBRID_PROCESS] Using hybrid processing (trafilatura + docling)...")
-            markdown_content = await process_html_hybrid(html_content, json_content)
+            markdown_content, tables_metadata_list = await process_html_hybrid(html_content, json_content)
 
             # 7. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"
@@ -728,7 +728,7 @@ class ProcessingService:
             except Exception as cleanup_err:
                 logger.warning(f"⚠️ [CLEANUP] Failed to delete temp HTML: {cleanup_err}")
 
-            return markdown_content, processed_content_s3_key
+            return markdown_content, processed_content_s3_key, tables_metadata_list
 
         except Exception as docling_err:
             logger.error(f"❌ [DOCLING_ERROR] Docling processing failed: {docling_err}")
@@ -1055,7 +1055,8 @@ class ProcessingService:
             upload_result: UploadResult,
             job_context: JobContext,
             crawl_config: CrawlConfig,
-            processed_content_s3_key: str = None
+            processed_content_s3_key: str = None,
+            tables_metadata_list: list = None
         ) -> Optional[str]:
             """Record single page in database"""
             metrics = calculate_metrics(page_data.markdown)
@@ -1100,6 +1101,14 @@ class ProcessingService:
                     filestore_token_count=filestore_token_count
                 )
 
+                # Save tables metadata (non-blocking)
+                if tables_metadata_list:
+                    try:
+                        from shared.tables_metadata_dao import save_tables_metadata
+                        await save_tables_metadata(tables_metadata_list, scraped_website_id=job_context.website_id)
+                    except Exception as tm_err:
+                        logger.warning(f"⚠️ [TABLES_META] Non-blocking error saving table metadata: {tm_err}")
+
                 # Cache citation URL mappings in Redis for fast lookup during chat
                 try:
                     from shared.redis_citation_cache import cache_single_url
@@ -1133,6 +1142,14 @@ class ProcessingService:
                     filestore_token_count=filestore_token_count
                 )
 
+                # Save tables metadata (non-blocking)
+                if tables_metadata_list:
+                    try:
+                        from shared.tables_metadata_dao import save_tables_metadata
+                        await save_tables_metadata(tables_metadata_list, scraped_website_id=job_context.website_id)
+                    except Exception as tm_err:
+                        logger.warning(f"⚠️ [TABLES_META] Non-blocking error saving table metadata: {tm_err}")
+
                 # Cache citation URL mappings in Redis for fast lookup during chat
                 try:
                     from shared.redis_citation_cache import cache_single_url
@@ -1163,6 +1180,14 @@ class ProcessingService:
                 filestore_word_count=filestore_word_count,
                 filestore_token_count=filestore_token_count
             )
+
+            # Save tables metadata for child page (non-blocking)
+            if tables_metadata_list and child_page_id:
+                try:
+                    from shared.tables_metadata_dao import save_tables_metadata
+                    await save_tables_metadata(tables_metadata_list, scraped_website_id=child_page_id)
+                except Exception as tm_err:
+                    logger.warning(f"⚠️ [TABLES_META] Non-blocking error saving table metadata for child page: {tm_err}")
 
             # Cache citation URL mappings in Redis for fast lookup during chat
             try:
