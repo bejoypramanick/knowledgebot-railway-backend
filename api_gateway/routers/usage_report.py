@@ -152,10 +152,15 @@ def _build_daily_chart_data(daily_msgs):
     return days_map
 
 
-@router.get("/usage", response_class=HTMLResponse)
-async def usage_report(request: Request, days: int = Query(default=30, ge=1, le=365)):
-    """Generate HTML usage report with charts. Protected by session middleware."""
+@router.get("/usage")
+async def usage_report(request: Request, days: int = Query(default=30, ge=1, le=365), format: str = Query(default="html")):
+    """Single endpoint for usage report. format=html (default) or format=csv."""
     data = await _fetch_report_data(days)
+
+    if format == "csv":
+        return _generate_csv(data, days)
+
+    # HTML report
     s = data["summary"]
     daily = _build_daily_chart_data(data["daily_msgs"])
 
@@ -304,7 +309,7 @@ async def usage_report(request: Request, days: int = Query(default=30, ge=1, le=
     <option value="180" {"selected" if days==180 else ""}>Last 180 days</option>
     <option value="365" {"selected" if days==365 else ""}>Last 365 days</option>
   </select>
-  <a href="/api/v1/gateway/reports/usage/csv?days={days}">Download CSV</a>
+  <a href="/api/v1/gateway/reports/usage?days={days}&format=csv">Download CSV</a>
   <button onclick="downloadPDF()">Download PDF</button>
   <button onclick="window.print()">Print</button>
 </div>
@@ -512,15 +517,11 @@ function downloadPDF() {{
     return HTMLResponse(content=html)
 
 
-@router.get("/usage/csv")
-async def usage_report_csv(request: Request, days: int = Query(default=30, ge=1, le=365)):
-    """Download usage data as CSV. Protected by session middleware."""
-    data = await _fetch_report_data(days)
-
+def _generate_csv(data: dict, days: int) -> StreamingResponse:
+    """Generate CSV response from report data."""
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Sheet 1: Sessions
     writer.writerow(["=== CHAT SESSIONS ==="])
     writer.writerow(["Session ID", "Started At", "Messages", "Total Characters", "Total Words",
                       "Total Tokens", "Duration (min)", "Status", "Sentiment"])
@@ -533,7 +534,6 @@ async def usage_report_csv(request: Request, days: int = Query(default=30, ge=1,
 
     writer.writerow([])
 
-    # Sheet 2: Message breakdown by role
     writer.writerow(["=== MESSAGE BREAKDOWN BY ROLE ==="])
     writer.writerow(["Role", "Message Count", "Total Characters", "Total Words", "Total Tokens",
                       "Avg Characters", "Avg Words", "Avg Tokens"])
@@ -545,7 +545,6 @@ async def usage_report_csv(request: Request, days: int = Query(default=30, ge=1,
 
     writer.writerow([])
 
-    # Sheet 3: File Uploads
     writer.writerow(["=== FILE UPLOADS ==="])
     writer.writerow(["Filename", "Extension", "File Size", "FS Characters", "FS Words",
                       "FS Tokens", "Status", "Docling", "Created"])
@@ -558,7 +557,6 @@ async def usage_report_csv(request: Request, days: int = Query(default=30, ge=1,
 
     writer.writerow([])
 
-    # Sheet 4: Scraped Websites
     writer.writerow(["=== SCRAPED WEBSITES ==="])
     writer.writerow(["URL", "Title", "Pages Scraped", "FS Characters", "FS Words",
                       "FS Tokens", "Status", "Depth", "Is Child", "Created"])
