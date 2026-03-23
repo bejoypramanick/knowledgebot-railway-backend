@@ -219,7 +219,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     <dl>
       <dt>System Prompt</dt><dd>The persona instructions + RAG enforcement rules sent at the start of every turn. Chars/words/tokens counted separately via count_tokens API</dd>
       <dt>History</dt><dd>All prior user + bot messages in the conversation, serialized as text. Grows with each turn. Chars/words/tokens counted separately</dd>
-      <dt>Tool Defs</dt><dd>Definitions of tools the agent can call (e.g. FileSearchTool). Relatively static. Chars/words/tokens counted separately</dd>
+      <dt>Tools + Multi-turn</dt><dd>Derived as: Total Prompt − System Prompt − History − User Msg. Includes the full Gemini tool schema, tool call/return context in multi-turn runs, and repeated prompt overhead when tools are invoked</dd>
       <dt>User Msg</dt><dd>Just the current user message text. Chars/words/tokens counted separately. Same as Msg Tokens but stored in dedicated columns</dd>
       <dt>Bot Response</dt><dd>Just the bot's generated response text. Chars/words/tokens stored on the assistant message row</dd>
     </dl>
@@ -568,11 +568,10 @@ function toggleSession(rowEl, sessionId) {
             <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.history_text)||'<i style="color:var(--muted)">No history (first message)</i>'}</div></td>
           </tr>
           <tr>
-            <td class="bd-label">Tool Definitions</td>
+            <td class="bd-label">Tools + Multi-turn</td>
             <td class="bd-num">${fmt(m.tool_def_token_count)}</td>
-            <td class="bd-num">${fmt(m.tool_def_word_count)}</td>
-            <td class="bd-num">${fmt(m.tool_def_char_count)}</td>
-            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.tool_def_text)||'-'}</div></td>
+            <td class="bd-num" colspan="2" style="text-align:left;font-weight:400;font-size:10px;color:var(--muted)">Derived: Total Prompt − Sys Prompt − History − User Msg</td>
+            <td class="bd-text" style="font-size:10px;color:var(--muted)">Includes tool schema, tool call/return context, and repeated prompt across turns</td>
           </tr>
           <tr>
             <td class="bd-label">User Message</td>
@@ -584,7 +583,7 @@ function toggleSession(rowEl, sessionId) {
           <tr style="background:rgba(79,70,229,.06);font-weight:600">
             <td class="bd-label">Total (Prompt)</td>
             <td class="bd-num">${fmt(m.prompt_token_count)}</td>
-            <td colspan="3" style="font-size:11px;color:var(--muted)">Billable input — includes all model turns (see Agent Run Steps below)</td>
+            <td colspan="3" style="font-size:11px;color:var(--muted)">= Sys Prompt + History + Tools/Multi-turn + User Msg (billable input from Gemini API)</td>
           </tr>
         ` : `
           <tr>

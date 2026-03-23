@@ -1442,8 +1442,9 @@ class StreamingService:
                         part_content = getattr(part, 'content', '')
                         if part_content and not isinstance(part, SystemPromptPart):
                             history_text += str(part_content) + "\n"
-                # Tool definitions (FileSearchTool is the only builtin tool)
-                tool_def_text = "FileSearchTool: Search through uploaded knowledge base files to find relevant information for answering user queries."
+                # Tool definitions text — we can't extract the actual schema Pydantic AI sends to Gemini,
+                # so token count is derived as: input_tokens - sys_prompt - history - user_msg
+                tool_def_text = "(Actual Gemini tool schema — tokens derived from input_tokens remainder)"
 
                 await self._track_token_usage(
                     session_id, user_email, full_response, tool_call_count,
@@ -1635,7 +1636,7 @@ class StreamingService:
             from ..core.ai import get_genai_client
             genai_client = get_genai_client()
             if genai_client:
-                executor = ThreadPoolExecutor(max_workers=5)
+                executor = ThreadPoolExecutor(max_workers=4)
 
                 def count_user():
                     return genai_client.models.count_tokens(model=token_model, contents=user_message)
@@ -1653,25 +1654,26 @@ class StreamingService:
                         return None
                     return genai_client.models.count_tokens(model=token_model, contents=history_text)
 
-                def count_tool_defs():
-                    if not tool_def_text.strip():
-                        return None
-                    return genai_client.models.count_tokens(model=token_model, contents=tool_def_text)
-
                 results = await asyncio.gather(
                     loop.run_in_executor(executor, count_user),
                     loop.run_in_executor(executor, count_bot),
                     loop.run_in_executor(executor, count_system_prompt),
                     loop.run_in_executor(executor, count_history),
-                    loop.run_in_executor(executor, count_tool_defs)
                 )
                 user_message_tokens = results[0].total_tokens if results[0] else 0
                 bot_message_tokens = results[1].total_tokens if results[1] else 0
                 sp_tokens = results[2].total_tokens if results[2] else 0
                 hist_tokens = results[3].total_tokens if results[3] else 0
-                td_tokens = results[4].total_tokens if results[4] else 0
+
+                # Derive tool definition tokens from the remainder:
+                # input_tokens (from Gemini API) = sys_prompt + history + tool_defs + user_msg
+                # So: tool_defs = input_tokens - sys_prompt - history - user_msg
+                # Note: input_tokens is aggregate across ALL turns if tools were called,
+                # so this includes tool schema sent in every turn + tool return context.
+                known_tokens = sp_tokens + hist_tokens + user_message_tokens
+                td_tokens = max(0, input_tokens - known_tokens)
                 logger.info(f"📊 [MSG_TOKENS] Message token counts: user={user_message_tokens}, bot={bot_message_tokens}")
-                logger.info(f"📊 [COMPONENT_TOKENS] system_prompt={sp_tokens}, history={hist_tokens}, tool_defs={td_tokens}")
+                logger.info(f"📊 [COMPONENT_TOKENS] system_prompt={sp_tokens}, history={hist_tokens}, tool_defs={td_tokens} (derived: {input_tokens} - {known_tokens})")
         except Exception as tc_err:
             logger.warning(f"⚠️ [MSG_TOKENS] Failed to count message tokens: {tc_err}")
 
