@@ -62,7 +62,9 @@ def table_to_kv_markdown(
             clean_cell = str(cell).replace("\n", " ").strip()
             kv_pairs.append(f"{clean_header}: {clean_cell}")
         
-        row_line = f"**Row {i+1}**: {', '.join(kv_pairs)}"
+        # Prepend table index and page info to every row for RAG retrieval stability
+        row_prefix = f"**Table {table_index}{page_info} Row {i+1}**"
+        row_line = f"{row_prefix}: {', '.join(kv_pairs)}"
         lines.append(row_line)
     
     return "\n".join(lines)
