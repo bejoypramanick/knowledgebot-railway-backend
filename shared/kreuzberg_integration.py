@@ -127,16 +127,16 @@ async def process_with_kreuzberg(
         # 2. Prepare Kreuzberg API Request
         logger.info(f"[KREUZBERG] Sending extraction request into {endpoint}...")
         
-        # We use 'files' (plural) as per previous working commits
-        files_payload = [
-            ('files', (original_filename, file_bytes, mime_type))
-        ]
-        
-        data = {
-            'output_format': 'json'
-        }
-
         async with httpx.AsyncClient(timeout=KREUZBERG_API_TIMEOUT) as client:
+            # We use 'files' (plural) as per previous working commits
+            files_payload = [
+                ('files', (original_filename, file_bytes, mime_type))
+            ]
+            
+            data = {
+                'output_format': 'markdown'
+            }
+            
             response = await client.post(endpoint, files=files_payload, data=data)
             
             if response.status_code != 200:
