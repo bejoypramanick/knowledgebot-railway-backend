@@ -12,6 +12,7 @@ from shared.otel_logger import get_otel_logger
 from knowledgebase_ingestion.dao.webcrawl_dao import WebCrawlDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import web_celery
+from shared.redis_ui_cache import invalidate_kb_caches
 
 logger = get_otel_logger("webcrawl_service", "knowledgebase-ingestion")
 
@@ -78,7 +79,10 @@ async def update_website_status(website_id: str, status: str, error_message: str
     """Update website processing status."""
     try:
         dao = get_webcrawl_dao()
-        return await dao.update_website_status(website_id, status, error_message)
+        res = await dao.update_website_status(website_id, status, error_message)
+        if res:
+            await invalidate_kb_caches()
+        return res
     except Exception as e:
         logger.error(f"❌ Error updating website status: {e}")
         return False
@@ -181,6 +185,9 @@ async def queue_website_for_scraping(
                 "error": "Failed to create website record"
             }
         logger.info(f"✅ [DB_CREATE_SUCCESS] Website record created with ID: {website_id}")
+        
+        # Invalidate cache so the pending record shows up in UI
+        await invalidate_kb_caches()
 
         # Dispatch to Celery worker with the real website_id — Celery assigns the task ID
         logger.info("=" * 80)

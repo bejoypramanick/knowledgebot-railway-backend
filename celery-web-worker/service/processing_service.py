@@ -10,11 +10,13 @@ import tempfile
 from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
 import logging
+import hashlib
 from shared.otel_logger import get_otel_logger
 from urllib.parse import urljoin, urlparse
 from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
-from shared.kreuzberg_integration import process_with_kreuzberg
+from shared.kreuzberg_integration import process_with_kreuzberg, get_kv_table_markdown, table_to_kv_markdown
+from shared.html_cleaner import clean_html_with_trafilatura
 from shared.s3_file_storage import s3_file_storage
 
 from models.value_objects import (
@@ -522,7 +524,7 @@ class ProcessingService:
 
                 async with AsyncWebCrawler() as crawler:
                     # Get page as-is without any removal
-                    # Trafilatura will extract text content from full page
+                    # Extract text content from full page using Kreuzberg
                     logger.info(f"🔍 [CRAWL4AI] Fetching {page_url}...")
                     result = await crawler.arun(
                         url=page_url,
@@ -597,27 +599,25 @@ class ProcessingService:
         HTML is pre-cleaned by crawl4ai to remove menus, navbars, ads.
         Extracts: text + tables, with text-based equation reconstruction.
 
-        Returns:
-            Tuple of (markdown_content, processed_content_s3_key, tables_metadata)
         """
-        import hashlib
-
         logger.info(f"📄 [KREUZBERG_WEB] Processing page with Kreuzberg: {page_url}")
         logger.info(f"📄 [KREUZBERG_WEB] HTML size: {len(html_content)} bytes")
 
         # Create URL hash for file naming
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
 
-        # Calculate hash of HTML content
-        html_hash = hashlib.md5(html_content.encode('utf-8')).hexdigest()[:8]
-        logger.info(f"📄 [HTML_HASH] Input HTML hash: {html_hash}")
+        # 0. Clean HTML using Trafilatura (Noise Removal: menus, ads, headers, footers)
+        logger.info(f"✨ [HTML_CLEANING] Cleaning HTML for: {page_url}")
+        cleaned_html = clean_html_with_trafilatura(html_content, url=page_url)
+        
+        # Log cleaning results
+        html_hash = hashlib.md5(cleaned_html.encode('utf-8')).hexdigest()[:8]
+        logger.info(f"📄 [HTML_HASH] Cleaned HTML hash: {html_hash} (Was: {hashlib.md5(html_content.encode('utf-8')).hexdigest()[:8]})")
 
-        # 1. Upload cleaned HTML to S3 temporarily (same input that trafilatura will receive)
+        # 1. Upload cleaned HTML to S3 temporarily as input for Kreuzberg
         html_filename = f"page_{url_hash}.html"
-        logger.info(f"📤 [S3_HTML_UPLOAD] Uploading HTML to S3 ({len(html_content)} bytes)...")
-
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
-            file_data=html_content.encode('utf-8'),
+            file_data=cleaned_html.encode('utf-8'),
             original_filename=html_filename,
             file_type="web-worker-temp"  # Temporary storage
         )
@@ -699,7 +699,7 @@ class ProcessingService:
             except:
                 pass
 
-            # Re-raise error - no fallback to trafilatura
+            # Re-raise error
             raise Exception(f"Kreuzberg processing failed for {page_url}: {kreuzberg_err}")
 
     async def _extractDocumentsFromPage(

@@ -251,7 +251,7 @@ class WebCrawlDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def get_hierarchical_websites(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
+    async def get_hierarchical_websites(self, include_inactive: bool = False, user_role_id: str = None) -> List[Dict[str, Any]]:
         """
         Get all websites with hierarchical structure (parent-child relationships).
         Returns only root-level websites (parent_id IS NULL) with their children recursively populated.
@@ -259,11 +259,18 @@ class WebCrawlDAO:
         Args:
             include_inactive: If False (default), returns pending, processing, queued, and completed items.
                             If True, returns items that are NOT pending, processing, queued, and NOT completed.
+            user_role_id: Optional user role ID to filter by.
         """
-        logger.info("🌳 [TREE_START] get_hierarchical_websites() called")
+        logger.info(f"🌳 [TREE_START] get_hierarchical_websites(user_role_id={user_role_id}) called")
 
         # Build WHERE clause based on include_inactive flag
         where_clause = "WHERE is_root_page = true"
+        params = {}
+
+        if user_role_id:
+            where_clause += " AND user_role_id = :user_role_id"
+            params["user_role_id"] = user_role_id
+
         if not include_inactive:
             # Active: pending, processing, queued, and completed
             where_clause += " AND processing_status IN ('pending', 'processing', 'queued', 'completed')"
@@ -298,7 +305,7 @@ class WebCrawlDAO:
             logger.log_db_operation(query)
 
             async with get_db_session() as session:
-                root_websites_result = await session.execute(text(query))
+                root_websites_result = await session.execute(text(query), params)
                 root_websites = root_websites_result.fetchall()
                 logger.info(f"✅ [TREE_RESULTS] Found {len(root_websites)} root websites")
                 logger.log_db_query(query, result=root_websites)
@@ -311,7 +318,7 @@ class WebCrawlDAO:
                     website_dict = self._format_website_record(root)
                     logger.info(f"📝 [TREE_FORMAT] Formatted root website: {website_dict.get('id')} -> {website_dict.get('url')}")
 
-                    children = await self._get_website_children(session, root.id, include_inactive=include_inactive)
+                    children = await self._get_website_children(session, root.id, include_inactive=include_inactive, user_role_id=user_role_id)
                     logger.info(f"👶 [TREE_CHILDREN] Fetched {len(children)} children for root ID={root.id}")
 
                     website_dict['children'] = children
@@ -322,7 +329,11 @@ class WebCrawlDAO:
                 # For Not Active tab, also fetch orphan/deleted child pages
                 if include_inactive:
                     logger.info("🔍 [ORPHAN_CHECK] Checking for orphan/deleted child pages")
-                    orphan_query = """
+                    orphan_where = "WHERE parent_id IS NOT NULL AND processing_status NOT IN ('pending', 'processing', 'queued', 'completed')"
+                    if user_role_id:
+                        orphan_where += " AND user_role_id = :user_role_id"
+
+                    orphan_query = f"""
                         SELECT
                             id,
                             original_url,
@@ -341,11 +352,10 @@ class WebCrawlDAO:
                             char_count,
                             processed_content_s3_key
                         FROM scraped_websites
-                        WHERE parent_id IS NOT NULL
-                        AND processing_status NOT IN ('pending', 'processing', 'queued', 'completed')
+                        {orphan_where}
                         ORDER BY id DESC
                     """
-                    orphan_pages_result = await session.execute(text(orphan_query))
+                    orphan_pages_result = await session.execute(text(orphan_query), params)
                     orphan_pages = orphan_pages_result.fetchall()
                     logger.info(f"✅ [ORPHAN_RESULTS] Found {len(orphan_pages)} orphan/deleted child pages")
 
@@ -365,16 +375,23 @@ class WebCrawlDAO:
             logger.log_db_query(query, error=e)
             return []
 
-    async def _get_website_children(self, session, parent_id: str, level: int = 0, include_inactive: bool = False) -> List[Dict[str, Any]]:
+    async def _get_website_children(self, session, parent_id: str, level: int = 0, include_inactive: bool = False, user_role_id: str = None) -> List[Dict[str, Any]]:
         """
         Recursively fetch all children of a website.
 
         Args:
             include_inactive: If False (default), returns pending, processing, queued, and completed items.
                             If True, returns items that are NOT pending, processing, queued, and NOT completed.
+            user_role_id: Optional user role ID to filter by.
         """
         # Build WHERE clause based on include_inactive flag
         where_clause = "WHERE parent_id = :parent_id"
+        params = {"parent_id": parent_id}
+
+        if user_role_id:
+            where_clause += " AND user_role_id = :user_role_id"
+            params["user_role_id"] = user_role_id
+
         if not include_inactive:
             # Active: pending, processing, queued, and completed
             where_clause += " AND processing_status IN ('pending', 'processing', 'queued', 'completed')"
@@ -405,14 +422,14 @@ class WebCrawlDAO:
             ORDER BY depth ASC, id ASC
         """
         try:
-            children_result = await session.execute(text(query), {"parent_id": parent_id})
+            children_result = await session.execute(text(query), params)
             children = children_result.fetchall()
 
             # Recursively fetch children of children
             result = []
             for child in children:
                 child_dict = self._format_website_record(child)
-                grandchildren = await self._get_website_children(session, child.id, level + 1, include_inactive=include_inactive)
+                grandchildren = await self._get_website_children(session, child.id, level + 1, include_inactive=include_inactive, user_role_id=user_role_id)
                 child_dict['children'] = grandchildren
                 result.append(child_dict)
 

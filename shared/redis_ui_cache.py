@@ -137,6 +137,22 @@ async def cache_invalidate_pattern(pattern: str) -> int:
         return 0
 
 
+async def invalidate_kb_caches() -> int:
+    """
+    Invalidate all knowledge base related UI caches (active and inactive).
+    Called whenever a file or website is added, deleted, or status changes.
+    """
+    try:
+        pattern = f"{KB_FILES_KEY_PREFIX}*"
+        count = await cache_invalidate_pattern(pattern)
+        if count:
+            logger.info(f"🧹 Knowledge base UI caches invalidated ({count} keys)")
+        return count
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to invalidate KB caches: {e}")
+        return 0
+
+
 async def close_ui_cache_redis():
     """Close the Redis UI cache client on shutdown."""
     global _ui_cache_client

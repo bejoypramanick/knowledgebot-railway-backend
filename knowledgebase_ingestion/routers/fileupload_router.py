@@ -128,9 +128,9 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
         # Get hierarchical websites based on status parameter
         webcrawl_dao = WebCrawlDAO()
         if status == 'inactive':
-            websites = await webcrawl_dao.get_hierarchical_websites(include_inactive=True)
+            websites = await webcrawl_dao.get_hierarchical_websites(include_inactive=True, user_role_id=user_id)
         else:
-            websites = await webcrawl_dao.get_hierarchical_websites(include_inactive=False)
+            websites = await webcrawl_dao.get_hierarchical_websites(include_inactive=False, user_role_id=user_id)
 
         # Format files for response
         files_list = [

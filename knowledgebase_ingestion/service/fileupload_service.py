@@ -21,6 +21,7 @@ from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery, web_celery
 from shared.task_control import TaskControl
+from shared.redis_ui_cache import invalidate_kb_caches
 
 logger = get_otel_logger("fileupload_service", "knowledgebase-ingestion")
 
@@ -60,6 +61,8 @@ async def create_file_record(record_data: Dict[str, Any]) -> Optional[str]:
         if file_id:
             logger.info(f"✅ [DB_INSERT_SUCCESS] File record created with ID: {file_id}")
             logger.info(f"   Filename: {record_data.get('original_filename')}")
+            # Invalidate cache so the pending record shows up in UI
+            await invalidate_kb_caches()
             return file_id
         else:
             logger.error(f"❌ [DB_INSERT_FAILED] Failed to create file record (returned None)")
@@ -122,7 +125,10 @@ async def update_file_status(file_id: str, status: str, error_message: str = Non
     """Update file processing status."""
     try:
         dao = get_fileupload_dao()
-        return await dao.update_file_status(file_id, status, error_message)
+        res = await dao.update_file_status(file_id, status, error_message)
+        if res:
+            await invalidate_kb_caches()
+        return res
     except Exception as e:
         logger.error(f"❌ Error updating file status: {e}")
         return False

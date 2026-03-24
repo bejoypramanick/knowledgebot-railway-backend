@@ -16,6 +16,26 @@ logger = get_otel_logger("kreuzberg_integration", "shared")
 KREUZBERG_API_URL = os.environ.get("KREUZBERG_API_URL", "http://localhost:8000")
 KREUZBERG_API_TIMEOUT = float(os.environ.get("KREUZBERG_API_TIMEOUT", "300.0"))
 
+def retry_on_connection_error(max_retries: int = 3, delay: float = 1.0):
+    """Decorator to retry a function on httpx connection errors."""
+    def decorator(func):
+        import functools
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_err = None
+            for i in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError) as e:
+                    last_err = e
+                    wait = delay * (2 ** i) # Exponential backoff
+                    logger.warning(f"⚠️ [KREUZBERG_RETRY] {type(e).__name__} on attempt {i+1}/{max_retries}. Retrying in {wait}s...")
+                    await asyncio.sleep(wait)
+            logger.error(f"❌ [KREUZBERG_RETRY_FAILED] Max retries reached: {last_err}")
+            raise last_err
+        return wrapper
+    return decorator
+
 async def download_file_from_s3(presigned_url: str) -> bytes:
     """Download file from S3 using presigned URL to memory."""
     logger.info(f"[KREUZBERG] Downloading file from S3 to memory...")
@@ -69,6 +89,7 @@ def table_to_kv_markdown(
     
     return "\n".join(lines)
 
+@retry_on_connection_error(max_retries=3, delay=2.0)
 async def process_with_kreuzberg(
     presigned_url: str,
     original_filename: str,
