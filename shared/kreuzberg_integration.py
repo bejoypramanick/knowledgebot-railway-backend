@@ -26,7 +26,14 @@ def retry_on_connection_error(max_retries: int = 3, delay: float = 1.0):
             for i in range(max_retries):
                 try:
                     return await func(*args, **kwargs)
-                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ReadError) as e:
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ReadError, Exception) as e:
+                    # We catch Exception more broadly if it looks like a network error, 
+                    # but specifically target httpcore and httpx types
+                    if not any(isinstance(e, t) for t in (httpx.NetworkError, httpx.TimeoutException)):
+                        # If it's not a known httpx error, check if it's httpcore
+                        if "httpcore" not in str(type(e)):
+                            raise e
+                    
                     last_err = e
                     # Log more details about the error
                     error_detail = f"{type(e).__name__}: {str(e)}"
@@ -118,6 +125,16 @@ async def process_with_kreuzberg(
     logger.info(f"[KREUZBERG] File: {original_filename}")
     logger.info(f"[KREUZBERG] MIME Type: {mime_type}")
     logger.info(f"[KREUZBERG] API URL: {endpoint}")
+    
+    # DNS Diagnostics
+    try:
+        import socket
+        hostname = endpoint.split("//")[-1].split(":")[0].split("/")[0]
+        ip_addr = socket.gethostbyname(hostname)
+        logger.info(f"[KREUZBERG_DNS] Resolved {hostname} to {ip_addr}")
+    except Exception as dns_err:
+        logger.warning(f"⚠️ [KREUZBERG_DNS] Could not resolve hostname {hostname}: {dns_err}")
+        
     logger.info("=" * 80)
 
     try:
