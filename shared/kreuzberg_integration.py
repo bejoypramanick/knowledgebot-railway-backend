@@ -12,6 +12,7 @@ from shared.otel_logger import get_otel_logger
 logger = get_otel_logger("kreuzberg_integration", "shared")
 
 KREUZBERG_API_URL = os.environ.get("KREUZBERG_API_URL", "http://localhost:8000")
+KREUZBERG_API_TIMEOUT = float(os.environ.get("KREUZBERG_API_TIMEOUT", "300.0"))
 
 async def download_file_from_s3(presigned_url: str) -> bytes:
     """Download file from S3 using presigned URL to memory."""
@@ -68,7 +69,7 @@ async def process_with_kreuzberg(
             'output_format': 'markdown'
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=KREUZBERG_API_TIMEOUT) as client:
             response = await client.post(endpoint, files=files, data=data)
             
             if response.status_code != 200:
