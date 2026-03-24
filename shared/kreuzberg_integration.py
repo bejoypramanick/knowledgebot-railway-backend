@@ -94,7 +94,7 @@ def table_to_kv_markdown(
     
     return "\n".join(lines)
 
-@retry_on_connection_error(max_retries=3, delay=2.0)
+@retry_on_connection_error(max_retries=5, delay=2.0)
 async def process_with_kreuzberg(
     presigned_url: str,
     original_filename: str,
