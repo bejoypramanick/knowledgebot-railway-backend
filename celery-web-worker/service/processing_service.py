@@ -11,13 +11,9 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
 import logging
 from shared.otel_logger import get_otel_logger
-from shared.otel_logger import get_otel_logger
 from urllib.parse import urljoin, urlparse
-
-from shared.otel_logger import get_otel_logger
 from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
-from shared.kreuzberg_integration import process_with_kreuzberg
 from shared.kreuzberg_integration import process_with_kreuzberg
 from shared.s3_file_storage import s3_file_storage
 
