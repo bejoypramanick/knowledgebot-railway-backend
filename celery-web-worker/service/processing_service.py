@@ -18,8 +18,7 @@ from shared.otel_logger import get_otel_logger
 from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
 from shared.kreuzberg_integration import process_with_kreuzberg
-from shared.gemini_table_formatter import process_extracted_markdown
-from shared.hybrid_content_processor import process_html_hybrid
+from shared.kreuzberg_integration import process_with_kreuzberg
 from shared.s3_file_storage import s3_file_storage
 
 from models.value_objects import (
@@ -658,7 +657,9 @@ class ProcessingService:
                 presigned_url=presigned_url,
                 original_filename=html_filename,
                 mime_type="text/html",
-                worker_type="web"
+                worker_type="web",
+                source_id=website_id,
+                source_name=page_url
             )
 
             # Validate markdown_content is not empty/None
@@ -667,15 +668,11 @@ class ProcessingService:
                 logger.error(f"❌ [KREUZBERG_ERROR] Kreuzberg processing failed: {error_detail}")
                 raise Exception(f"Kreuzberg processing failed for {page_url}: {error_detail}")
 
-            # Use hybrid processing: Kreuzberg + Gemini Table Formatter
-            logger.info(f"🔄 [HYBRID_PROCESS] Using hybrid processing for {page_url} ({website_id})...")
-            markdown_content, tables_metadata_list, total_pages = await process_html_hybrid(
-                html_content, 
-                kreuzberg_markdown,
-                source_id=website_id,
-                source_name=page_url,
-                source_type="website"
-            )
+            # Content is already KV-formatted by process_with_kreuzberg
+            logger.info(f"✅ [KREUZBERG_KV] Using manual KV-formatted markdown for {page_url}")
+            markdown_content = kreuzberg_markdown
+            tables_metadata_list = [] # No longer using separate metadata list
+            total_pages = 0 # Not applicable for HTML
 
             # 7. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"
@@ -776,51 +773,67 @@ class ProcessingService:
                 logger.warning(f"⚠️ File too large: {file_url}")
                 return None
 
-            return await self._downloadAndDoclingProcess(response.content, file_url, file_link)
+            return await self._downloadAndKreuzbergProcess(response.content, file_url, file_link)
         except Exception as e:
             logger.warning(f"⚠️ Error processing {file_url}: {e}")
             return None
 
-    async def _downloadAndDoclingProcess(self, file_bytes: bytes, file_url: str, file_link: Dict) -> Optional[Dict]:
-        """Save file and process through docling"""
-        _, file_ext = os.path.splitext(urlparse(file_url).path.lower())
-        fd, temp_path = tempfile.mkstemp(suffix=file_ext)
+    async def _downloadAndKreuzbergProcess(self, file_bytes: bytes, file_url: str, file_link: Dict) -> Optional[Dict]:
+        """Upload file to S3 and process through Kreuzberg"""
+        filename = os.path.basename(urlparse(file_url).path)
+        _, file_ext = os.path.splitext(filename.lower())
+        
+        mime_types = {
+            '.pdf': 'application/pdf',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.doc': 'application/msword',
+            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            '.ppt': 'application/vnd.ms-powerpoint',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.xls': 'application/vnd.ms-excel',
+        }
+        mime_type = mime_types.get(file_ext, 'application/octet-stream')
+
+        logger.info(f"📤 [KREUZBERG_EMBEDDED] Processing embedded document: {filename}")
 
         try:
-            os.write(fd, file_bytes)
-            os.close(fd)
+            # 1. Upload to S3 temporarily
+            success, s3_key = await s3_file_storage.upload_file(
+                file_data=file_bytes,
+                original_filename=filename,
+                file_type="web-worker-temp"
+            )
+            
+            if not success:
+                logger.error(f"❌ [KREUZBERG_EMBEDDED] Failed to upload {filename} to S3")
+                return None
 
-            from shared.docling_integration import process_with_docling
+            # 2. Generate presigned URL
+            url_success, presigned_url = s3_file_storage.generate_presigned_url(s3_key)
+            if not url_success:
+                logger.error(f"❌ [KREUZBERG_EMBEDDED] Failed to generate presigned URL for {filename}")
+                await s3_file_storage.delete_file(s3_key)
+                return None
 
-            mime_types = {
-                '.pdf': 'application/pdf',
-                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                '.doc': 'application/msword',
-                '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                '.ppt': 'application/vnd.ms-powerpoint',
-                '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                '.xls': 'application/vnd.ms-excel',
-            }
-
-            filename = os.path.basename(urlparse(file_url).path)
-            mime_type = mime_types.get(file_ext, 'application/octet-stream')
-
-            markdown_content, _ = await process_with_docling(
-                file_path=temp_path, 
-                filename=filename, 
-                mime_type=mime_type, 
-                timeout_seconds=30,
-                presigned_url=None  # Web worker uses local files
+            # 3. Process with Kreuzberg
+            markdown_content, _ = await process_with_kreuzberg(
+                presigned_url=presigned_url,
+                original_filename=filename,
+                mime_type=mime_type,
+                worker_type="web"
             )
 
+            # 4. Cleanup S3
+            await s3_file_storage.delete_file(s3_key)
+
             if markdown_content:
-                logger.info(f"✅ [DOCLING] Extracted {len(markdown_content)} chars")
+                logger.info(f"✅ [KREUZBERG_EMBEDDED] Extracted {len(markdown_content)} characters")
                 return {'title': file_link['text'], 'filename': filename, 'content': markdown_content}
 
             return None
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+        except Exception as e:
+            logger.error(f"❌ [KREUZBERG_EMBEDDED] Error processing {filename}: {e}")
+            return None
 
     async def _appendDocumentsToMarkdown(self, page_markdown: str, extracted_docs: List[Dict]) -> str:
         """Append extracted documents to page markdown"""

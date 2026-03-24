@@ -6,7 +6,9 @@ import asyncio
 import time
 import httpx
 import os
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, Optional, List
+import json
+import re
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("kreuzberg_integration", "shared")
@@ -23,11 +25,55 @@ async def download_file_from_s3(presigned_url: str) -> bytes:
         logger.info(f"[KREUZBERG] Downloaded {len(response.content)} bytes from S3.")
         return response.content
 
+def table_to_kv_markdown(
+    cells: List[List[str]], 
+    table_index: int, 
+    page_number: Optional[int] = None,
+    source_name: Optional[str] = None,
+    source_id: Optional[str] = None
+) -> str:
+    """
+    Convert a 2D list of cells into a Markdown KV format.
+    Ensures each row is a single line to prevent Gemini FileSearch chunking issues.
+    """
+    if not cells or len(cells) < 1:
+        return ""
+    
+    headers = cells[0]
+    rows = cells[1:] if len(cells) > 1 else []
+    
+    page_info = f" (Page {page_number})" if page_number else ""
+    context_info = f" - {source_name}" if source_name else ""
+    id_info = f" ({source_id})" if source_id else ""
+    
+    lines = [f"### Table {table_index}{page_info}{context_info}{id_info}"]
+    
+    # Simple summary if possible
+    lines.append(f"**Summary**: Structured data table with {len(rows)} rows and {len(headers)} columns.")
+    lines.append(f"**Columns**: {', '.join(headers)}")
+    lines.append("")
+
+    for i, row in enumerate(rows):
+        kv_pairs = []
+        for j, cell in enumerate(row):
+            header = headers[j] if j < len(headers) else f"Column {j+1}"
+            # Clean cell value and header of newlines/excess whitespace
+            clean_header = str(header).replace("\n", " ").strip()
+            clean_cell = str(cell).replace("\n", " ").strip()
+            kv_pairs.append(f"{clean_header}: {clean_cell}")
+        
+        row_line = f"**Row {i+1}**: {', '.join(kv_pairs)}"
+        lines.append(row_line)
+    
+    return "\n".join(lines)
+
 async def process_with_kreuzberg(
     presigned_url: str,
     original_filename: str,
     mime_type: str,
-    worker_type: str = "file"
+    worker_type: str = "file",
+    source_id: Optional[str] = None,
+    source_name: Optional[str] = None
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """
     Process a document synchronously using Kreuzberg REST API.
@@ -66,7 +112,7 @@ async def process_with_kreuzberg(
         ]
         
         data = {
-            'output_format': 'markdown'
+            'output_format': 'json'
         }
 
         async with httpx.AsyncClient(timeout=KREUZBERG_API_TIMEOUT) as client:
@@ -81,7 +127,8 @@ async def process_with_kreuzberg(
         processing_time_ms = int((time.time() - start_time) * 1000)
         
         # 3. Parse and normalize response
-        # Kreuzberg might return a list if it processes multiple files, or an object.
+        # Kreuzberg returns an object with 'content' (markdown) and 'tables' (structured data)
+        # Based on GitHub schema: ExtractionResult { content, tables, metadata }
         if isinstance(result, list) and len(result) > 0:
             result = result[0]
             
@@ -89,14 +136,41 @@ async def process_with_kreuzberg(
         if not markdown_content and "text" in result:
             markdown_content = result.get("text", "")
             
+        tables = result.get("tables", [])
         response_metadata = result.get("metadata", {})
         
+        # 4. Process tables into KV format and replace in markdown
+        if tables:
+            logger.info(f"[KREUZBERG] Processing {len(tables)} tables into KV format...")
+            for i, table_data in enumerate(tables):
+                cells = table_data.get("cells", [])
+                original_markdown = table_data.get("markdown", "")
+                page_num = table_data.get("page_number")
+                
+                if cells:
+                    kv_markdown = table_to_kv_markdown(
+                        cells, 
+                        i + 1, 
+                        page_num, 
+                        source_name=source_name or original_filename,
+                        source_id=source_id
+                    )
+                    if original_markdown and original_markdown in markdown_content:
+                        # Add some padding or clear markers
+                        # Using replacement for exact match of the markdown representation Kreuzberg provided
+                        markdown_content = markdown_content.replace(original_markdown, f"\n\n{kv_markdown}\n\n")
+                    else:
+                        # Fallback: if we can't find the exact markdown, append at the end or log warning
+                        logger.warning(f"[KREUZBERG] Could not find exact location for table {i+1} in content.")
+                        markdown_content += f"\n\n{kv_markdown}\n\n"
+
         metadata = {
             "processing_time_ms": processing_time_ms,
             "images_extracted": 0,
             "images_with_ocr": 0,
-            "content_format": "markdown",
-            "kreuzberg_metadata": response_metadata
+            "content_format": "markdown_kv",
+            "kreuzberg_metadata": response_metadata,
+            "tables_processed": len(tables)
         }
 
         logger.info(f"✅ [KREUZBERG] Extraction successful in {processing_time_ms}ms")

@@ -423,31 +423,31 @@ async def process_file_content(
             try:
                 logger.info(f"🔍 [DEBUG] About to call process_with_kreuzberg with presigned_url: {presigned_url}")
                 markdown_content, kreuzberg_metadata = await process_with_kreuzberg(
-                    presigned_url=presigned_url,  # Use presigned URL only
+                    presigned_url=presigned_url,
                     original_filename=original_filename,
                     mime_type=detected_mime_type,
-                    worker_type="file"
+                    worker_type="file",
+                    source_id=file_id,
+                    source_name=original_filename
                 )
 
                 if markdown_content:
                     processed_by_kreuzberg = True
                     kreuzberg_processing_time_ms = kreuzberg_metadata.get('processing_time_ms', 0)
                     
-                    # Use unified markdown processing
-                    from shared.gemini_table_formatter import process_extracted_markdown
-
-                    logger.info(f"🔄 [KREUZBERG_PROCESS] Using unified markdown processing pipeline for {original_filename} ({file_id})")
-                    content_for_upload, tables_metadata_list = await process_extracted_markdown(
-                        markdown_content,
-                        source_id=file_id,
-                        source_name=original_filename,
-                        source_type="file"
-                    )
+                    # Content is already KV-formatted by process_with_kreuzberg
+                    content_for_upload = markdown_content
+                    tables_metadata_list = [] # No longer using separate metadata list for Gemini NAR
                     
                     total_pages = kreuzberg_metadata.get('kreuzberg_metadata', {}).get('page_count', 0)
 
                     # Log the final merged content being sent to Gemini
-                    logger.info(f"📤 [DOCLING_TO_GEMINI] Final merged content for Gemini FileStore:")
+                    logger.info(f"📤 [KREUZBERG_TO_GEMINI] Final KV-formatted content for Gemini FileStore:")
+                    lines = content_for_upload.split('\n')
+                    for line in lines[:10]:
+                        logger.info(f"   | {line}")
+                    if len(lines) > 10:
+                        logger.info(f"   | ... ({len(lines)-10} more lines)")
                     logger.info(f"    Content Format: Markdown with formatted tables")
                     logger.info(f"    Total Size: {len(content_for_upload)} characters")
                     logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.md")
@@ -631,14 +631,14 @@ async def process_file_content(
                     raise Exception("Gemini operation creation failed")
 
                 # Wait for the upload operation to complete
-                start_time = time.time()
+                wait_start_time = time.time()
                 max_wait_time = 300  # 5 minutes
                 document_name = None
                 final_state = "PENDING"
                 gemini_processed_at = None
 
                 while not operation.done:
-                    elapsed = time.time() - start_time
+                    elapsed = time.time() - wait_start_time
                     if elapsed > max_wait_time:
                         logger.error(f"❌ Timeout waiting for file upload to complete")
                         raise Exception("File upload timeout")
