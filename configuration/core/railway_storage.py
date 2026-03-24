@@ -12,7 +12,9 @@ class RailwayStorageService:
     
     def __init__(self):
         # Railway automatically provides these environment variables when storage is attached
-        self.bucket_name = os.getenv('RAILWAY_BUCKET_NAME') or os.getenv('RAILWAY_VOLUME_NAME', 'widget-images')
+        # Use consistent bucket name across all services to prevent 404s
+        # RAILWAY_VOLUME_NAME is service-unique, so RAILWAY_BUCKET_NAME should be set in Project Settings.
+        self.bucket_name = os.getenv('RAILWAY_BUCKET_NAME') or os.getenv('RAILWAY_VOLUME_NAME') or 'knowledgebot-storage'
         self.region = os.getenv('RAILWAY_REGION', 'us-east-1')
         self.endpoint_url = os.getenv('RAILWAY_STORAGE_URL') or os.getenv('AWS_S3_ENDPOINT_URL')
         self.access_key = os.getenv('RAILWAY_STORAGE_ACCESS_KEY') or os.getenv('AWS_ACCESS_KEY_ID')

@@ -16,15 +16,37 @@ logger = get_otel_logger("s3_file_storage", "storage")
 class S3FileStorage:
     """Handle Railway S3-compatible file operations for file and website processing"""
 
-    def __init__(self, bucket_name: str = None):
+    def __init__(self, bucket_name: Optional[str] = None):
         # Use provided bucket or fall back to environment variables
         # Use the same bucket as widget images (RAILWAY_BUCKET_NAME)
-        self.bucket_name = bucket_name or os.getenv('RAILWAY_BUCKET_NAME') or os.getenv('RAILWAY_VOLUME_NAME') or os.getenv('PROCESSING_FILES_BUCKET', 'widget-images')
+        # Use the same bucket across all services. 
+        # WARNING: RAILWAY_VOLUME_NAME is service-specific. If RAILWAY_BUCKET_NAME is not set,
+        # different services will look at different "buckets" (volumes).
+        
+        env_bucket = os.getenv('RAILWAY_BUCKET_NAME')
+        env_volume = os.getenv('RAILWAY_VOLUME_NAME')
+        default_bucket = 'knowledgebot-storage'
+        
+        # Determine sources for logging
+        if bucket_name:
+            source = "explicit argument"
+            self.bucket_name = bucket_name
+        elif env_bucket:
+            source = "RAILWAY_BUCKET_NAME env"
+            self.bucket_name = env_bucket
+        elif env_volume:
+            source = f"RAILWAY_VOLUME_NAME env (fallback: {env_volume})"
+            self.bucket_name = env_volume
+        else:
+            source = "hardcoded default"
+            self.bucket_name = default_bucket
+            
         self.region = os.getenv('RAILWAY_REGION', 'us-east-1')
         self.endpoint_url = os.getenv('RAILWAY_STORAGE_URL')
         self.access_key = os.getenv('RAILWAY_STORAGE_ACCESS_KEY')
         self.secret_key = os.getenv('RAILWAY_STORAGE_SECRET_KEY')
 
+        logger.info(f"🏗️  [S3_STORAGE] Initializing with bucket resolved from {source}: {self.bucket_name}")
         self._s3_client = None
         self._init_s3_client()
 
@@ -221,7 +243,7 @@ class S3FileStorage:
         if verify_exists:
             logger.info(f"🔍 [S3_VERIFY] Checking if object exists before generating presigned URL...")
             if not self._verify_object_exists(s3_key):
-                error_msg = f"Object not found in S3 (cannot generate presigned URL): {s3_key}"
+                error_msg = f"Object not found in S3 bucket '{self.bucket_name}': {s3_key}. Check if RAILWAY_BUCKET_NAME is set consistently across services."
                 logger.error(f"❌ {error_msg}")
                 return False, error_msg
 

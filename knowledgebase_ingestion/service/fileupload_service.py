@@ -357,26 +357,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.warning(f"⚠️ [TASK_CONTROL_ERROR] Error stopping tasks: {e}")
             # Don't add to errors - task termination is best-effort
 
-        # Step 1b: Cancel all docling RQ jobs in the queue
-        logger.info("🔧 [DOCLING_RQ_CANCEL] Cancelling all docling RQ jobs...")
-        try:
-            import os
-            from shared.docling_rq_client import DoclingRQClient
-
-            docling_redis_url = os.getenv('DOCLING_REDIS_URL')
-            if not docling_redis_url:
-                base_url = os.getenv('WEB_REDIS_URL') or os.getenv('FILE_REDIS_URL', '')
-                if base_url:
-                    docling_redis_url = base_url.rsplit('/', 1)[0] + '/2'
-
-            if docling_redis_url:
-                client = DoclingRQClient(redis_url=docling_redis_url, queue_name="convert", worker_type="file")
-                docling_cancelled = client.cancel_all_jobs()
-                logger.info(f"   ✅ Cancelled {docling_cancelled} docling RQ jobs")
-            else:
-                logger.warning("   ⚠️  No Redis URL for docling RQ cleanup")
-        except Exception as e:
-            logger.warning(f"⚠️ [DOCLING_RQ_ERROR] Error cancelling docling jobs: {e}")
+        # Step 1b: Removed docling RQ jobs cancellation as Kreuzberg doesn't use RQ
 
         # Step 2: Delete ALL FileSearch stores matching our display name
         logger.info("🤖 [FILESEARCH_DELETE_ALL] Deleting ALL FileSearch stores with our display name...")

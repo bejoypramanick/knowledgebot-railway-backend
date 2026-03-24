@@ -27,16 +27,9 @@ class Settings(BaseSettings):
     # Gemini FileSearch Store Configuration (required from Railway env)
     gemini_file_search_store_name: Optional[str] = None  # FileSearch store display name - MUST be set in Railway env
 
-    # Docling Service Configuration (plug-and-play)
-    docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
-    docling_timeout_seconds: int = 1800  # Processing timeout (30 minutes - handles queue wait time)
-    docling_fallback_to_raw: bool = True  # Fallback to raw upload if docling fails/times out
-    docling_redis_url: str = Field(..., validation_alias="DOCLING_SERVE_ENG_RQ_REDIS_URL")  # DOCLING_SERVE_ENG_RQ_REDIS_URL from Railway (required - Redis for docling-serve RQ queue)
-    docling_rq_queue_name: str = "convert"  # Redis Queue name for docling jobs (must match docling-serve worker queue)
-    docling_rq_job_timeout_minutes: int = 60  # RQ job timeout in minutes
-    docling_poll_initial_delay: int = 2  # Initial polling delay in seconds
-    docling_poll_max_interval: int = 60  # Max polling interval in seconds
-    s3_docling_prefix: str = "docling-results"  # S3 key prefix for docling outputs (from S3_DOCLING_PREFIX env var)
+    # Kreuzberg Service Configuration
+    kreuzberg_enabled: bool = Field(default=True, env="KREUZBERG_ENABLED")  # Set to False to disable kreuzberg and use raw uploads
+    kreuzberg_api_url: str = Field(default="http://localhost:8000", env="KREUZBERG_API_URL")
 
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None
@@ -49,20 +42,7 @@ class Settings(BaseSettings):
         'case_sensitive': False
     }
 
-    def get_docling_redis_url(self) -> str:
-        """
-        Get the docling-specific Redis URL (DB 2).
 
-        Returns:
-            Redis connection URL for docling queue
-        """
-        if not self.docling_redis_url:
-            raise ValueError(
-                "DOCLING_REDIS_URL environment variable not set. "
-                "Required for docling document processing via Redis Queue (DB 2)."
-            )
-
-        return self.docling_redis_url
 
 
 settings = Settings()

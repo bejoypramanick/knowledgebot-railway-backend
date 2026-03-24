@@ -11,6 +11,7 @@ Handles:
 6. Full audit trail and verification
 """
 
+import os
 import asyncio
 import json
 import logging
@@ -169,10 +170,7 @@ class ComprehensiveDeletionService:
                     )
                     deletion_report["cleanup_summary"]["celery_tasks_revoked"] = 1 if celery_revoked else 0
 
-                    # Step 2b: DOCLING RQ CLEANUP
-                    logger.info(f"🔧 [DOCLING_RQ_CANCEL] Cancelling docling RQ jobs...")
-                    docling_cancelled = await self._cancel_docling_rq_jobs()
-                    deletion_report["cleanup_summary"]["docling_rq_jobs_cancelled"] = docling_cancelled
+
 
                     # Step 3: REDIS CLEANUP
                     logger.info(f"🚩 [REDIS_CLEANUP] Cleaning Redis state...")
@@ -330,10 +328,7 @@ class ComprehensiveDeletionService:
 
                     deletion_report["cleanup_summary"]["celery_tasks_revoked"] = celery_revoked
 
-                    # Step 2b: DOCLING RQ CLEANUP
-                    logger.info(f"🔧 [DOCLING_RQ_CANCEL] Cancelling docling RQ jobs...")
-                    docling_cancelled = await self._cancel_docling_rq_jobs()
-                    deletion_report["cleanup_summary"]["docling_rq_jobs_cancelled"] = docling_cancelled
+
 
                     # Step 3: REDIS CLEANUP
                     logger.info(f"🚩 [REDIS_CLEANUP] Cleaning Redis state...")
@@ -457,29 +452,7 @@ class ComprehensiveDeletionService:
             logger.warning(f"   ⚠️  Could not clean Redis: {e}")
             return False
 
-    async def _cancel_docling_rq_jobs(self) -> int:
-        """Cancel all pending docling RQ jobs in Redis DB 2."""
-        try:
-            import os
-            from shared.docling_rq_client import DoclingRQClient
 
-            docling_redis_url = os.getenv('DOCLING_REDIS_URL')
-            if not docling_redis_url:
-                # Construct from base Redis URL
-                base_url = os.getenv('WEB_REDIS_URL') or os.getenv('FILE_REDIS_URL', '')
-                if base_url:
-                    # Replace DB number with /2 for docling
-                    docling_redis_url = base_url.rsplit('/', 1)[0] + '/2'
-                else:
-                    logger.warning("   ⚠️  No Redis URL available for docling RQ cleanup")
-                    return 0
-
-            client = DoclingRQClient(redis_url=docling_redis_url, queue_name="convert", worker_type="file")
-            cancelled = client.cancel_all_jobs()
-            return cancelled
-        except Exception as e:
-            logger.warning(f"   ⚠️  Could not cancel docling RQ jobs: {e}")
-            return 0
 
     async def _delete_from_gemini_complete(
         self,

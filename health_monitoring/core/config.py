@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     configuration_service_url: str = "http://configuration.railway.internal:8080"
     knowledgebase_ingestion_url: str = "http://knowledge-base.railway.internal:8080"
     website_crawling_url: str = "http://web-crawling.railway.internal:8080"
-    docling_service_url: str = "http://docling.railway.internal:8080"
+    # Kreuzberg Service Configuration
+    kreuzberg_api_url: str = "http://kreuzberg.railway.internal:8000"
 
     # Service Health Check Endpoints
     api_gateway_health_endpoint: str = "/health"
@@ -30,7 +31,7 @@ class Settings(BaseSettings):
     chatbot_health_endpoint: str = "/health"
     knowledgebase_health_endpoint: str = "/health"
     website_crawling_health_endpoint: str = "/health"
-    docling_health_endpoint: str = "/health"
+    kreuzberg_health_endpoint: str = "/"
 
     # Port Configuration
     health_monitoring_port: int = 8006
@@ -52,7 +53,7 @@ class Settings(BaseSettings):
         logger.info(f"   - chatbot_orchestration: {self.chatbot_orchestration_url}")
         logger.info(f"   - knowledgebase_ingestion: {self.knowledgebase_ingestion_url}")
         logger.info(f"   - website_crawling: {self.website_crawling_url}")
-        logger.info(f"   - docling_service: {self.docling_service_url}")
+        logger.info(f"   - kreuzberg_api: {self.kreuzberg_api_url}")
 
     model_config = {
         'env_file': ".env",

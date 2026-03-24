@@ -3,6 +3,8 @@ Celery tasks for file processing worker
 Handles async file processing with database status tracking
 """
 
+import os
+import sys
 import asyncio
 from typing import Dict, Any
 from celery.exceptions import SoftTimeLimitExceeded
@@ -54,8 +56,6 @@ def process_file_upload_task(
         logger.info("🔍 [PROCESSING] Loading processing functions...")
         
         # Ensure celery-file-worker directory is in Python path (do this right before import)
-        import sys
-        import os
         worker_dir = os.path.dirname(__file__)
         if worker_dir not in sys.path:
             sys.path.insert(0, worker_dir)

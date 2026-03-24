@@ -17,14 +17,8 @@ from urllib.parse import urljoin, urlparse
 from shared.otel_logger import get_otel_logger
 from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
-from shared.docling_integration import process_with_docling
-from shared.gemini_table_formatter import (
-    extract_tables_from_docling_json,
-    extract_text_content_from_docling,
-    format_tables_with_gemini,
-    merge_content_with_formatted_tables,
-    process_docling_content
-)
+from shared.kreuzberg_integration import process_with_kreuzberg
+from shared.gemini_table_formatter import process_extracted_markdown
 from shared.hybrid_content_processor import process_html_hybrid
 from shared.s3_file_storage import s3_file_storage
 
@@ -241,7 +235,7 @@ class ProcessingService:
                 # HTML is pre-cleaned by crawl4ai (menus, navbars, ads removed)
                 try:
                     markdown_content, processed_content_s3_key, tables_metadata_list = await self._preparePageAsMarkdown(
-                        page_data.page_html, page_data.page_url, remove_ads=True
+                        page_data.page_html, page_data.page_url, website_id=job_context.website_id, remove_ads=True
                     )
                 except Exception as docling_error:
                     logger.error(f"   ❌ Docling processing failed: {docling_error}")
@@ -602,7 +596,7 @@ class ProcessingService:
             return False
         return True
 
-    async def _preparePageAsMarkdown(self, html_content: str, page_url: str, remove_ads: bool = True) -> Tuple[str, Optional[str], list]:
+    async def _preparePageAsMarkdown(self, html_content: str, page_url: str, website_id: Optional[str] = None, remove_ads: bool = True) -> Tuple[str, Optional[str], list]:
         """
         Process HTML with docling queue (same as file worker).
         HTML is pre-cleaned by crawl4ai to remove menus, navbars, ads.
@@ -613,13 +607,13 @@ class ProcessingService:
         """
         import hashlib
 
-        logger.info(f"📄 [DOCLING_WEB] Processing page with docling: {page_url}")
-        logger.info(f"📄 [DOCLING_WEB] HTML size: {len(html_content)} bytes")
+        logger.info(f"📄 [KREUZBERG_WEB] Processing page with Kreuzberg: {page_url}")
+        logger.info(f"📄 [KREUZBERG_WEB] HTML size: {len(html_content)} bytes")
 
         # Create URL hash for file naming
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
 
-        # Calculate hash of HTML content to verify both docling and trafilatura get identical input
+        # Calculate hash of HTML content
         html_hash = hashlib.md5(html_content.encode('utf-8')).hexdigest()[:8]
         logger.info(f"📄 [HTML_HASH] Input HTML hash: {html_hash}")
 
@@ -639,7 +633,7 @@ class ProcessingService:
 
         logger.info(f"✅ [S3_HTML_UPLOAD] HTML uploaded: {html_s3_key}")
 
-        # 2. Generate presigned URL for docling to access
+        # 2. Generate presigned URL for Kreuzberg to access
         logger.info(f"🔗 [S3] Generating presigned URL for S3 object: {html_s3_key}")
         success, result = s3_file_storage.generate_presigned_url(html_s3_key, expiration=3600)
         if not success:
@@ -657,58 +651,31 @@ class ProcessingService:
         logger.info(f"🔍 [DEBUG] presigned_url length: {len(presigned_url) if presigned_url else 'None'}")
         logger.info(f"🔍 [DEBUG] presigned_url starts with http: {presigned_url.startswith('http') if presigned_url else 'None'}")
 
-        # 3. Call docling queue (same pattern as file worker)
+        # 3. Call Kreuzberg via REST API
         try:
-            logger.info(f"🔍 [DEBUG] About to call process_with_docling with presigned_url: {presigned_url}")
-            json_content, docling_metadata = await process_with_docling(
+            logger.info(f"🔍 [DEBUG] About to call process_with_kreuzberg with presigned_url: {presigned_url}")
+            kreuzberg_markdown, kreuzberg_metadata = await process_with_kreuzberg(
                 presigned_url=presigned_url,
                 original_filename=html_filename,
                 mime_type="text/html",
                 worker_type="web"
             )
-            logger.info(f"🔍 [DEBUG] process_with_docling returned: json_content={bool(json_content)}, metadata_keys={list(docling_metadata.keys()) if docling_metadata else 'None'}")
 
-            # Validate json_content is not empty/None
-            if not json_content:
-                error_detail = docling_metadata.get('error', 'unknown') if docling_metadata else 'unknown'
-                logger.error(f"❌ [DOCLING_ERROR] Docling processing failed: {error_detail}")
-                raise Exception(f"Docling processing failed for {url}: {error_detail}")
+            # Validate markdown_content is not empty/None
+            if not kreuzberg_markdown:
+                error_detail = kreuzberg_metadata.get('error', 'unknown') if kreuzberg_metadata else 'unknown'
+                logger.error(f"❌ [KREUZBERG_ERROR] Kreuzberg processing failed: {error_detail}")
+                raise Exception(f"Kreuzberg processing failed for {page_url}: {error_detail}")
 
-            # Log comprehensive docling JSON structure (same as file worker)
-            try:
-                import json as json_lib
-                parsed = json_lib.loads(json_content) if isinstance(json_content, str) and json_content.strip().startswith(('{', '[')) else None
-                if parsed and isinstance(parsed, dict):
-                    logger.info(f"📊 [DOCLING_STRUCTURE] Top-level keys: {list(parsed.keys())}")
-                    # Log texts, tables, groups structure
-                    texts_count = len(parsed.get('texts', []))
-                    tables_list = parsed.get('tables', [])
-                    tables_count = len(tables_list) if tables_list else 0
-                    groups_count = len(parsed.get('groups', []))
-                    body_children = parsed.get('body', {}).get('children', [])
-
-                    logger.info(f"📊 [DOCLING_STRUCTURE] Content summary:")
-                    logger.info(f"   texts: {texts_count}")
-                    logger.info(f"   tables: {tables_count}")
-                    logger.info(f"   groups: {groups_count}")
-                    logger.info(f"   body.children: {len(body_children)}")
-
-                    # Log text labels distribution for debugging
-                    if parsed.get('texts'):
-                        label_counts = {}
-                        for text in parsed['texts']:
-                            label = text.get('label', 'text')
-                            label_counts[label] = label_counts.get(label, 0) + 1
-                        logger.info(f"📊 [DOCLING_TEXT_LABELS] Distribution: {label_counts}")
-                else:
-                    logger.warning(f"⚠️ [DOCLING_STRUCTURE] Not valid JSON. First 500 chars: {repr(json_content[:500])}")
-            except Exception as parse_err:
-                logger.warning(f"⚠️ [DOCLING_STRUCTURE] Failed to parse: {parse_err}. First 500 chars: {repr(json_content[:500])}")
-
-            # Use hybrid processing: trafilatura for text + docling for tables
-            # This ensures clean article text is extracted while preserving table intelligence
-            logger.info(f"🔄 [HYBRID_PROCESS] Using hybrid processing (trafilatura + docling)...")
-            markdown_content, tables_metadata_list, total_pages = await process_html_hybrid(html_content, json_content)
+            # Use hybrid processing: Kreuzberg + Gemini Table Formatter
+            logger.info(f"🔄 [HYBRID_PROCESS] Using hybrid processing for {page_url} ({website_id})...")
+            markdown_content, tables_metadata_list, total_pages = await process_html_hybrid(
+                html_content, 
+                kreuzberg_markdown,
+                source_id=website_id,
+                source_name=page_url,
+                source_type="website"
+            )
 
             # 7. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"
@@ -730,8 +697,8 @@ class ProcessingService:
 
             return markdown_content, processed_content_s3_key, tables_metadata_list
 
-        except Exception as docling_err:
-            logger.error(f"❌ [DOCLING_ERROR] Docling processing failed: {docling_err}")
+        except Exception as kreuzberg_err:
+            logger.error(f"❌ [KREUZBERG_ERROR] Kreuzberg processing failed: {kreuzberg_err}")
 
             # Cleanup temp HTML
             try:
@@ -740,15 +707,16 @@ class ProcessingService:
                 pass
 
             # Re-raise error - no fallback to trafilatura
-            raise Exception(f"Docling processing failed for {page_url}: {docling_err}")
+            raise Exception(f"Kreuzberg processing failed for {page_url}: {kreuzberg_err}")
 
     async def _extractDocumentsFromPage(
         self, html_content: str, page_url: str, page_markdown: str
     ) -> str:
-        """Extract embedded files from HTML if docling enabled"""
+        """Extract embedded files from HTML if Kreuzberg enabled"""
         from core.config import settings
 
-        if not settings.docling_enabled:
+        if not settings.kreuzberg_enabled:
+            logger.info("📄 [ROUTING] Kreuzberg processing disabled, keeping existing files.")
             return page_markdown
 
         try:
@@ -891,7 +859,7 @@ class ProcessingService:
         logger.info(f"✅ Resolved FileSearch store: {store}")
         return store
 
-    async def _resolveUserRoleID(self, user_email: str, user_role_id: str = None) -> Optional[str]:
+    async def _resolveUserRoleID(self, user_email: str, user_role_id: Optional[str] = None) -> Optional[str]:
         """Resolve user_role_id (allow NULL if not found)"""
         if user_role_id:
             logger.info(f"✅ Using provided user_role_id: {user_role_id}")
@@ -966,7 +934,7 @@ class ProcessingService:
             ]
         }
 
-    async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext, display_name: str = None) -> Optional[UploadResult]:
+    async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext, display_name: Optional[str] = None) -> Optional[UploadResult]:
         """Poll Gemini upload operation until done using async client"""
         from core.ai import get_genai_client
 
@@ -1012,7 +980,7 @@ class ProcessingService:
         
         return await self._extractDocumentNameFromOperation(current_operation, job_context.store_name, display_name=display_name)
 
-    async def _extractDocumentNameFromOperation(self, operation, store_name: str, display_name: str = None) -> Optional[UploadResult]:
+    async def _extractDocumentNameFromOperation(self, operation, store_name: str, display_name: Optional[str] = None) -> Optional[UploadResult]:
         """Extract document name and URI from operation"""
         # Handle case where operation is still a string (ID)
         if isinstance(operation, str):
@@ -1055,7 +1023,7 @@ class ProcessingService:
             upload_result: UploadResult,
             job_context: JobContext,
             crawl_config: CrawlConfig,
-            processed_content_s3_key: str = None,
+            processed_content_s3_key: Optional[str] = None,
             tables_metadata_list: list = None
         ) -> Optional[str]:
             """Record single page in database"""
@@ -1236,7 +1204,7 @@ class ProcessingService:
         file_size: int,
         char_count: int,
         mark_completed: bool = True,
-        processed_content_s3_key: str = None,
+        processed_content_s3_key: Optional[str] = None,
         filestore_character_count: int = 0,
         filestore_word_count: int = 0,
         filestore_token_count: int = 0

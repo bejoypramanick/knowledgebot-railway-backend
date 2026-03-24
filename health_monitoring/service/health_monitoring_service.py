@@ -38,9 +38,9 @@ class HealthMonitoringService:
             'url': settings.website_crawling_url,
             'endpoint': settings.website_crawling_health_endpoint,
         },
-        'docling_service': {
-            'url': settings.docling_service_url,
-            'endpoint': settings.docling_health_endpoint,
+        'kreuzberg_service': {
+            'url': settings.kreuzberg_api_url,
+            'endpoint': settings.kreuzberg_health_endpoint,
         },
     }
 

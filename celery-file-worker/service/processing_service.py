@@ -14,13 +14,11 @@ from typing import Dict, List, Any, Optional, Tuple
 from shared.otel_logger import get_otel_logger
 from core.ai import get_genai_client
 from core.config import settings
-from shared.docling_integration import (
-    process_with_docling,
-    should_use_docling_for_file,
-    create_markdown_temp_file,
-    create_json_temp_file
+from shared.kreuzberg_integration import (
+    process_with_kreuzberg,
+    should_use_kreuzberg_for_file,
+    create_markdown_temp_file
 )
-from shared.docling_content_converter import convert_docling_to_markdown
 from shared.file_search import get_file_search_store_by_display_name
 from shared.html_processor import extract_content_from_html
 from shared.sqlalchemy_db import get_db_session
@@ -44,8 +42,8 @@ async def process_with_gemini(
     file_display_name: str,
     original_filename: str,
     mime_type: str,
-    user_email: str = None,
-    file_search_store_name: str = None
+    user_email: Optional[str] = None,
+    file_search_store_name: Optional[str] = None
 ) -> Tuple[Any, str, datetime, Dict[str, Any]]:
     """
     Process file with Gemini - uploads file directly to FileSearch store (no fallback).
@@ -224,7 +222,7 @@ async def query_gemini_file_existence(
 async def process_file_content(
     file_id: str,
     user_email: str = "admin",
-    celery_task_id: str = None
+    celery_task_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Complete file processing pipeline:
@@ -243,9 +241,9 @@ async def process_file_content(
     tmp_path = None
     json_tmp_path = None  # Temporary file for Docling JSON response
 
-    # Initialize Docling tracking variables
-    processed_by_docling = False
-    docling_processing_time_ms = None
+    # Initialize Kreuzberg tracking variables
+    processed_by_kreuzberg = False
+    kreuzberg_processing_time_ms = 0
     docling_images_extracted = 0
     docling_images_with_ocr = 0
     original_file_extension = None
@@ -290,9 +288,8 @@ async def process_file_content(
             return None
 
     try:
-        # Log docling configuration at the start of processing
+        # Log Kreuzberg configuration at the start of processing
         from core.config import settings
-        logger.info(f"⚙️  [CONFIG] DOCLING_ENABLED={settings.docling_enabled}")
 
         # STEP 1: Query database with file_id to get file details
         logger.info(f"🔍 [DB_QUERY] Getting file details for file_id: {file_id}")
@@ -419,93 +416,46 @@ async def process_file_content(
         json_tmp_path = None
         processed_successfully = False
 
-        # Route all supported files to Docling (including HTML)
-        if await should_use_docling_for_file(original_filename, detected_mime_type, file_size):
-            logger.info(f"📄 [ROUTING] Routing {original_filename} to Docling pipeline")
+        # Route all supported files to Kreuzberg (including HTML)
+        if await should_use_kreuzberg_for_file(original_filename, detected_mime_type, file_size):
+            logger.info(f"📄 [ROUTING] Routing {original_filename} to Kreuzberg pipeline")
             
             try:
-                logger.info(f"🔍 [DEBUG] About to call process_with_docling with presigned_url: {presigned_url}")
-                json_content, docling_metadata = await process_with_docling(
+                logger.info(f"🔍 [DEBUG] About to call process_with_kreuzberg with presigned_url: {presigned_url}")
+                markdown_content, kreuzberg_metadata = await process_with_kreuzberg(
                     presigned_url=presigned_url,  # Use presigned URL only
                     original_filename=original_filename,
                     mime_type=detected_mime_type,
                     worker_type="file"
                 )
-                logger.info(f"🔍 [DEBUG] process_with_docling returned: json_content={bool(json_content)}, metadata_keys={list(docling_metadata.keys()) if docling_metadata else 'None'}")
 
-                if json_content:
-                    # Capture Docling metadata
-                    processed_by_docling = True
+                if markdown_content:
+                    processed_by_kreuzberg = True
+                    kreuzberg_processing_time_ms = kreuzberg_metadata.get('processing_time_ms', 0)
+                    
+                    # Use unified markdown processing
+                    from shared.gemini_table_formatter import process_extracted_markdown
 
-                    # Extract all docling metadata fields
-                    docling_processing_time_ms = docling_metadata.get('processing_time_ms', 0)
-                    docling_images_extracted = docling_metadata.get('images_extracted', 0)
-                    docling_images_with_ocr = docling_metadata.get('images_with_ocr', 0)
-                    content_format = docling_metadata.get('content_format', 'json')
-
-                    # Calculate content statistics
-                    content_length = len(json_content)
-                    content_lines = len(json_content.splitlines())
-                    content_words = len(json_content.split())
-
-                    # Log comprehensive Docling response summary
-                    logger.info(
-                        f"✅ [DOCLING_COMPLETE_RESPONSE] Docling service response received (JSON format) - "
-                        f"Content: {content_length} chars / {content_lines} lines / {content_words} words, "
-                        f"Processing: {docling_processing_time_ms}ms, "
-                        f"Images: {docling_images_extracted} extracted / {docling_images_with_ocr} with OCR"
+                    logger.info(f"🔄 [KREUZBERG_PROCESS] Using unified markdown processing pipeline for {original_filename} ({file_id})")
+                    content_for_upload, tables_metadata_list = await process_extracted_markdown(
+                        markdown_content,
+                        source_id=file_id,
+                        source_name=original_filename,
+                        source_type="file"
                     )
-
-                    # Log full response from Docling service with all metadata
-                    logger.info(f"📋 [DOCLING_FULL_RESPONSE] Complete Docling service response (JSON):")
-                    logger.info(f"    Content Format: {content_format}")
-                    logger.info(f"    Content Length: {content_length} characters")
-                    logger.info(f"    Content Lines: {content_lines}")
-                    logger.info(f"    Content Words: {content_words}")
-                    logger.info(f"    Processing Time: {docling_processing_time_ms} ms")
-                    logger.info(f"    Images Extracted: {docling_images_extracted}")
-                    logger.info(f"    Images with OCR: {docling_images_with_ocr}")
-                    logger.info(f"    Additional Metadata Keys: {list(docling_metadata.keys())}")
-
-                    # Log tables extracted by Docling from the PDF
-                    logger.info(f"📝 [DOCLING_CONTENT] JSON content length: {len(json_content)} chars")
-                    try:
-                        import json as json_lib
-                        parsed = json_lib.loads(json_content) if isinstance(json_content, str) and json_content.strip().startswith(('{', '[')) else None
-                        if parsed and isinstance(parsed, dict):
-                            logger.info(f"📊 [DOCLING_STRUCTURE] Top-level keys: {list(parsed.keys())}")
-                            # Docling stores extracted tables under the "tables" key in its JSON output
-                            raw_tables = parsed.get('tables', None)
-                            if raw_tables is not None:
-                                logger.info(f"📊 [DOCLING_TABLES] Found 'tables' key with {len(raw_tables)} table(s)")
-                                tables_json = json_lib.dumps(raw_tables, indent=2, ensure_ascii=False)
-                                # Log in chunks to avoid log truncation
-                                for chunk_start in range(0, len(tables_json), 10000):
-                                    logger.info(tables_json[chunk_start:chunk_start + 10000])
-                            else:
-                                logger.info(f"📊 [DOCLING_TABLES] No 'tables' key found. First 3000 chars:")
-                                logger.info(f"{json_content[:3000]}")
-                        else:
-                            logger.warning(f"⚠️ [DOCLING_CONTENT] Not valid JSON. First 500 chars: {repr(json_content[:500])}")
-                    except Exception as parse_err:
-                        logger.warning(f"⚠️ [DOCLING_PARSE] Failed to parse: {parse_err}. First 500 chars: {repr(json_content[:500])}")
-
-                    # Use unified docling processing
-                    from shared.gemini_table_formatter import process_docling_content
-
-                    logger.info(f"🔄 [DOCLING_PROCESS] Using unified docling processing pipeline...")
-                    content_for_upload, tables_metadata_list, total_pages = await process_docling_content(json_content)
+                    
+                    total_pages = kreuzberg_metadata.get('kreuzberg_metadata', {}).get('page_count', 0)
 
                     # Log the final merged content being sent to Gemini
                     logger.info(f"📤 [DOCLING_TO_GEMINI] Final merged content for Gemini FileStore:")
                     logger.info(f"    Content Format: Markdown with formatted tables")
                     logger.info(f"    Total Size: {len(content_for_upload)} characters")
                     logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.md")
-                    logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === BEGIN MERGED CONTENT ===")
+                    logger.info(f"📋 [KREUZBERG_FINAL_MARKDOWN] === BEGIN MERGED CONTENT ===")
                     # Log full content in chunks to avoid log truncation
                     for chunk_start in range(0, len(content_for_upload), 10000):
                         logger.info(content_for_upload[chunk_start:chunk_start + 10000])
-                    logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === END MERGED CONTENT ===")
+                    logger.info(f"📋 [KREUZBERG_FINAL_MARKDOWN] === END MERGED CONTENT ===")
 
                     # Upload converted markdown to S3 for later download
                     md_filename = original_filename.rsplit('.', 1)[0] + '.md'
@@ -528,7 +478,7 @@ async def process_file_content(
 
                     # Log temporary file creation and verify content
                     temp_file_size = os.path.getsize(tmp_path)
-                    logger.info(f"📁 [TEMP_FILE_CREATED] Temporary Markdown file created from Docling response:")
+                    logger.info(f"📁 [TEMP_FILE_CREATED] Temporary Markdown file created from Kreuzberg response:")
                     logger.info(f"    File Path: {tmp_path}")
                     logger.info(f"    File Size: {temp_file_size} bytes")
                     logger.info(f"    Format: Markdown")
@@ -567,32 +517,31 @@ async def process_file_content(
                     # Switch to processed artifact
                     original_tmp_path = tmp_path
 
-                    # Update filename and MIME type - Docling JSON converted to Markdown
+                    # Update filename and MIME type - Kreuzberg converts to Markdown
                     original_filename = original_filename.rsplit('.', 1)[0] + '.md'
                     detected_mime_type = 'text/markdown'
-                    logger.info(f"📋 [CONTENT_FORMAT_MD] Docling JSON converted to Markdown - "
+                    logger.info(f"📋 [CONTENT_FORMAT_MD] Kreuzberg output is Markdown - "
                               f"File will be uploaded to Gemini FileStore as: {original_filename} (MIME: {detected_mime_type})")
 
                     processed_successfully = True
-                    logger.info(f"✅ [DOCLING_PROCESSING_COMPLETE] Successfully processed document to Markdown format: {original_filename} "
+                    logger.info(f"✅ [KREUZBERG_PROCESSING_COMPLETE] Successfully processed document to Markdown format: {original_filename} "
                               f"(Original: {original_filename.rsplit('.', 1)[0]}.*)")
                 else:
-                    error_msg = docling_metadata.get("error", "Docling processing failed")
-                    logger.error(f"❌ [DOCLING] Processing failed for {original_filename}: {error_msg}")
-                    # HARD FAILURE (no fallback to raw if it's a PDF/DOCX that failed)
+                    error_msg = kreuzberg_metadata.get("error", "Kreuzberg processing failed")
+                    logger.error(f"❌ [KREUZBERG] Processing failed for {original_filename}: {error_msg}")
                     if tmp_path and os.path.exists(tmp_path):
                         os.unlink(tmp_path)
                     return {
                         "success": False,
-                        "error": f"Docling processing failed: {error_msg}"
+                        "error": f"Kreuzberg processing failed: {error_msg}"
                     }
             except Exception as e:
-                logger.error(f"❌ [DOCLING] Unexpected error: {e}")
+                logger.error(f"❌ [KREUZBERG] Unexpected error: {e}")
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
                 return {
                     "success": False,
-                    "error": f"Docling processing error: {str(e)}"
+                    "error": f"Kreuzberg processing error: {str(e)}"
                 }
 
         # Unsupported format (Raw file)
@@ -600,8 +549,8 @@ async def process_file_content(
             # For raw files, read content if it's text-based to get metrics, 
             # otherwise just record the file itself
             from core.config import settings
-            if not settings.docling_enabled:
-                logger.info(f"📝 [ROUTING] DOCLING_ENABLED=false, sending {original_filename} raw to Gemini API")
+            if not settings.kreuzberg_enabled:
+                logger.info(f"📝 [ROUTING] File doesn't require kreuzberg processing, sending raw to Gemini API")
             else:
                 logger.info(f"📝 [ROUTING] File type {detected_mime_type} doesn't require docling processing, sending raw to Gemini API")
             
@@ -775,7 +724,6 @@ async def process_file_content(
 
                 # Count tokens via Gemini API
                 try:
-                    import os
                     token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
                     token_response = genai_client.models.count_tokens(
                         model=token_model,

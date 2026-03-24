@@ -572,9 +572,10 @@ function render() {
 
   // === TABLES METADATA TABLE ===
   document.getElementById('tables-meta-table').innerHTML = tablesMeta.slice(0,200).map(r => {
-    const cost = calcTableCost(r.table_input_token_count||0, r.table_output_token_count||0);
-    return `<tr>
-    <td title="${r.source_name}">${trunc(r.source_name,35)}</td>
+    <td title="${r.source_name}">
+      <div style="font-weight:500;white-space:normal;word-break:break-all;max-width:300px">${r.source_name || '-'}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">ID: ${r.file_upload_id || r.scraped_website_id || '-'}</div>
+    </td>
     <td><span class="badge badge-${r.source_type==='file'?'processing':'active'}">${r.source_type}</span></td>
     <td>${r.table_index}</td>
     <td>${r.table_column_count_input||0}</td><td>${r.table_row_count_input||0}</td>
@@ -873,6 +874,7 @@ function downloadExcel() {
     const cost = calcTableCost(r.table_input_token_count||0, r.table_output_token_count||0);
     return {
       'Source': r.source_name||'',
+      'Source ID': r.file_upload_id || r.scraped_website_id || '',
       'Source Type': r.source_type,
       'Table #': r.table_index,
       'Columns': r.table_column_count_input||0,
