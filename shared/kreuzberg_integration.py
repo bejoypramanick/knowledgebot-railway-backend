@@ -61,16 +61,16 @@ async def process_with_kreuzberg(
         
         # Kreuzberg typically returns markdown by default when requested or configurable via query params/form.
         # We will try to pass standard parameters.
-        files = {
-            'file': (original_filename, file_bytes, mime_type)
-        }
+        files_payload = [
+            ('files', (original_filename, file_bytes, mime_type))
+        ]
         
         data = {
             'output_format': 'markdown'
         }
 
         async with httpx.AsyncClient(timeout=KREUZBERG_API_TIMEOUT) as client:
-            response = await client.post(endpoint, files=files, data=data)
+            response = await client.post(endpoint, files=files_payload, data=data)
             
             if response.status_code != 200:
                 logger.error(f"[KREUZBERG] API returned error {response.status_code}: {response.text}")
