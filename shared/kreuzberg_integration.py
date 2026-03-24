@@ -134,7 +134,7 @@ async def process_with_kreuzberg(
             ]
             
             data = {
-                'output_format': 'markdown'
+                'output_format': 'json'
             }
             
             response = await client.post(endpoint, files=files_payload, data=data)
