@@ -34,7 +34,7 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
             output_format='xml',
             include_tables=True,
             include_comments=False,
-            include_images=True,
+            include_images=False,
             no_fallback=False
         )
         
