@@ -20,7 +20,6 @@ from shared.kreuzberg_integration import (
     create_markdown_temp_file
 )
 from shared.file_search import get_file_search_store_by_display_name
-from shared.html_processor import extract_content_from_html
 from shared.sqlalchemy_db import get_db_session
 from shared.file_metrics import calculate_metrics
 

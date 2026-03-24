@@ -15,7 +15,7 @@ from shared.otel_logger import get_otel_logger
 from urllib.parse import urljoin, urlparse
 from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
-from shared.kreuzberg_integration import process_with_kreuzberg, get_kv_table_markdown, table_to_kv_markdown
+from shared.kreuzberg_integration import process_with_kreuzberg, table_to_kv_markdown
 from shared.html_cleaner import clean_html_with_trafilatura
 from shared.s3_file_storage import s3_file_storage
 
