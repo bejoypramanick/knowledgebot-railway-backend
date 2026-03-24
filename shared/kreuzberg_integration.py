@@ -26,12 +26,15 @@ def retry_on_connection_error(max_retries: int = 3, delay: float = 1.0):
             for i in range(max_retries):
                 try:
                     return await func(*args, **kwargs)
-                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError) as e:
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ReadTimeout) as e:
                     last_err = e
+                    # Log more details about the error
+                    error_detail = f"{type(e).__name__}: {str(e)}"
                     wait = delay * (2 ** i) # Exponential backoff
-                    logger.warning(f"⚠️ [KREUZBERG_RETRY] {type(e).__name__} on attempt {i+1}/{max_retries}. Retrying in {wait}s...")
+                    logger.warning(f"⚠️ [KREUZBERG_RETRY] {error_detail} on attempt {i+1}/{max_retries}. Target: {KREUZBERG_API_URL}. Retrying in {wait}s...")
                     await asyncio.sleep(wait)
-            logger.error(f"❌ [KREUZBERG_RETRY_FAILED] Max retries reached for {func.__name__}. Last error: {last_err}")
+            
+            logger.error(f"❌ [KREUZBERG_RETRY_FAILED] Max retries reached for {func.__name__}. Last error: {type(last_err).__name__}: {str(last_err)}")
             if "localhost" in str(KREUZBERG_API_URL):
                 logger.warning("💡 [KREUZBERG_TIP] You are connecting to localhost:8000. If running in containers (e.g. Railway), ensure KREUZBERG_API_URL is set to the service's internal domain.")
             raise last_err
