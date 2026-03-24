@@ -26,7 +26,7 @@ def retry_on_connection_error(max_retries: int = 3, delay: float = 1.0):
             for i in range(max_retries):
                 try:
                     return await func(*args, **kwargs)
-                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ReadTimeout) as e:
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ReadError) as e:
                     last_err = e
                     # Log more details about the error
                     error_detail = f"{type(e).__name__}: {str(e)}"
@@ -104,23 +104,20 @@ async def process_with_kreuzberg(
     source_name: Optional[str] = None
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """
-    Process a document synchronously using Kreuzberg REST API.
-    
-    Args:
-        presigned_url: S3 presigned URL to download the file from.
-        original_filename: The original filename.
-        mime_type: The detected MIME type of the file.
-        worker_type: Worker type ('file' or 'web').
-        
-    Returns:
-        Tuple of (markdown_content, metadata)
+    Send a document to Kreuzberg for extraction.
+    Returns (markdown_content, metadata_dict).
     """
     start_time = time.time()
-    logger.info("=" * 80)
+    
+    # Sanitize URL to prevent double slashes
+    base_url = str(KREUZBERG_API_URL).strip("/")
+    endpoint = f"{base_url}/extract"
+
+    logger.info(f"================================================================================")
     logger.info(f"[KREUZBERG] === KREUZBERG DOCUMENT EXTRACTION ===")
     logger.info(f"[KREUZBERG] File: {original_filename}")
     logger.info(f"[KREUZBERG] MIME Type: {mime_type}")
-    logger.info(f"[KREUZBERG] API URL: {KREUZBERG_API_URL}")
+    logger.info(f"[KREUZBERG] API URL: {endpoint}")
     logger.info("=" * 80)
 
     try:
@@ -128,16 +125,12 @@ async def process_with_kreuzberg(
         file_bytes = await download_file_from_s3(presigned_url)
 
         # 2. Prepare Kreuzberg API Request
-        logger.info(f"[KREUZBERG] Sending extraction request to Kreuzberg API...")
+        logger.info(f"[KREUZBERG] Sending extraction request into {endpoint}...")
         
-        # We assume the endpoint is POST /extract
-        endpoint = f"{KREUZBERG_API_URL}/extract"
-        
-        # Kreuzberg typically returns markdown by default when requested or configurable via query params/form.
-        # We will try to pass standard parameters.
-        files_payload = [
-            ('files', (original_filename, file_bytes, mime_type))
-        ]
+        # We use 'file' as the key, which is more standard for single-file uploads
+        files_payload = {
+            'file': (original_filename, file_bytes, mime_type)
+        }
         
         data = {
             'output_format': 'json'
