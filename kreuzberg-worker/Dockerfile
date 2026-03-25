@@ -2,6 +2,10 @@ FROM rust:1.91-slim AS builder
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY kreuzberg-worker/Cargo.toml /app/Cargo.toml
 COPY kreuzberg-worker/src /app/src
 
