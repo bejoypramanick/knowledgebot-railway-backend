@@ -46,25 +46,16 @@ async def process_with_kreuzberg(
     start_time = time.time()
     reply_channel = f"kreuzberg_extraction_results:{source_id or original_filename}:{int(start_time * 1000)}"
     client = ExtractionWorkerClient()
-    source_type = "website" if worker_type == "web" else "file"
+    artifact_prefix = f"processing/processed/{source_id or original_filename}"
 
     logger.info(f"[KREUZBERG] Queueing extraction for {original_filename} via Redis worker")
 
     try:
         job = client.create_job(
-            source_type=source_type,
             document_id=source_id or original_filename,
-            source_name=source_name or original_filename,
-            mime_type=mime_type,
             presigned_url=presigned_url,
-            worker_type=worker_type,
-            source_url=source_name if worker_type == "web" else None,
+            artifact_prefix=artifact_prefix,
             reply_channel=reply_channel,
-            metadata={
-                "original_filename": original_filename,
-                "source_id": source_id,
-                "source_name": source_name,
-            },
         )
 
         published = await asyncio.to_thread(client.publish_job, job)
@@ -84,18 +75,23 @@ async def process_with_kreuzberg(
         if result.get("status") != "completed":
             return None, {"error": result.get("error") or "Kreuzberg extraction failed"}
 
-        markdown_s3_key = result.get("markdown_s3_key")
+        manifest_s3_key = result.get("manifest_s3_key")
+        manifest = await _download_s3_json(manifest_s3_key) if manifest_s3_key else None
+        if not manifest:
+            return None, {"error": f"Failed to download extraction manifest from S3: {manifest_s3_key}"}
+
+        markdown_s3_key = manifest.get("markdown_s3_key")
         markdown_content = await _download_s3_text(markdown_s3_key) if markdown_s3_key else None
         if not markdown_content:
             return None, {"error": f"Failed to download markdown artifact from S3: {markdown_s3_key}"}
 
         chunks = []
-        chunks_s3_key = result.get("chunks_s3_key")
+        chunks_s3_key = manifest.get("chunks_s3_key")
         if chunks_s3_key:
             chunks = await _download_s3_json(chunks_s3_key) or []
 
         tables = []
-        tables_s3_key = result.get("tables_s3_key")
+        tables_s3_key = manifest.get("tables_s3_key")
         if tables_s3_key:
             tables = await _download_s3_json(tables_s3_key) or []
 
@@ -110,9 +106,10 @@ async def process_with_kreuzberg(
             "markdown_s3_key": markdown_s3_key,
             "chunks_s3_key": chunks_s3_key,
             "tables_s3_key": tables_s3_key,
-            "kreuzberg_metadata": result.get("metadata", {}),
-            "page_count": result.get("metadata", {}).get("page_count", 0),
-            "table_count": result.get("metadata", {}).get("table_count", len(tables)),
+            "manifest_s3_key": manifest_s3_key,
+            "kreuzberg_metadata": manifest.get("metadata", {}),
+            "page_count": manifest.get("metadata", {}).get("page_count", 0),
+            "table_count": manifest.get("metadata", {}).get("table_count", len(tables)),
         }
 
     except Exception as e:

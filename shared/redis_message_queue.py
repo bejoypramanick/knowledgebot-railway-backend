@@ -239,10 +239,9 @@ class RedisMessageQueue:
             message_json = json.dumps(message)
             self._extract_connection.rpush(self.EXTRACT_TASK_QUEUE, message_json)
             logger.info(
-                "📤 [EXTRACT] Published task: job_id=%s document_id=%s source_type=%s",
+                "📤 [EXTRACT] Published task: job_id=%s document_id=%s",
                 message.get("job_id"),
                 message.get("document_id"),
-                message.get("source_type"),
             )
             return True
         except Exception as e:

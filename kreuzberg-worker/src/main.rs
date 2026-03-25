@@ -22,31 +22,19 @@ const DEFAULT_RESULT_QUEUE: &str = "kreuzberg_extraction_results";
 #[derive(Debug, Deserialize)]
 struct ExtractionJob {
     job_id: String,
-    source_type: String,
     document_id: String,
-    source_name: String,
-    mime_type: String,
     presigned_url: String,
+    artifact_prefix: String,
     #[serde(default = "default_result_queue")]
     reply_channel: String,
-    #[serde(default = "default_chunking_profile")]
-    chunking_profile: String,
-    worker_type: Option<String>,
-    source_url: Option<String>,
-    #[serde(default)]
-    metadata: serde_json::Value,
 }
 
 #[derive(Debug, Serialize)]
 struct ExtractionResult {
     job_id: String,
     document_id: String,
-    source_type: String,
     status: String,
-    markdown_s3_key: Option<String>,
-    chunks_s3_key: Option<String>,
-    tables_s3_key: Option<String>,
-    metadata: serde_json::Value,
+    manifest_s3_key: Option<String>,
     error: Option<String>,
     completed_at: String,
 }
@@ -68,10 +56,6 @@ struct AppState {
 
 fn default_result_queue() -> String {
     DEFAULT_RESULT_QUEUE.to_string()
-}
-
-fn default_chunking_profile() -> String {
-    "default".to_string()
 }
 
 #[tokio::main]
@@ -162,7 +146,6 @@ fn pop_job(state: &AppState) -> Result<Option<ExtractionJob>> {
         info!(
             job_id = %job.job_id,
             document_id = %job.document_id,
-            source_type = %job.source_type,
             "received extraction job"
         );
         Ok(Some(job))
@@ -179,15 +162,8 @@ async fn handle_job(state: &AppState, job: ExtractionJob) -> Result<()> {
             ExtractionResult {
                 job_id: job.job_id.clone(),
                 document_id: job.document_id.clone(),
-                source_type: job.source_type.clone(),
                 status: "failed".to_string(),
-                markdown_s3_key: None,
-                chunks_s3_key: None,
-                tables_s3_key: None,
-                metadata: json!({
-                    "source_name": job.source_name,
-                    "worker_type": job.worker_type,
-                }),
+                manifest_s3_key: None,
                 error: Some(err.to_string()),
                 completed_at: Utc::now().to_rfc3339(),
             }
@@ -204,8 +180,7 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
 
     let markdown_key = upload_bytes(
         state,
-        "processed",
-        &format!("{}.md", safe_basename(&job.source_name)),
+        &format!("{}.md", job.artifact_prefix),
         extraction.markdown.as_bytes().to_vec(),
         "text/markdown; charset=utf-8",
     )
@@ -213,8 +188,7 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
 
     let chunks_key = upload_bytes(
         state,
-        "processed",
-        &format!("{}_chunks.json", safe_basename(&job.source_name)),
+        &format!("{}_chunks.json", job.artifact_prefix),
         serde_json::to_vec_pretty(&extraction.chunks)?,
         "application/json",
     )
@@ -226,8 +200,7 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
         Some(
             upload_bytes(
                 state,
-                "processed",
-                &format!("{}_tables.json", safe_basename(&job.source_name)),
+                &format!("{}_tables.json", job.artifact_prefix),
                 serde_json::to_vec_pretty(&extraction.tables)?,
                 "application/json",
             )
@@ -235,15 +208,28 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
         )
     };
 
+    let manifest = json!({
+        "job_id": job.job_id,
+        "document_id": job.document_id,
+        "markdown_s3_key": markdown_key,
+        "chunks_s3_key": chunks_key,
+        "tables_s3_key": tables_key,
+        "metadata": extraction.metadata,
+    });
+
+    let manifest_key = upload_bytes(
+        state,
+        &format!("{}_manifest.json", job.artifact_prefix),
+        serde_json::to_vec_pretty(&manifest)?,
+        "application/json",
+    )
+    .await?;
+
     Ok(ExtractionResult {
         job_id: job.job_id.clone(),
         document_id: job.document_id.clone(),
-        source_type: job.source_type.clone(),
         status: "completed".to_string(),
-        markdown_s3_key: Some(markdown_key),
-        chunks_s3_key: Some(chunks_key),
-        tables_s3_key: tables_key,
-        metadata: extraction.metadata,
+        manifest_s3_key: Some(manifest_key),
         error: None,
         completed_at: Utc::now().to_rfc3339(),
     })
@@ -272,8 +258,8 @@ struct ExtractionArtifacts {
 
 async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<ExtractionArtifacts> {
     let checksum = checksum(file_bytes);
-    let mime_type = validate_mime_type(&job.mime_type)
-        .or_else(|_| detect_mime_type_from_bytes(file_bytes))
+    let mime_type = detect_mime_type_from_bytes(file_bytes)
+        .or_else(|_| validate_mime_type("application/octet-stream"))
         .context("unable to validate or detect mime type for extraction")?;
     let chunk_size = parse_env_usize("KREUZBERG_CHUNK_MAX_CHARACTERS", 1200);
     let chunk_overlap = parse_env_usize("KREUZBERG_CHUNK_OVERLAP", 150);
@@ -286,7 +272,6 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
             ..Default::default()
         }),
         include_document_structure: true,
-        language_detection: Some(Default::default()),
         ..Default::default()
     };
 
@@ -320,18 +305,15 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
                 .into_iter()
                 .enumerate()
                 .map(|(idx, chunk)| ExtractedChunk {
-                    text: chunk.content,
+                    text: chunk.content.clone(),
                     metadata: json!({
                         "chunk_index": idx,
                         "byte_start": chunk.metadata.byte_start,
                         "byte_end": chunk.metadata.byte_end,
-                        "char_count": chunk.metadata.char_count,
+                        "char_count": chunk.content.chars().count(),
                         "token_count": chunk.metadata.token_count,
                         "first_page": chunk.metadata.first_page,
                         "last_page": chunk.metadata.last_page,
-                        "source_name": job.source_name,
-                        "source_type": job.source_type,
-                        "chunking_profile": job.chunking_profile,
                         "strategy": "kreuzberg_markdown_table_aware",
                     }),
                 })
@@ -344,9 +326,6 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
                 metadata: json!({
                     "chunk_index": 0,
                     "char_count": markdown.chars().count(),
-                    "source_name": job.source_name,
-                    "source_type": job.source_type,
-                    "chunking_profile": job.chunking_profile,
                     "strategy": "kreuzberg_markdown_table_aware",
                 }),
             }]
@@ -372,13 +351,9 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     );
 
     let metadata = json!({
-        "source_name": job.source_name,
         "mime_type": mime_type,
         "downloaded_bytes": file_bytes.len(),
         "checksum_sha256": checksum,
-        "worker_type": job.worker_type,
-        "source_url": job.source_url,
-        "original_metadata": job.metadata,
         "content_length": markdown.len(),
         "chunk_count": chunks.len(),
         "table_count": tables.as_array().map(|items| items.len()).unwrap_or(0),
@@ -618,15 +593,7 @@ fn normalize_cell(value: &str) -> String {
         .to_string()
 }
 
-async fn upload_bytes(
-    state: &AppState,
-    prefix: &str,
-    filename: &str,
-    body: Vec<u8>,
-    content_type: &str,
-) -> Result<String> {
-    let key = format!("processing/{prefix}/{}_{}", Utc::now().timestamp(), filename);
-
+async fn upload_bytes(state: &AppState, key: &str, body: Vec<u8>, content_type: &str) -> Result<String> {
     state
         .s3_client
         .put_object()
