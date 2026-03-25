@@ -273,10 +273,6 @@ class ScrapingDAO:
         description: str = None,
         crawl_session_id: str = None,
         processed_content_s3_key: str = None,
-        filestore_char_count: int = 0,
-        filestore_word_count: int = 0,
-        filestore_token_count: int = 0,
-        md_file_size: int = 0,
         storage_backend_state: str = 'pending'
     ) -> Optional[str]:
         """
@@ -318,15 +314,13 @@ class ScrapingDAO:
                 storage_document_name, storage_document_uri, metadata, depth, user_role_id,
                 file_size, char_count, title, description, crawl_session_id,
                 pages_scraped, processed_content_s3_key,
-                filestore_char_count, filestore_word_count, filestore_token_count,
-                md_file_size, storage_backend_state, created_at, updated_at
+                storage_backend_state, created_at, updated_at
             ) VALUES (
                 :parent_id, :page_url, :processing_status,
                 :storage_document_name, :storage_document_uri, CAST(:metadata AS jsonb), :depth, :user_role_id,
                 :file_size, :char_count, :title, :description, :crawl_session_id,
                 :pages_scraped, :processed_content_s3_key,
-                :filestore_char_count, :filestore_word_count, :filestore_token_count,
-                :md_file_size, :storage_backend_state, NOW(), NOW()
+                :storage_backend_state, NOW(), NOW()
             ) RETURNING id
         """
 
@@ -346,10 +340,6 @@ class ScrapingDAO:
             "crawl_session_id": crawl_session_id,
             "pages_scraped": 1,
             "processed_content_s3_key": processed_content_s3_key,
-            "filestore_char_count": filestore_char_count,
-            "filestore_word_count": filestore_word_count,
-            "filestore_token_count": filestore_token_count,
-            "md_file_size": md_file_size,
             "storage_backend_state": storage_backend_state
         }
 
@@ -394,10 +384,6 @@ class ScrapingDAO:
         total_size_bytes: int,
         total_char_count: int,
         storage_metadata: Dict[str, Any],
-        filestore_char_count: int = 0,
-        filestore_word_count: int = 0,
-        filestore_token_count: int = 0,
-        md_file_size: int = 0,
         storage_backend_state: str = 'completed'
     ) -> bool:
         """
@@ -419,10 +405,6 @@ class ScrapingDAO:
                 metadata = :metadata,
                 file_size = :file_size,
                 char_count = :char_count,
-                filestore_char_count = :filestore_char_count,
-                filestore_word_count = :filestore_word_count,
-                filestore_token_count = :filestore_token_count,
-                md_file_size = :md_file_size,
                 storage_backend_state = :storage_backend_state,
                 processing_status = 'completed',
                 updated_at = NOW()
@@ -434,10 +416,6 @@ class ScrapingDAO:
             "metadata": json.dumps(storage_metadata),
             "file_size": total_size_bytes,
             "char_count": total_char_count,
-            "filestore_char_count": filestore_char_count,
-            "filestore_word_count": filestore_word_count,
-            "filestore_token_count": filestore_token_count,
-            "md_file_size": md_file_size,
             "storage_backend_state": storage_backend_state,
             "website_id": website_id
         }
@@ -469,10 +447,6 @@ class ScrapingDAO:
         storage_metadata: Dict[str, Any],
         mark_completed: bool = True,
         processed_content_s3_key: str = None,
-        filestore_char_count: int = 0,
-        filestore_word_count: int = 0,
-        filestore_token_count: int = 0,
-        md_file_size: int = 0,
         storage_backend_state: str = 'completed'
     ) -> bool:
         """
@@ -511,10 +485,6 @@ class ScrapingDAO:
                     crawl_session_id = :crawl_session_id,
                     pages_scraped = :pages_scraped,
                     metadata = metadata || CAST(:metadata AS jsonb),
-                    filestore_char_count = :filestore_char_count,
-                    filestore_word_count = :filestore_word_count,
-                    filestore_token_count = :filestore_token_count,
-                    md_file_size = :md_file_size,
                     processing_status = 'completed',
                     updated_at = NOW()
                 WHERE id = :website_id
@@ -536,10 +506,6 @@ class ScrapingDAO:
                     pages_scraped = :pages_scraped,
                     metadata = metadata || CAST(:metadata AS jsonb),
                     processed_content_s3_key = :processed_content_s3_key,
-                    filestore_char_count = :filestore_char_count,
-                    filestore_word_count = :filestore_word_count,
-                    filestore_token_count = :filestore_token_count,
-                    md_file_size = :md_file_size,
                     updated_at = NOW()
                 WHERE id = :website_id
                 RETURNING OLD.metadata AS previous_metadata, OLD.processing_status AS old_status, NEW.processing_status AS new_status
@@ -556,10 +522,6 @@ class ScrapingDAO:
             "pages_scraped": 1,
             "metadata": json.dumps(storage_metadata),
             "processed_content_s3_key": processed_content_s3_key,
-            "filestore_char_count": filestore_char_count,
-            "filestore_word_count": filestore_word_count,
-            "filestore_token_count": filestore_token_count,
-            "md_file_size": md_file_size,
             "storage_backend_state": storage_backend_state,
             "website_id": website_id
         }
