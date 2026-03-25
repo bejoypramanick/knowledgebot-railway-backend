@@ -147,11 +147,11 @@ async def process_with_kreuzberg(
         async with httpx.AsyncClient(timeout=KREUZBERG_API_TIMEOUT) as client:
             # We use 'files' (plural) as per previous working commits
             files_payload = [
-                ('files', (original_filename, file_bytes, mime_type))
+                ('file', (original_filename, file_bytes, mime_type))
             ]
             
             data = {
-                'output_format': 'json'
+                'output_format': 'markdown'
             }
             
             response = await client.post(endpoint, files=files_payload, data=data)
