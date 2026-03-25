@@ -7,7 +7,7 @@ from shared.kreuzberg_integration import process_with_kreuzberg
 def mock_httpx_response():
     response = MagicMock()
     response.status_code = 200
-    response.json.return_value = {"content": "# Extracted Markdown", "metadata": {"pages": 1}}
+    response.text = "# Extracted Markdown"
     return response
 
 @pytest.mark.asyncio
@@ -26,7 +26,6 @@ async def test_process_with_kreuzberg_success(mock_httpx_response):
             
             assert markdown == "# Extracted Markdown"
             assert metadata["content_format"] == "markdown"
-            assert metadata["kreuzberg_metadata"] == {"pages": 1}
 
 @pytest.mark.asyncio
 async def test_process_with_kreuzberg_api_error():

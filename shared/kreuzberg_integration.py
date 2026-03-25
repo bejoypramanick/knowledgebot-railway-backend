@@ -7,7 +7,6 @@ import time
 import httpx
 import os
 from typing import Tuple, Dict, Any, Optional, List
-import json
 import re
 from shared.otel_logger import get_otel_logger
 
@@ -155,51 +154,19 @@ async def process_with_kreuzberg(
         if response.status_code != 200:
             logger.error(f"[KREUZBERG] API returned error {response.status_code}: {response.text}")
             return None, {"error": f"API Error {response.status_code}: {response.text}"}
-            
-        result = response.json()
-            
-        # 3. Parse and normalize response
-        # Kreuzberg returns an object with 'content' (markdown) and 'tables' (structured data)
-        # If it returns a list, take the first element (the only file we sent)
-        if isinstance(result, list) and len(result) > 0:
-            result = result[0]
-            
-        # Debug logging for empty chunks
-        if not result.get("chunks"):
-            logger.warning(f"⚠️ [KREUZBERG_DEBUG] No chunks returned. Keys in result: {list(result.keys())}")
-            if "content" in result:
-                logger.info(f"   Content length: {len(result['content'])} characters")
-            logger.info(f"   Full Result Structure: {json.dumps({k: str(v)[:100] for k, v in result.items()}, indent=2)}")
-            
+
+        # Kreuzberg returns raw markdown when output_format=markdown
+        # No post-processing — pass directly to Chonkie for chunking.
         processing_time_ms = int((time.time() - start_time) * 1000)
-            
-        # 4. Standard Markdown Output
-        # Kreuzberg returns an object with 'content' (markdown) and 'tables' (structured data)
-        # We now use 'content' directly and let Chonkie handle chunking.
-        markdown_content = result.get("content", "")
-        if not markdown_content and "text" in result:
-            markdown_content = result.get("text", "")
-            
-        tables = result.get("tables", [])
-        chunks = result.get("chunks", [])
-        response_metadata = result.get("metadata", {})
-        
-        if tables:
-            logger.info(f"[KREUZBERG] Found {len(tables)} tables in document.")
+        markdown_content = response.text
+
+        logger.info(f"✅ [KREUZBERG] Extraction successful in {processing_time_ms}ms — {len(markdown_content)} characters")
 
         metadata = {
             "processing_time_ms": processing_time_ms,
-            "images_extracted": 0,
-            "images_with_ocr": 0,
             "content_format": "markdown",
-            "kreuzberg_metadata": response_metadata,
-            "tables_processed": len(tables),
-            "chunks": chunks  # Pass chunks (with embeddings) for pgvector storage
         }
 
-        logger.info(f"✅ [KREUZBERG] Extraction successful in {processing_time_ms}ms (Got {len(chunks)} chunks)")
-        logger.info(f"✅ [KREUZBERG] Extracted {len(markdown_content)} characters")
-        
         return markdown_content, metadata
 
     except Exception as e:
