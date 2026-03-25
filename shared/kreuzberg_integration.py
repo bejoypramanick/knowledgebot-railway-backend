@@ -105,7 +105,7 @@ def table_to_kv_markdown(
     
     return "\n".join(lines)
 
-@retry_on_connection_error(max_retries=5, delay=2.0)
+@retry_on_connection_error(max_retries=10, delay=3.0)
 async def process_with_kreuzberg(
     presigned_url: str,
     original_filename: str,
@@ -131,35 +131,29 @@ async def process_with_kreuzberg(
     logger.info(f"[KREUZBERG] API URL: {endpoint}")
     
     # 2. DNS & Connectivity Diagnostics
+    # We resolve the hostname just for logging/debugging purposes.
+    # The actual connection attempt will handle the fallback.
+    hostname = endpoint.split("//")[-1].split(":")[0].split("/")[0]
     try:
         import socket
-        hostname = endpoint.split("//")[-1].split(":")[0].split("/")[0]
         ip_addr = socket.gethostbyname(hostname)
         logger.info(f"🌐 [KREUZBERG_DNS] Resolved {hostname} to {ip_addr}")
     except Exception as dns_err:
         logger.warning(f"⚠️ [KREUZBERG_DNS] Could not resolve hostname {hostname}: {dns_err}")
-        # Fallback to localhost if internal domain fails in development/local
-        if ".railway.internal" in endpoint:
-            fallback_endpoint = endpoint.replace("kreuzberg.railway.internal", "localhost")
-            logger.info(f"🔄 [KREUZBERG_FALLBACK] Attempting fallback to {fallback_endpoint}...")
-            endpoint = fallback_endpoint
 
     logger.info("=" * 80)
 
-    try:
-        # 3. Download file from S3 into memory
-        file_bytes = await download_file_from_s3(presigned_url)
+    # 3. Download file from S3 into memory
+    file_bytes = await download_file_from_s3(presigned_url)
 
-        # 2. Prepare Kreuzberg API Request
-        logger.info(f"[KREUZBERG] Sending extraction request into {endpoint}...")
-        
+    # 4. Prepare Kreuzberg API Request
+    # We define a helper for the actual POST to allow for internal fallbacks
+    async def perform_request(target_url: str) -> httpx.Response:
+        logger.info(f"[KREUZBERG] Attempting extraction request to {target_url}...")
         async with httpx.AsyncClient(timeout=KREUZBERG_API_TIMEOUT) as client:
             # Official API spec uses 'files' (plural)
-            files_payload = [
-                ('files', (original_filename, file_bytes, mime_type))
-            ]
+            files_payload = [('files', (original_filename, file_bytes, mime_type))]
             
-            # 1. Robust Extraction Config (OCR and Layout logic)
             config_payload = {
                 "layout_detection": "accurate",
                 "pdf_hierarchy": True,
@@ -168,14 +162,11 @@ async def process_with_kreuzberg(
                 "extract_tables": True
             }
             
-            # 2. Semantic Strategy (Direct field prioritized by Rust /extract)
             semantic_chunking = {
-                "strategy": "semantic",
-                "max_characters": 1000,
-                "overlap": 200,
-                "threshold": 0.85,
-                "embedding_model": "accurate", # 'accurate' uses a slightly larger model than 'fast'
-                "enabled": True
+                "strategy": "recursive",
+                "chunk_size": 800,
+                "chunk_overlap": 160,
+                "enabled": True,
             }
             
             data = {
@@ -184,13 +175,33 @@ async def process_with_kreuzberg(
                 'config': json.dumps(config_payload)
             }
             
-            response = await client.post(endpoint, files=files_payload, data=data)
+            return await client.post(target_url, files=files_payload, data=data)
+
+    try:
+        try:
+            response = await perform_request(endpoint)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.NetworkError) as conn_err:
+            # DUAL-STACK FALLBACK: If internal domain fails, try localhost (Common in Railway/Local hybrid)
+            if ".railway.internal" in endpoint or "kreuzberg:" in endpoint:
+                fallback_url = endpoint.replace("kreuzberg.railway.internal", "localhost").replace("kreuzberg:", "localhost:")
+                logger.warning(f"⚠️ [KREUZBERG_CONNECT_FAIL] Primary endpoint {endpoint} failed: {conn_err}")
+                logger.info(f"🔄 [KREUZBERG_FALLBACK] Attempting Dual-Stack fallback to {fallback_url}...")
+                response = await perform_request(fallback_url)
+            else:
+                raise conn_err
+
+        if response.status_code != 200:
+            logger.error(f"[KREUZBERG] API returned error {response.status_code}: {response.text}")
+            return None, {"error": f"API Error {response.status_code}: {response.text}"}
             
-            if response.status_code != 200:
-                logger.error(f"[KREUZBERG] API returned error {response.status_code}: {response.text}")
-                return None, {"error": f"API Error {response.status_code}: {response.text}"}
-                
-            result = response.json()
+        result = response.json()
+            
+        # Debug logging for empty chunks
+        if not result.get("chunks"):
+            logger.warning(f"⚠️ [KREUZBERG_DEBUG] No chunks returned. Keys in result: {list(result.keys())}")
+            if "content" in result:
+                logger.info(f"   Content length: {len(result['content'])} characters")
+            logger.info(f"   Full Result Structure: {json.dumps({k: str(v)[:100] for k, v in result.items()}, indent=2)}")
             
         processing_time_ms = int((time.time() - start_time) * 1000)
         
