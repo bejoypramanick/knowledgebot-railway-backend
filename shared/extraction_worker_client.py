@@ -22,6 +22,8 @@ class ExtractionWorkerClient:
         document_id: str,
         worker_type: str,
         s3_key: str,
+        original_filename: Optional[str] = None,
+        mime_type: Optional[str] = None,
         artifact_prefix: str,
         reply_channel: str = "kreuzberg_extraction_results",
     ) -> Dict[str, Any]:
@@ -29,6 +31,8 @@ class ExtractionWorkerClient:
             document_id=document_id,
             worker_type=worker_type,
             s3_key=s3_key,
+            original_filename=original_filename,
+            mime_type=mime_type,
             artifact_prefix=artifact_prefix,
             reply_channel=reply_channel,
         )

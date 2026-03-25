@@ -26,6 +26,8 @@ struct ExtractionJob {
     document_id: String,
     worker_type: String,
     s3_key: String,
+    original_filename: Option<String>,
+    mime_type: Option<String>,
     artifact_prefix: String,
     #[serde(default = "default_result_queue")]
     reply_channel: String,
@@ -215,7 +217,7 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
         "starting S3-backed extraction job"
     );
     let file_bytes = download_from_s3(state, &job.s3_key).await?;
-    let extraction = extract_and_chunk(&file_bytes).await?;
+    let extraction = extract_and_chunk(job, &file_bytes).await?;
 
     let markdown_key = upload_bytes(
         state,
@@ -311,10 +313,9 @@ struct ExtractionArtifacts {
     metadata: serde_json::Value,
 }
 
-async fn extract_and_chunk(file_bytes: &[u8]) -> Result<ExtractionArtifacts> {
+async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<ExtractionArtifacts> {
     let checksum = checksum(file_bytes);
-    let mime_type = detect_mime_type_from_bytes(file_bytes)
-        .or_else(|_| validate_mime_type("application/octet-stream"))
+    let mime_type = resolve_mime_type(job, file_bytes)
         .context("unable to validate or detect mime type for extraction")?;
     let extraction_config = build_extraction_config();
     let chunk_size = extraction_config
@@ -416,6 +417,45 @@ async fn extract_and_chunk(file_bytes: &[u8]) -> Result<ExtractionArtifacts> {
     });
 
     Ok(ExtractionArtifacts { markdown, chunks, tables, metadata })
+}
+
+fn resolve_mime_type(job: &ExtractionJob, file_bytes: &[u8]) -> Result<String> {
+    if let Some(mime_type) = job.mime_type.as_deref() {
+        if let Ok(validated) = validate_mime_type(mime_type) {
+            return Ok(validated.to_string());
+        }
+    }
+
+    if let Some(filename) = job.original_filename.as_deref().or(Some(job.s3_key.as_str())) {
+        let lowered = filename.to_ascii_lowercase();
+        let inferred = if lowered.ends_with(".html") || lowered.ends_with(".htm") {
+            Some("text/html")
+        } else if lowered.ends_with(".md") || lowered.ends_with(".markdown") {
+            Some("text/markdown")
+        } else if lowered.ends_with(".pdf") {
+            Some("application/pdf")
+        } else if lowered.ends_with(".docx") {
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        } else if lowered.ends_with(".pptx") {
+            Some("application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        } else if lowered.ends_with(".xlsx") {
+            Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        } else if lowered.ends_with(".csv") {
+            Some("text/csv")
+        } else {
+            None
+        };
+
+        if let Some(mime_type) = inferred {
+            if let Ok(validated) = validate_mime_type(mime_type) {
+                return Ok(validated.to_string());
+            }
+        }
+    }
+
+    detect_mime_type_from_bytes(file_bytes)
+        .or_else(|_| validate_mime_type("application/octet-stream"))
+        .map(|mime| mime.to_string())
 }
 
 fn build_extraction_config() -> ExtractionConfig {

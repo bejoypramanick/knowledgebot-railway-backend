@@ -25,6 +25,8 @@ class ExtractionJob:
     document_id: str
     worker_type: str
     s3_key: str
+    original_filename: Optional[str] = None
+    mime_type: Optional[str] = None
     artifact_prefix: str
     reply_channel: str = "kreuzberg_extraction_results"
     created_at: str = field(default_factory=_utc_now)
@@ -39,6 +41,8 @@ class ExtractionJob:
         document_id: str,
         worker_type: str,
         s3_key: str,
+        original_filename: Optional[str] = None,
+        mime_type: Optional[str] = None,
         artifact_prefix: str,
         reply_channel: str = "kreuzberg_extraction_results",
     ) -> "ExtractionJob":
@@ -47,6 +51,8 @@ class ExtractionJob:
             document_id=document_id,
             worker_type=worker_type,
             s3_key=s3_key,
+            original_filename=original_filename,
+            mime_type=mime_type,
             artifact_prefix=artifact_prefix,
             reply_channel=reply_channel,
         )

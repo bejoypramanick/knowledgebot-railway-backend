@@ -66,6 +66,8 @@ async def process_with_kreuzberg(
             document_id=document_id,
             worker_type=worker_type,
             s3_key=s3_key,
+            original_filename=original_filename,
+            mime_type=mime_type,
             artifact_prefix=artifact_prefix,
             reply_channel=reply_channel,
         )
