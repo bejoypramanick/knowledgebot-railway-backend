@@ -9,15 +9,12 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic_ai import Agent
-from pydantic_ai.builtin_tools import FileSearchTool
 from shared.otel_logger import get_otel_logger
-from shared.file_search import get_file_search_store_by_display_name
 
 from ..core.ai import MODEL_NAME, get_genai_client
-from ..core.cached_google_model import CachedGoogleModel
-from ..core.cache_manager import gemini_cache_manager
 from ..core.dependencies import ChatSessionDeps
 from .session_manager import session_state_manager
+from ..tools.vector_search_tool import search_knowledge_base
 
 logger = get_otel_logger("agent_manager", "chatbot-orchestration")
 
@@ -28,7 +25,6 @@ class AgentManager:
         self.genai_client = None
         self.agent_cache: Dict[str, Agent] = {}  # Cache agents by session_id
         self.system_prompt_cache: Dict[str, str] = {}  # Cache system prompts by session_id
-        self.cache_name_cache: Dict[str, Optional[str]] = {}  # Cache Gemini cache names by session_id
 
     async def initialize(self):
         """Initialize the agent manager."""
@@ -146,25 +142,9 @@ class AgentManager:
         """Get cached system prompt for a session if it exists."""
         return self.system_prompt_cache.get(session_id)
 
-    def get_cached_cache_name(self, session_id: str) -> Optional[str]:
-        """Get Gemini cache name for a session. Returns None if no cache or expired."""
-        stored = self.cache_name_cache.get(session_id)
-        if stored is None:
-            return None
-        # Validate it's still active via the manager's TTL check
-        active = gemini_cache_manager.cache_name
-        if active and active == stored:
-            return active
-        # Cache expired or was invalidated
-        self.cache_name_cache[session_id] = None
-        return None
-
     async def clear_agent_cache(self, session_id: str = None):
         """Clear cached agent for a session or all sessions.
-
-        When the last session is removed, deletes the Gemini cache from Google
-        to stop per-hour billing for idle cache storage.
-
+        
         Args:
             session_id: If provided, clear only this session's cache. If None, clear all caches.
         """
@@ -174,22 +154,11 @@ class AgentManager:
                 logger.info(f"Cleared cached agent for session: {session_id}")
             if session_id in self.system_prompt_cache:
                 del self.system_prompt_cache[session_id]
-            if session_id in self.cache_name_cache:
-                del self.cache_name_cache[session_id]
-
-            # If no more active sessions, delete Gemini cache from Google (stop billing)
-            if not self.agent_cache:
-                logger.info("Last session closed — deleting Gemini cache from Google")
-                await gemini_cache_manager.delete_cache()
-            else:
-                logger.info(f"{len(self.agent_cache)} sessions still active, keeping Gemini cache")
         else:
             cache_size = len(self.agent_cache)
             self.agent_cache.clear()
             self.system_prompt_cache.clear()
-            self.cache_name_cache.clear()
-            await gemini_cache_manager.delete_cache()
-            logger.info(f"Cleared all caches and deleted Gemini cache from Google ({cache_size} sessions)")
+            logger.info(f"Cleared all caches ({cache_size} sessions)")
 
     async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com", force_new: bool = False) -> Agent:
         """Create or retrieve cached agent instance with PydanticAI's built-in caching.
@@ -239,49 +208,24 @@ class AgentManager:
             logger.error(f"❌ Failed to build system prompt: {prompt_error}")
             raise
 
-        # Resolve FileSearch store for builtin FileSearchTool
-        try:
-            store_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
-            store_id = get_file_search_store_by_display_name(self.genai_client, store_display_name)
-            if not store_id:
-                raise RuntimeError(f"FileSearch store '{store_display_name}' not found")
-            file_search_tool = FileSearchTool(file_store_ids=[store_id])
-            logger.info(f"FileSearchTool created with store: {store_id}")
-        except Exception as fs_error:
-            logger.error(f"Failed to resolve FileSearch store: {fs_error}")
-            raise
-
-        # Create Gemini explicit context cache (system prompt + FileSearch tool)
-        cache_name = None
-        try:
-            cache_name = await gemini_cache_manager.ensure_cache(
-                system_prompt=system_prompt,
-                tool_functions=[],
-                model_name=MODEL_NAME,
-                file_search_store_id=store_id,
-            )
-            if cache_name:
-                logger.info(f"Gemini cache active: {cache_name}")
-            else:
-                logger.info("Gemini cache not available, using inline system prompt (fallback)")
-        except Exception as cache_error:
-            logger.warning(f"Gemini cache creation failed: {cache_error}, using fallback")
-
-        # Create agent with builtin FileSearchTool (single Gemini call)
+        # Get standard model wrapper based on chosen LLM
         logger.info("Creating agent for session")
         try:
-            google_model = CachedGoogleModel(MODEL_NAME)
-            logger.info("CachedGoogleModel created")
+            from ..core.ai import get_model
+            model = get_model()
+            
+            if not model:
+                 raise RuntimeError("Failed to initialize model provider")
 
             agent = Agent(
-                google_model,
+                model,
                 system_prompt=system_prompt,
-                builtin_tools=[file_search_tool],
+                tools=[search_knowledge_base],
                 deps_type=ChatSessionDeps,
                 end_strategy='exhaustive'
             )
-            logger.info(f"Agent created (system prompt: {len(system_prompt)} chars, cache: {cache_name or 'none'})")
-            logger.info(f"Agent builtin_tools: FileSearchTool (store: {store_id})")
+            logger.info(f"Agent created (system prompt: {len(system_prompt)} chars)")
+            logger.info(f"Agent registered tools: [search_knowledge_base]")
 
         except Exception as agent_error:
             logger.error(f"Failed to create Agent: {agent_error}")
@@ -290,10 +234,9 @@ class AgentManager:
         # Cache the agent instance and related data for this session
         self.agent_cache[session_id] = agent
         self.system_prompt_cache[session_id] = system_prompt
-        self.cache_name_cache[session_id] = cache_name
         logger.info(f"Agent cached for session: {session_id}")
 
-        logger.info(f"CREATE_AGENT COMPLETED - Session: {session_id}, cache: {cache_name or 'none'}")
+        logger.info(f"CREATE_AGENT COMPLETED - Session: {session_id}")
 
         return agent
 

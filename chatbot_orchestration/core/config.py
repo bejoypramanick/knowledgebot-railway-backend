@@ -20,8 +20,17 @@ class Settings(BaseSettings):
     api_gateway_host: str = "0.0.0.0"
     
     # Chatbot Configuration
-    chatbot_model: str = "gemini-2.5-flash-lite"
+    chatbot_provider: str = "google"
+    chatbot_model: str = "gemini-2.0-flash-lite"
+    
+    # Embedding Configuration
+    embedding_provider: str = "google"
+    embedding_model: str = "text-embedding-004"
 
+    # API Keys (provide via Railway env vars)
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    
     # Citation Configuration
     enable_citations: bool = True  # Enable DB lookup for inline citation URLs
     

@@ -151,7 +151,10 @@ async def process_with_kreuzberg(
             ]
             
             data = {
-                'output_format': 'markdown'
+                'output_format': 'markdown',
+                'extract_chunks': True, # Request chunking
+                'generate_embeddings': False, # We generate embeddings in the worker for full model-agnosticism
+                'chunking_strategy': 'hierarchical' # Use hierarchical semantic chunking
             }
             
             response = await client.post(endpoint, files=files_payload, data=data)
@@ -166,7 +169,7 @@ async def process_with_kreuzberg(
         
         # 3. Parse and normalize response
         # Kreuzberg returns an object with 'content' (markdown) and 'tables' (structured data)
-        # Based on GitHub schema: ExtractionResult { content, tables, metadata }
+        # It may also now return 'chunks' with text and embeddings
         if isinstance(result, list) and len(result) > 0:
             result = result[0]
             
@@ -175,6 +178,7 @@ async def process_with_kreuzberg(
             markdown_content = result.get("text", "")
             
         tables = result.get("tables", [])
+        chunks = result.get("chunks", [])
         response_metadata = result.get("metadata", {})
         
         # 4. Process tables into KV format and replace in markdown
@@ -208,10 +212,11 @@ async def process_with_kreuzberg(
             "images_with_ocr": 0,
             "content_format": "markdown_kv",
             "kreuzberg_metadata": response_metadata,
-            "tables_processed": len(tables)
+            "tables_processed": len(tables),
+            "chunks": chunks  # Pass chunks (with embeddings) for pgvector storage
         }
 
-        logger.info(f"✅ [KREUZBERG] Extraction successful in {processing_time_ms}ms")
+        logger.info(f"✅ [KREUZBERG] Extraction successful in {processing_time_ms}ms (Got {len(chunks)} chunks)")
         logger.info(f"✅ [KREUZBERG] Extracted {len(markdown_content)} characters")
         
         return markdown_content, metadata

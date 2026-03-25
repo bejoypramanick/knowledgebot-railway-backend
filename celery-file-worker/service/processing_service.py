@@ -492,7 +492,14 @@ async def process_file_content(
                     
                     # Content is already KV-formatted by process_with_kreuzberg
                     content_for_upload = markdown_content
-                    tables_metadata_list = [] # No longer using separate metadata list for Gemini NAR
+                    
+                    # Extract chunks
+                    chunks = kreuzberg_metadata.get("chunks", [])
+                    for chunk in chunks:
+                        if "metadata" not in chunk:
+                            chunk["metadata"] = {}
+                        chunk["metadata"]["filename"] = original_filename
+                    tables_metadata_list = chunks # Use tables_metadata_list temporarily to pass chunks down
                     
                     total_pages = kreuzberg_metadata.get('kreuzberg_metadata', {}).get('page_count', 0)
 
@@ -622,179 +629,74 @@ async def process_file_content(
 
             processed_successfully = True
 
-        # STEP 6: GEMINI UPLOAD PHASE
+        # STEP 6: DB VECTOR INSERTION PHASE
+        # Initialize variables needed for step 7 database update
+        document_name = f"vector_db_file_{file_id}"
+        document_uri = f"vector_db_file_{file_id}"
+        final_state = "completed"
+        gemini_processed_at = datetime.utcnow()
+
+        class FileSearchDocument:
+            def __init__(self, name, uri):
+                self.name = name
+                self.uri = uri
+
+        uploaded_file = FileSearchDocument(document_name, document_uri)
+        file_search_metadata = {
+            'type': 'vector_db',
+            'document_name': document_name,
+            'uploaded_at': gemini_processed_at.isoformat()
+        }
+
         if processed_successfully or detected_mime_type == 'text/markdown':
-            logger.info(f"🤖 [GEMINI] Uploading to FileSearch - Display: {file_display_name}, Original: {original_filename}, MIME: {detected_mime_type}...")
+            logger.info(f"🤖 [VECTOR_DB] Uploading chunks to pgvector - Original: {original_filename}...")
             try:
-                from core.ai import get_genai_client
-                genai_client = get_genai_client()
-                if not genai_client:
-                    logger.error("❌ Gemini client not available")
-                    raise Exception("Gemini client not configured")
+                from shared.vector_dao import vector_dao
+                
+                chunks_to_insert = tables_metadata_list # We temporarily used this variable
+                
+                if chunks_to_insert:
+                    # Generate embeddings using our model-agnostic utility
+                    logger.info(f"🧬 Generating embeddings for {len(chunks_to_insert)} file chunks...")
+                    from shared.embeddings import batch_generate_embeddings
+                    chunk_texts = [c.get("text") or c.get("content", "") for c in chunks_to_insert]
+                    embeddings = await batch_generate_embeddings(chunk_texts)
+                    
+                    # Attach embeddings to chunks
+                    for i, embedding in enumerate(embeddings):
+                        if i < len(chunks_to_insert):
+                            chunks_to_insert[i]["embedding"] = embedding
 
-                # Detect proper MIME type - use magic bytes from file path
-                final_mime_type = detect_mime_type_from_extension(original_filename, detected_mime_type, tmp_path)
-
-                # Create display name
-                if file_display_name != original_filename:
-                    gemini_display_name = f"{file_display_name} | {original_filename}"
+                    success = await vector_dao.batch_insert_chunks(
+                        chunks=chunks_to_insert, 
+                        document_id=file_id,
+                        document_type='file'
+                    )
+                    if not success:
+                        logger.warning(f"⚠️ Chunk batch insert failed for file {file_id}")
+                        final_state = "failed"
+                    else:
+                        logger.info(f"✅ Uploaded {len(chunks_to_insert)} chunks with provider-agnostic embeddings to vector DB")
                 else:
-                    gemini_display_name = original_filename
-
-                logger.info(f"📦 Looking up FileSearch store: {settings.gemini_file_search_store_name}")
-
-                # Look up store by display name
-                from shared.file_search import get_file_search_store_by_display_name
-                file_search_store_name = get_file_search_store_by_display_name(
-                    genai_client,
-                    display_name=settings.gemini_file_search_store_name
-                )
-
-                if not file_search_store_name:
-                    logger.error(f"❌ FileSearch store '{settings.gemini_file_search_store_name}' not found")
-                    raise Exception(f"FileSearch store '{settings.gemini_file_search_store_name}' not found")
-
-                logger.info(f"✅ Found store: {file_search_store_name}")
-
-                logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
+                    logger.warning(f"⚠️ No chunks produced, creating a single chunk from the file content")
+                    if content_for_upload:
+                        dummy_chunk = {
+                            "text": content_for_upload,
+                            "metadata": {"filename": original_filename}
+                        }
+                        success = await vector_dao.batch_insert_chunks(
+                            chunks=[dummy_chunk], 
+                            document_id=file_id,
+                            document_type='file'
+                        )
+                        if not success:
+                            final_state = "failed"
                 
-                # Build config with mime_type inside (like web worker does)
-                upload_config = {
-                    'display_name': gemini_display_name,
-                    'custom_metadata': [
-                        {'key': 'original_filename', 'string_value': original_filename},
-                        {'key': 'user_email', 'string_value': user_email or 'admin'},
-                        {'key': 'celery_task_id', 'string_value': celery_task_id}
-                    ]
-                }
-                
-                # Set appropriate MIME type based on content format
-                if detected_mime_type == 'text/markdown' or tmp_path.endswith('.md'):
-                    upload_config['mime_type'] = 'text/markdown'
-                    logger.info(f"📝 [MIME] Setting mime_type='text/markdown' for {original_filename}")
-                else:
-                    logger.info(f"📄 [MIME] Using default MIME type for {original_filename}")
-                
-                operation = genai_client.file_search_stores.upload_to_file_search_store(
-                    file=tmp_path,
-                    file_search_store_name=file_search_store_name,
-                    config=upload_config
-                )
-
-                if not operation:
-                    logger.error(f"❌ [GEMINI] Failed to create upload operation")
-                    raise Exception("Gemini operation creation failed")
-
-                # Wait for the upload operation to complete (robust polling)
-                wait_start_time = time.time()
-                max_wait_time = 600  # 10 minutes for large/complex files
-                document_name = None
-                document_uri = None
-                final_state = "pending" # Default to pending until confirmed ACTIVE
-                gemini_processed_at = datetime.utcnow()
-                poll_interval = 2.0
-                confirmed_done = False
-
-                while True:
-                    elapsed = time.time() - wait_start_time
-                    if elapsed > max_wait_time:
-                        logger.error(f"❌ [GEMINI_TIMEOUT] Timeout after {elapsed:.0f}s")
-                        raise Exception(f"Gemini upload timeout after {elapsed:.0f}s")
-
-                    try:
-                        # Refresh operation status
-                        operation = genai_client.operations.get(operation)
-                        
-                        if operation.done:
-                            # Check for errors
-                            op_error = getattr(operation, 'error', None)
-                            if op_error:
-                                logger.error(f"❌ [GEMINI_ERROR] Operation failed: {op_error}")
-                                raise Exception(f"Gemini operation failed: {op_error}")
-                                
-                            logger.info(f"✅ [GEMINI_UPLOAD] Operation completed in {elapsed:.0f}s")
-                            confirmed_done = True
-                            break
-                    except Exception as poll_err:
-                        logger.warning(f"⚠️ [GEMINI_POLL] Error refreshing status: {poll_err}")
-                        if elapsed > 60: # Fallback if persistent errors but significant time passed
-                            logger.info(f"ℹ️ [GEMINI_FALLBACK] Assuming completion after {elapsed:.0f}s due to polling errors")
-                            confirmed_done = False
-                            break
-
-                    await asyncio.sleep(poll_interval)
-                    poll_interval = min(poll_interval * 1.5, 10.0)
-
-                # FileSearch upload returns result in response.document_name
-                if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
-                    document_name = operation.response.document_name
-                    # Try to get URI if available
-                    document_uri = getattr(operation.response, 'uri', None) if hasattr(operation.response, 'uri') else None
-                    logger.info(f"✅ [GEMINI] FileSearch document: {document_name}")
-                    if document_uri:
-                        logger.info(f"📎 [GEMINI] Document URI: {document_uri}")
-
-                # STEP 6.5: CONFIRM ACTIVE STATUS
-                # This addresses the user's request to query filesearch to confirm status is active
-                if document_name and confirmed_done:
-                    try:
-                        logger.info(f"🔍 [FILE_STATUS] Verifying status for {document_name}...")
-                        file_metadata = genai_client.file_search_stores.get_file(name=document_name)
-                        
-                        actual_state = getattr(file_metadata, 'state', None)
-                        if actual_state:
-                            state_str = str(actual_state).upper()
-                            logger.info(f"📊 [FILE_STATUS] Actual state: {state_str}")
-                            # Use 'completed' for database state if ACTIVE
-                            if 'ACTIVE' in state_str:
-                                logger.info(f"✅ [FILE_STATUS] File is ACTIVE!")
-                                final_state = 'completed'
-                            else:
-                                logger.warning(f"⚠️ [FILE_STATUS] File is not yet ACTIVE (State: {state_str}). Setting state to pending.")
-                                final_state = 'pending'
-                        else:
-                            # If no state field, assume completed if the operation was confirmed done
-                            final_state = 'completed'
-                    except Exception as status_err:
-                        logger.warning(f"⚠️ [FILE_STATUS_ERR] Could not verify status via FileSearch Store: {status_err}")
-                        final_state = 'pending' # Safe fallback
-                else:
-                    # Not confirmed or no document name
-                    final_state = 'pending' if document_name else 'failed'
-
-                gemini_processed_at = datetime.utcnow()
-
-                # Log complete Gemini FileStore response after successful upload
-                logger.info(f"📦 [GEMINI_UPLOAD_RESPONSE] Complete FileStore upload response received:")
-                logger.info(f"    Document Name: {document_name}")
-                logger.info(f"    Final State: {final_state}")
-                logger.info(f"    Processed At: {gemini_processed_at.isoformat()}")
-                logger.info(f"    Operation Type: {type(operation).__name__}")
-                logger.info(f"    Response Details: {getattr(operation, 'response', 'N/A')}")
-                logger.info(f"📋 [GEMINI_UPLOAD_FULL_RESPONSE] Full operation response:")
-                logger.info(f"┌─────────────────────────────────────────────────────────────────┐")
-                logger.info(f"Operation: {operation}")
-                logger.info(f"└─────────────────────────────────────────────────────────────────┘")
-                
-                # Create a placeholder file object with the document name
-                class FileSearchDocument:
-                    def __init__(self, name):
-                        self.name = name
-                        self.uri = None
-
-                uploaded_file = FileSearchDocument(document_name)
-                file_search_metadata = {
-                    'type': 'file_search',
-                    'file_search_store_name': file_search_store_name,
-                    'document_name': document_name,
-                    'uploaded_at': gemini_processed_at.isoformat()
-                }
-
-                logger.info(f"✅ [GEMINI] Phase complete. Document: {document_name}")
-                logger.info(f"📝 [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
-
+                # Clear tables_metadata_list since we used it for chunks and don't want it saved as tables
+                tables_metadata_list = []
+                    
             except Exception as e:
-                logger.error(f"❌ [GEMINI] Error uploading to FileSearch: {e}")
+                logger.error(f"❌ [VECTOR_DB] Error uploading chunks: {e}")
                 raise
 
             # STEP 7: DATABASE UPDATE PHASE

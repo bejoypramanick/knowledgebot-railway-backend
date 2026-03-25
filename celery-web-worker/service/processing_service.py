@@ -231,7 +231,7 @@ class ProcessingService:
                 # Convert HTML to markdown via docling
                 # HTML is pre-cleaned by crawl4ai (menus, navbars, ads removed)
                 try:
-                    markdown_content, processed_content_s3_key, tables_metadata_list = await self._preparePageAsMarkdown(
+                    markdown_content, processed_content_s3_key, chunks = await self._preparePageAsMarkdown(
                         page_data.page_html, page_data.page_url, website_id=job_context.website_id, remove_ads=True
                     )
                 except Exception as docling_error:
@@ -248,16 +248,53 @@ class ProcessingService:
                     session_id=page_data.session_id
                 )
 
-                # Upload
-                upload_result = await self._uploadPageToGemini(page_data, job_context)
-                if not upload_result:
-                    logger.warning(f"   ⚠️ Upload failed, skipping this page")
-                    return None
+                # Upload chunks to Vector DB
+                from shared.vector_dao import vector_dao
+                
+                # Check if we have chunks
+                if chunks:
+                    # Generate embeddings using our model-agnostic utility
+                    logger.info(f"🧬 Generating embeddings for {len(chunks)} chunks...")
+                    from shared.embeddings import batch_generate_embeddings
+                    chunk_texts = [c.get("text") or c.get("content", "") for c in chunks]
+                    embeddings = await batch_generate_embeddings(chunk_texts)
+                    
+                    # Attach embeddings to chunks
+                    for i, embedding in enumerate(embeddings):
+                        if i < len(chunks):
+                            chunks[i]["embedding"] = embedding
 
-                # Store current page data for MIME type detection
+                    success = await vector_dao.batch_insert_chunks(
+                        chunks=chunks, 
+                        document_id=job_context.website_id,
+                        document_type='website'
+                    )
+                    if not success:
+                        logger.warning(f"   ⚠️ Chunk batch insert failed, skipping this page")
+                        return None
+                    logger.info(f"   ✅ Uploaded {len(chunks)} chunks with provider-agnostic embeddings to vector DB")
+                else:
+                    logger.warning(f"   ⚠️ No chunks produced by Kreuzberg for {page_data.page_url}")
+                    if page_data.markdown:
+                        dummy_chunk = {
+                            "text": page_data.markdown,
+                            "metadata": {"title": page_data.title, "url": page_data.page_url}
+                        }
+                        await vector_dao.batch_insert_chunks(
+                            chunks=[dummy_chunk], 
+                            document_id=job_context.website_id,
+                            document_type='website'
+                        )
+
                 self._current_page_data = page_data
-
-                logger.info(f"   ✅ Uploaded to Gemini: {upload_result.document_name}")
+                
+                # Create a mock upload result for backwards compatibility with _recordPageToDB
+                upload_result = UploadResult(
+                    document_name=f"vector_db_{job_context.website_id}",
+                    document_uri=f"vector_db_{job_context.website_id}",
+                    mime_type="text/markdown",
+                    confirmed=True
+                )
 
                 # Delete processed markdown from S3 (now safely in Gemini FileSearch)
                 # Check RETAIN_MD_FILE environment variable to decide whether to delete
@@ -279,7 +316,7 @@ class ProcessingService:
                             logger.warning(f"   ⚠️ [S3_CLEANUP] Error deleting processed markdown: {cleanup_err}")
 
                 # Record to database
-                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config, processed_content_s3_key, tables_metadata_list)
+                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config, processed_content_s3_key, None)
 
                 # Metrics
                 metrics = calculate_metrics(markdown_content)
@@ -667,8 +704,16 @@ class ProcessingService:
             # Content is already KV-formatted by process_with_kreuzberg
             logger.info(f"✅ [KREUZBERG_KV] Using manual KV-formatted markdown for {page_url}")
             markdown_content = kreuzberg_markdown
-            tables_metadata_list = [] # No longer using separate metadata list
+            chunks = kreuzberg_metadata.get("chunks", [])
             total_pages = 0 # Not applicable for HTML
+
+            # Add source URL to all chunks metadata
+            for chunk in chunks:
+                if "metadata" not in chunk:
+                    chunk["metadata"] = {}
+                chunk["metadata"]["url"] = page_url
+                if hasattr(self, "_current_page_data") and getattr(self._current_page_data, "title", None):
+                    chunk["metadata"]["title"] = self._current_page_data.title
 
             # 7. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"
@@ -688,7 +733,7 @@ class ProcessingService:
             except Exception as cleanup_err:
                 logger.warning(f"⚠️ [CLEANUP] Failed to delete temp HTML: {cleanup_err}")
 
-            return markdown_content, processed_content_s3_key, tables_metadata_list
+            return markdown_content, processed_content_s3_key, chunks
 
         except Exception as kreuzberg_err:
             logger.error(f"❌ [KREUZBERG_ERROR] Kreuzberg processing failed: {kreuzberg_err}")
