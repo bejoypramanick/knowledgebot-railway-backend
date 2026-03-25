@@ -3,7 +3,7 @@ FROM rust:1.91-slim AS builder
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates g++ \
     && rm -rf /var/lib/apt/lists/*
 
 COPY kreuzberg-worker/Cargo.toml /app/Cargo.toml
@@ -11,11 +11,7 @@ COPY kreuzberg-worker/src /app/src
 
 RUN cargo build --release
 
-FROM debian:bookworm-slim
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+FROM ghcr.io/kreuzberg-dev/kreuzberg:latest
 
 WORKDIR /app
 
