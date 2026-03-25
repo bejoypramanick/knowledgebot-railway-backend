@@ -44,7 +44,9 @@ def retry_on_connection_error(max_retries: int = 3, delay: float = 1.0):
             logger.error(f"❌ [KREUZBERG_RETRY_FAILED] Max retries reached for {func.__name__}. Last error: {type(last_err).__name__}: {str(last_err)}")
             if "localhost" in str(KREUZBERG_API_URL):
                 logger.warning("💡 [KREUZBERG_TIP] You are connecting to localhost:8000. If running in containers (e.g. Railway), ensure KREUZBERG_API_URL is set to the service's internal domain.")
-            raise last_err
+            if last_err is not None:
+                raise last_err
+            raise Exception(f"KREUZBERG_RETRY_FAILED: Max retries reached for {func.__name__} without specific error recorded.")
         return wrapper
     return decorator
 
@@ -55,7 +57,9 @@ async def download_file_from_s3(presigned_url: str) -> bytes:
         response = await client.get(presigned_url)
         response.raise_for_status()
         logger.info(f"[KREUZBERG] Downloaded {len(response.content)} bytes from S3.")
-        return response.content
+        if response.status_code == 200:
+            return response.content
+        return b""
 
 def table_to_kv_markdown(
     cells: List[List[str]], 
@@ -213,7 +217,7 @@ async def process_with_kreuzberg(
                         source_name=source_name or original_filename,
                         source_id=source_id
                     )
-                    if original_markdown and original_markdown in markdown_content:
+                    if original_markdown and markdown_content and str(original_markdown) in str(markdown_content):
                         # Add some padding or clear markers
                         # Using replacement for exact match of the markdown representation Kreuzberg provided
                         markdown_content = markdown_content.replace(original_markdown, f"\n\n{kv_markdown}\n\n")
