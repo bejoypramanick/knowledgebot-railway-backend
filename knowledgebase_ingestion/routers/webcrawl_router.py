@@ -294,7 +294,7 @@ async def scrape_website_async_endpoint(request: Request = None):
                     detail={
                         "success": False,
                         "error": result.get('error'),
-                        "duplicate_website_id": result.get('duplicate_website_id'),
+                        "duplicate_website_id": str(result.get('duplicate_website_id')),
                         "reason": "website_duplicate"
                     }
                 )

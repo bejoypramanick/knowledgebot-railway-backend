@@ -158,7 +158,7 @@ async def queue_website_for_scraping(
                     return {
                         "success": False,
                         "error": f"Website is already being crawled or has been crawled (ID: {existing_active['id']}, Status: {existing_active['processing_status']}).",
-                        "duplicate_website_id": existing_active['id']
+                        "duplicate_website_id": str(existing_active['id'])
                     }
             else:
                 logger.info(f"🔍 [DUPLICATE_CHECK] No active crawl found for: {url}")
@@ -430,6 +430,7 @@ async def validate_scraping_request(request_data: Dict[str, Any]) -> Dict[str, A
         max_pages = request_data.get('max_pages', 100)
         max_concurrent = request_data.get('max_concurrent', 10)
         delay_between_requests = request_data.get('delay_between_requests', 0.0)
+        replace_existing = request_data.get('replace_existing', False)
         
         # Validate parameter ranges
         # max_depth=0 is allowed (scans only main page, no child links)
@@ -463,7 +464,8 @@ async def validate_scraping_request(request_data: Dict[str, Any]) -> Dict[str, A
             "max_depth": max_depth,
             "max_pages": max_pages,
             "max_concurrent": max_concurrent,
-            "delay_between_requests": delay_between_requests
+            "delay_between_requests": delay_between_requests,
+            "replace_existing": replace_existing
         }
     except Exception as e:
         logger.error(f"❌ Error validating scraping request: {e}")
