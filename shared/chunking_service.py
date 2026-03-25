@@ -17,10 +17,10 @@ class HierarchicalSemanticChunker:
     """
     def __init__(
         self, 
-        chunk_size: int = 800, 
-        chunk_overlap: int = 150,
-        threshold: float = 0.5,
-        skip_window: int = 1
+        chunk_size: int = int(os.getenv("CHONKIE_CHUNK_SIZE", "350")),
+        chunk_overlap: int = int(os.getenv("CHONKIE_CHUNK_OVERLAP", "75")),
+        threshold: float = float(os.getenv("CHONKIE_THRESHOLD", "0.5")),
+        skip_window: int = int(os.getenv("CHONKIE_SKIP_WINDOW", "1"))
     ):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
