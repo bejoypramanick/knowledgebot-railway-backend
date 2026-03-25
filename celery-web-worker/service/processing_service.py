@@ -890,28 +890,6 @@ class ProcessingService:
             """Record single page in database"""
             metrics = calculate_metrics(page_data.markdown)
 
-            # Compute filestore metrics from the markdown content sent to Gemini
-            md_content = page_data.markdown or ""
-            filestore_character_count = len(md_content)
-            filestore_word_count = len(md_content.split()) if md_content.strip() else 0
-            filestore_token_count = 0
-
-            # Count tokens via Gemini API
-            try:
-                from core.ai import get_genai_client as get_web_genai_client
-                import os
-                token_client = get_web_genai_client()
-                if token_client:
-                    token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"))
-                    token_response = token_client.models.count_tokens(
-                        model=token_model,
-                        contents=md_content
-                    )
-                    filestore_token_count = token_response.total_tokens
-                    logger.info(f"📊 [TOKEN_COUNT] Gemini token count for {page_data.page_url}: {filestore_token_count}")
-            except Exception as tc_err:
-                logger.warning(f"⚠️ [TOKEN_COUNT] Failed to count tokens for {page_data.page_url}: {tc_err}")
-
             storage_backend_state = 'completed' if upload_result.confirmed else 'pending'
             
             if await self._isSinglePageMode(page_data.page_url, job_context.root_url, crawl_config):
@@ -927,10 +905,6 @@ class ProcessingService:
                     char_count=metrics.get('char_count', 0),
                     mark_completed=True,  # Single-page mode - mark as completed
                     processed_content_s3_key=processed_content_s3_key,
-                    filestore_char_count=filestore_character_count,
-                    filestore_word_count=filestore_word_count,
-                    filestore_token_count=filestore_token_count,
-                    md_file_size=len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0,
                     storage_backend_state=storage_backend_state
                 )
 
@@ -970,10 +944,6 @@ class ProcessingService:
                     char_count=metrics.get('char_count', 0),
                     mark_completed=False,  # Multi-page mode - keep status as 'processing'
                     processed_content_s3_key=processed_content_s3_key,
-                    filestore_char_count=filestore_character_count,
-                    filestore_word_count=filestore_word_count,
-                    filestore_token_count=filestore_token_count,
-                    md_file_size=len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0,
                     storage_backend_state=storage_backend_state
                 )
 
@@ -1011,10 +981,6 @@ class ProcessingService:
                 description=page_data.description,
                 crawl_session_id=page_data.session_id,
                 processed_content_s3_key=processed_content_s3_key,
-                filestore_char_count=filestore_character_count,
-                filestore_word_count=filestore_word_count,
-                filestore_token_count=filestore_token_count,
-                md_file_size=len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0,
                 storage_backend_state=storage_backend_state
             )
 
@@ -1074,10 +1040,6 @@ class ProcessingService:
         char_count: int,
         mark_completed: bool = True,
         processed_content_s3_key: Optional[str] = None,
-        filestore_char_count: int = 0,
-        filestore_word_count: int = 0,
-        filestore_token_count: int = 0,
-        md_file_size: int = 0,
         storage_backend_state: str = 'completed'
     ) -> bool:
         """Update parent website record with single page data"""
@@ -1095,10 +1057,6 @@ class ProcessingService:
             storage_metadata=upload_result.storage_metadata,
             mark_completed=mark_completed,
             processed_content_s3_key=processed_content_s3_key,
-            filestore_char_count=filestore_char_count,
-            filestore_word_count=filestore_word_count,
-            filestore_token_count=filestore_token_count,
-            md_file_size=md_file_size,
             storage_backend_state=storage_backend_state
         )
 
