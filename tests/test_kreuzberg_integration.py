@@ -25,7 +25,7 @@ async def test_process_with_kreuzberg_success(mock_httpx_response):
             )
             
             assert markdown == "# Extracted Markdown"
-            assert metadata["content_format"] == "markdown_kv"
+            assert metadata["content_format"] == "markdown"
             assert metadata["kreuzberg_metadata"] == {"pages": 1}
 
 @pytest.mark.asyncio

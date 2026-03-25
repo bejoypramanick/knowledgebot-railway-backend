@@ -61,49 +61,6 @@ async def download_file_from_s3(presigned_url: str) -> bytes:
             return response.content
         return b""
 
-def table_to_kv_markdown(
-    cells: List[List[str]], 
-    table_index: int, 
-    page_number: Optional[int] = None,
-    source_name: Optional[str] = None,
-    source_id: Optional[str] = None
-) -> str:
-    """
-    Convert a 2D list of cells into a Markdown KV format.
-    Ensures each row is a single line to prevent Gemini FileSearch chunking issues.
-    """
-    if not cells or len(cells) < 1:
-        return ""
-    
-    headers = cells[0]
-    rows = cells[1:] if len(cells) > 1 else []
-    
-    page_info = f" (Page {page_number})" if page_number else ""
-    context_info = f" - {source_name}" if source_name else ""
-    id_info = f" ({source_id})" if source_id else ""
-    
-    lines = [f"### Table {table_index}{page_info}{context_info}{id_info}"]
-    
-    # Simple summary if possible
-    lines.append(f"**Summary**: Structured data table with {len(rows)} rows and {len(headers)} columns.")
-    lines.append(f"**Columns**: {', '.join(headers)}")
-    lines.append("")
-
-    for i, row in enumerate(rows):
-        kv_pairs = []
-        for j, cell in enumerate(row):
-            header = headers[j] if j < len(headers) else f"Column {j+1}"
-            # Clean cell value and header of newlines/excess whitespace
-            clean_header = str(header).replace("\n", " ").strip()
-            clean_cell = str(cell).replace("\n", " ").strip()
-            kv_pairs.append(f"{clean_header}: {clean_cell}")
-        
-        # Prepend table index and page info to every row for RAG retrieval stability
-        row_prefix = f"**Table {table_index}{page_info} Row {i+1}**"
-        row_line = f"{row_prefix}: {', '.join(kv_pairs)}"
-        lines.append(row_line)
-    
-    return "\n".join(lines)
 
 @retry_on_connection_error(max_retries=10, delay=3.0)
 async def process_with_kreuzberg(
@@ -229,6 +186,9 @@ async def process_with_kreuzberg(
             
         processing_time_ms = int((time.time() - start_time) * 1000)
             
+        # 4. Standard Markdown Output
+        # Kreuzberg returns an object with 'content' (markdown) and 'tables' (structured data)
+        # We now use 'content' directly and let Chonkie handle chunking.
         markdown_content = result.get("content", "")
         if not markdown_content and "text" in result:
             markdown_content = result.get("text", "")
@@ -237,36 +197,14 @@ async def process_with_kreuzberg(
         chunks = result.get("chunks", [])
         response_metadata = result.get("metadata", {})
         
-        # 4. Process tables into KV format and replace in markdown
         if tables:
-            logger.info(f"[KREUZBERG] Processing {len(tables)} tables into KV format...")
-            for i, table_data in enumerate(tables):
-                cells = table_data.get("cells", [])
-                original_markdown = table_data.get("markdown", "")
-                page_num = table_data.get("page_number")
-                
-                if cells:
-                    kv_markdown = table_to_kv_markdown(
-                        cells, 
-                        i + 1, 
-                        page_num, 
-                        source_name=source_name or original_filename,
-                        source_id=source_id
-                    )
-                    if original_markdown and markdown_content and str(original_markdown) in str(markdown_content):
-                        # Add some padding or clear markers
-                        # Using replacement for exact match of the markdown representation Kreuzberg provided
-                        markdown_content = markdown_content.replace(original_markdown, f"\n\n{kv_markdown}\n\n")
-                    else:
-                        # Fallback: if we can't find the exact markdown, append at the end or log warning
-                        logger.warning(f"[KREUZBERG] Could not find exact location for table {i+1} in content.")
-                        markdown_content += f"\n\n{kv_markdown}\n\n"
+            logger.info(f"[KREUZBERG] Found {len(tables)} tables in document.")
 
         metadata = {
             "processing_time_ms": processing_time_ms,
             "images_extracted": 0,
             "images_with_ocr": 0,
-            "content_format": "markdown_kv",
+            "content_format": "markdown",
             "kreuzberg_metadata": response_metadata,
             "tables_processed": len(tables),
             "chunks": chunks  # Pass chunks (with embeddings) for pgvector storage
