@@ -176,7 +176,11 @@ class GeminiCacheManager:
                 return self._cache_name
 
             except Exception as e:
-                logger.error(f"Failed to create Gemini cache: {e}", exc_info=True)
+                error_str = str(e)
+                if "too small" in error_str.lower() or "min_total_token_count" in error_str:
+                    logger.info(f"Gemini cache skipped: content below minimum token threshold ({error_str}). Agent works fine without cache.")
+                else:
+                    logger.error(f"Failed to create Gemini cache: {e}", exc_info=True)
                 logger.warning("Falling back to non-cached mode (agent works without cache)")
                 return None
 
