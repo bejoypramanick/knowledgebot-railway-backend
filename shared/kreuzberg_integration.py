@@ -13,7 +13,7 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("kreuzberg_integration", "shared")
 
-KREUZBERG_API_URL = os.environ.get("KREUZBERG_API_URL", "http://localhost:8000")
+KREUZBERG_API_URL = os.environ.get("KREUZBERG_API_URL", "http://kreuzberg:8000")
 KREUZBERG_API_TIMEOUT = float(os.environ.get("KREUZBERG_API_TIMEOUT", "300.0"))
 
 def retry_on_connection_error(max_retries: int = 3, delay: float = 1.0):
@@ -181,14 +181,33 @@ async def process_with_kreuzberg(
         try:
             response = await perform_request(endpoint)
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.NetworkError) as conn_err:
-            # DUAL-STACK FALLBACK: If internal domain fails, try localhost (Common in Railway/Local hybrid)
-            if ".railway.internal" in endpoint or "kreuzberg:" in endpoint:
-                fallback_url = endpoint.replace("kreuzberg.railway.internal", "localhost").replace("kreuzberg:", "localhost:")
-                logger.warning(f"⚠️ [KREUZBERG_CONNECT_FAIL] Primary endpoint {endpoint} failed: {conn_err}")
-                logger.info(f"🔄 [KREUZBERG_FALLBACK] Attempting Dual-Stack fallback to {fallback_url}...")
-                response = await perform_request(fallback_url)
-            else:
-                raise conn_err
+            # TRIPLE-STACK FALLBACK:
+            # 1. Primary endpoint failed.
+            # 2. Try simple service discovery (http://kreuzberg:8000)
+            
+            logger.warning(f"⚠️ [KREUZBERG_CONNECT_FAIL] Primary endpoint {endpoint} failed: {conn_err}")
+            
+            # Sequence of fallbacks to try
+            fallbacks = []
+            if "kreuzberg.railway.internal" in endpoint:
+                fallbacks.append(endpoint.replace("kreuzberg.railway.internal", "kreuzberg"))
+            
+            response = None
+            last_err = conn_err
+            
+            for fallback_url in fallbacks:
+                try:
+                    logger.info(f"🔄 [KREUZBERG_FALLBACK] Attempting fallback to {fallback_url}...")
+                    response = await perform_request(fallback_url)
+                    if response:
+                        endpoint = fallback_url 
+                        break
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.NetworkError) as fb_err:
+                    logger.warning(f"⚠️ [KREUZBERG_FALLBACK_FAIL] Fallback {fallback_url} failed: {fb_err}")
+                    last_err = fb_err
+            
+            if not response:
+                raise last_err
 
         if response.status_code != 200:
             logger.error(f"[KREUZBERG] API returned error {response.status_code}: {response.text}")
