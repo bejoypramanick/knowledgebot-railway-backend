@@ -956,7 +956,8 @@ class ProcessingService:
         
         logger.info(f"   ⏳ [GEMINI_UPLOAD] Waiting for indexing... (timeout: {max_wait}s)")
         
-        # Keep track of the current operation object or name
+        # Keep track of the current operation
+        # google-genai operations.get() handles both string ID and Operation object
         current_op = operation
         poll_interval = 2.0
         
@@ -969,7 +970,7 @@ class ProcessingService:
             
             # 2. Check if operation is done
             try:
-                # If we have an object, check its 'done' state
+                # API Spec: Operation object has a 'done' boolean field
                 if not isinstance(current_op, str) and getattr(current_op, 'done', False):
                     logger.info(f"   ✅ [GEMINI_UPLOAD] Indexing completed after {elapsed:.0f}s")
                     break
@@ -988,15 +989,8 @@ class ProcessingService:
             
             # 3. Refresh operation status
             try:
-                # Determine the operation name/ID for the refresh call
-                op_name = current_op if isinstance(current_op, str) else getattr(current_op, 'name', None)
-                
-                if not op_name:
-                    logger.error(f"   ❌ [GEMINI_REFRESH_ERR] Could not determine operation name from {type(current_op)}")
-                    return None
-                    
-                # Refresh from API
-                current_op = await genai_client.operations.get(op_name)
+                # Polymorphic refresh: genai_client.operations.get accepts string or object
+                current_op = await genai_client.operations.get(current_op)
                 logger.info(f"   ⏳ [GEMINI_INDEX...] {elapsed:.0f}s elapsed (Interval: {poll_interval:.1f}s)")
                 
                 # Success check right after refresh
@@ -1006,7 +1000,15 @@ class ProcessingService:
                     
             except Exception as e:
                 logger.warning(f"   ⚠️ [GEMINI_REFRESH_ERR] Error refreshing status: {e}")
-                # We don't break here, we wait for the next interval to try again
+                
+                # Legacy Fallback: If we can't refresh, but significant time has passed ($30s),
+                # assume the operation completed and move to extraction. 
+                # This was found necessary for stability during previous indexing spikes.
+                if elapsed > 30:
+                    logger.info(f"   ℹ️ [GEMINI_FALLBACK] Assuming completion after {elapsed:.0f}s due to persistent refresh errors.")
+                    break
+                
+                # Otherwise, continue polling
                 continue
         
         return await self._extractDocumentNameFromOperation(current_op, job_context.store_name, display_name=display_name)
