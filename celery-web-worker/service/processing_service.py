@@ -912,7 +912,7 @@ class ProcessingService:
             except Exception as tc_err:
                 logger.warning(f"⚠️ [TOKEN_COUNT] Failed to count tokens for {page_data.page_url}: {tc_err}")
 
-                storage_backend_state = 'completed' if upload_result.confirmed else 'pending'
+            storage_backend_state = 'completed' if upload_result.confirmed else 'pending'
             
             if await self._isSinglePageMode(page_data.page_url, job_context.root_url, crawl_config):
                 logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
