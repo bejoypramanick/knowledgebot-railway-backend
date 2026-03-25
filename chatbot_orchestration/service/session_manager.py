@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 
 from shared.otel_logger import get_otel_logger
 
-from ..core.ai import get_genai_client, MODEL_NAME
+from ..core.ai import get_genai_client
 from ..dao.chat_dao import ChatDAO
 
 logger = get_otel_logger("session_manager", "chatbot-orchestration")

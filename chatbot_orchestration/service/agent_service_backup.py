@@ -13,7 +13,8 @@ from pydantic_ai.usage import Usage
 from chatbot_orchestration.dao.chat_dao import ChatDAO
 from shared.otel_logger import get_otel_logger
 
-from ..core.ai import MODEL_NAME, get_genai_client
+from ..core.ai import get_genai_client
+from ..core.config import settings
 from ..core.dependencies import ChatSessionDeps
 
 logger = get_otel_logger("agent_service", "chatbot-orchestration")
@@ -373,7 +374,7 @@ class PydanticAIGatewayService:
             logger.info(f"💰 Savings: ~{int(estimated_tokens)} tokens cached, ~500 tokens for tools uncached")
 
             cached_content = self.genai_client.caches.create(
-                model=MODEL_NAME,
+                model=settings.chatbot_model,
                 config=cache_config
             )
 
@@ -407,7 +408,7 @@ class PydanticAIGatewayService:
                 
                 # Create fallback agent without cache
                 try:
-                    fallback_model = GoogleModel(MODEL_NAME)
+                    fallback_model = GoogleModel(settings.chatbot_model)
                     fallback_agent = Agent(
                         fallback_model,
                         system_prompt=agent.system_prompt,
@@ -675,10 +676,10 @@ class PydanticAIGatewayService:
 
                 try:
                     # GoogleModelSettings is a TypedDict, create it and pass to GoogleModel
-                    settings = GoogleModelSettings(google_cached_content=cached_content_id)
+                    google_model_settings = GoogleModelSettings(google_cached_content=cached_content_id)
                     logger.info(f"✅ GoogleModelSettings created successfully")
-                    logger.info(f"🎯 Settings type: {type(settings)}")
-                    logger.info(f"🎯 Settings dict: {settings}")
+                    logger.info(f"🎯 Settings type: {type(google_model_settings)}")
+                    logger.info(f"🎯 Settings dict: {google_model_settings}")
                 except Exception as settings_error:
                     logger.error(f"❌ Failed to create GoogleModelSettings: {settings_error}")
                     logger.error(f"❌ Error type: {type(settings_error)}")
@@ -687,13 +688,13 @@ class PydanticAIGatewayService:
 
                 # Pass settings to GoogleModel constructor (parameter name is 'settings', not 'model_settings')
                 logger.info("🎯 Creating GoogleModel with cached content settings...")
-                logger.info(f"🎯 MODEL_NAME: {MODEL_NAME}")
-                logger.info(f"🎯 settings type: {type(settings)}")
-                logger.info(f"🎯 settings content: {settings}")
+                logger.info(f"🎯 CHATBOT_MODEL: {settings.chatbot_model}")
+                logger.info(f"🎯 google_model_settings type: {type(google_model_settings)}")
+                logger.info(f"🎯 google_model_settings content: {google_model_settings}")
 
                 try:
                     # FIX: Parameter name is 'settings', not 'model_settings'
-                    google_model = GoogleModel(MODEL_NAME, settings=settings)
+                    google_model = GoogleModel(settings.chatbot_model, settings=google_model_settings)
                     logger.info("✅ GoogleModel created with cached content")
                     logger.info(f"🎯 GoogleModel type: {type(google_model)}")
                     logger.info(f"🎯 GoogleModel repr: {repr(google_model)}")
@@ -742,9 +743,9 @@ class PydanticAIGatewayService:
                 logger.info(f"🎯 System prompt length: {len(system_prompt)} characters")
 
                 # Initialize GoogleModel without caching
-                logger.info(f"🎯 Creating GoogleModel without cache (MODEL_NAME: {MODEL_NAME})")
+                logger.info(f"🎯 Creating GoogleModel without cache (CHATBOT_MODEL: {settings.chatbot_model})")
                 try:
-                    google_model = GoogleModel(MODEL_NAME)
+                    google_model = GoogleModel(settings.chatbot_model)
                     logger.info("✅ GoogleModel created without cached content")
                     logger.info(f"🎯 GoogleModel type: {type(google_model)}")
                 except Exception as model_error:
@@ -829,7 +830,7 @@ class PydanticAIGatewayService:
                 text_part = TextPart(content=content)
                 model_response = ModelResponse(
                     parts=[text_part],
-                    model_name=MODEL_NAME,
+                    model_name=settings.chatbot_model,
                     # Usage is required but we don't have historical data, use zeros
                     usage=Usage(request_tokens=0, response_tokens=0, total_tokens=0)
                 )

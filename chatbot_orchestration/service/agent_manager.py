@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from pydantic_ai import Agent
 from shared.otel_logger import get_otel_logger
 
-from ..core.ai import MODEL_NAME, get_genai_client
+from ..core.ai import get_genai_client
 from ..core.dependencies import ChatSessionDeps
 from .session_manager import session_state_manager
 from ..tools.vector_search_tool import search_knowledge_base
