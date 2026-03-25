@@ -7,6 +7,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "google").lower()
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_OUTPUT_DIMENSIONALITY = int(os.getenv("EMBEDDING_OUTPUT_DIMENSIONALITY", "768"))
 
 logger = get_otel_logger("embeddings", "shared")
 
@@ -28,6 +29,15 @@ def get_genai_client():
         except Exception as e:
             logger.error(f"❌ Failed to initialize Gemini client for embeddings: {e}")
     return _genai_client
+
+
+def _google_embed_config():
+    from google.genai import types
+
+    dimensionality = int(os.getenv("EMBEDDING_OUTPUT_DIMENSIONALITY", str(EMBEDDING_OUTPUT_DIMENSIONALITY)))
+    if dimensionality <= 0:
+        return None
+    return types.EmbedContentConfig(output_dimensionality=dimensionality)
 
 
 def _google_embedding_model_candidates(model: str) -> List[str]:
@@ -56,7 +66,11 @@ async def generate_embedding(query: str) -> List[float]:
             last_error = None
             for candidate_model in _google_embedding_model_candidates(model):
                 try:
-                    response = client.models.embed_content(model=candidate_model, contents=query)
+                    response = client.models.embed_content(
+                        model=candidate_model,
+                        contents=query,
+                        config=_google_embed_config(),
+                    )
                     return response.embeddings[0].values if response.embeddings else []
                 except Exception as e:
                     last_error = e
@@ -102,7 +116,11 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
                     all_embeddings: List[List[float]] = []
                     for i in range(0, len(texts), _GOOGLE_BATCH_EMBED_LIMIT):
                         batch = texts[i:i + _GOOGLE_BATCH_EMBED_LIMIT]
-                        response = client.models.embed_content(model=candidate_model, contents=batch)
+                        response = client.models.embed_content(
+                            model=candidate_model,
+                            contents=batch,
+                            config=_google_embed_config(),
+                        )
                         batch_embeddings = [e.values for e in response.embeddings] if response.embeddings else []
                         all_embeddings.extend(batch_embeddings)
                     return all_embeddings
