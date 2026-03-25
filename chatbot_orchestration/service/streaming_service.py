@@ -280,7 +280,7 @@ class StreamingService:
             #   2. FOLLOW-UP: Prepend SystemPromptPart to message_history
 
             has_chat_history = len(pydantic_messages) > 0
-            cache_name = agent_manager.get_cached_cache_name(session_id)
+            cache_name = None
 
             logger.info(f"System prompt strategy: cache={'active: ' + cache_name if cache_name else 'none'}, "
                         f"history={len(pydantic_messages)} messages")
