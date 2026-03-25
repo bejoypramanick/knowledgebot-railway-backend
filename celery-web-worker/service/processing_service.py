@@ -956,27 +956,27 @@ class ProcessingService:
         
         logger.info(f"   ⏳ [GEMINI_UPLOAD] Waiting for indexing... (timeout: {max_wait}s)")
         
-        # Keep track of the current operation object
-        current_operation = operation
+        # Keep track of the current operation object or name
+        current_op = operation
         poll_interval = 2.0
         
         while True:
             elapsed = time.time() - start_time
             if elapsed > max_wait:
-                status = getattr(current_operation, 'status', 'unknown')
+                status = getattr(current_op, 'status', 'unknown') if not isinstance(current_op, str) else 'unknown'
                 logger.error(f"   ❌ [GEMINI_TIMEOUT] Timeout indexing after {elapsed:.0f}s (Status: {status})")
                 return None
             
-            # Check if operation is done
+            # 2. Check if operation is done
             try:
-                # API Spec: Operation object has a 'done' boolean field
-                if getattr(current_operation, 'done', False):
+                # If we have an object, check its 'done' state
+                if not isinstance(current_op, str) and getattr(current_op, 'done', False):
                     logger.info(f"   ✅ [GEMINI_UPLOAD] Indexing completed after {elapsed:.0f}s")
                     break
                 
-                # If error is present in the operation result
-                if hasattr(current_operation, 'error') and current_operation.error:
-                    logger.error(f"   ❌ [GEMINI_UPLOAD] Operation failed: {current_operation.error}")
+                # Check for errors if we have an object
+                if not isinstance(current_op, str) and hasattr(current_op, 'error') and current_op.error:
+                    logger.error(f"   ❌ [GEMINI_UPLOAD] Operation failed: {current_op.error}")
                     return None
                     
             except Exception as e:
@@ -986,16 +986,30 @@ class ProcessingService:
             await asyncio.sleep(poll_interval)
             poll_interval = min(poll_interval * 1.5, 10.0)
             
-            # Refresh operation status
+            # 3. Refresh operation status
             try:
-                current_operation = await genai_client.operations.get(current_operation.name)
+                # Determine the operation name/ID for the refresh call
+                op_name = current_op if isinstance(current_op, str) else getattr(current_op, 'name', None)
+                
+                if not op_name:
+                    logger.error(f"   ❌ [GEMINI_REFRESH_ERR] Could not determine operation name from {type(current_op)}")
+                    return None
+                    
+                # Refresh from API
+                current_op = await genai_client.operations.get(op_name)
                 logger.info(f"   ⏳ [GEMINI_INDEX...] {elapsed:.0f}s elapsed (Interval: {poll_interval:.1f}s)")
+                
+                # Success check right after refresh
+                if getattr(current_op, 'done', False):
+                    logger.info(f"   ✅ [GEMINI_UPLOAD] Indexing completed after {elapsed:.0f}s")
+                    break
+                    
             except Exception as e:
                 logger.warning(f"   ⚠️ [GEMINI_REFRESH_ERR] Error refreshing status: {e}")
                 # We don't break here, we wait for the next interval to try again
                 continue
         
-        return await self._extractDocumentNameFromOperation(current_operation, job_context.store_name, display_name=display_name)
+        return await self._extractDocumentNameFromOperation(current_op, job_context.store_name, display_name=display_name)
 
     async def _extractDocumentNameFromOperation(self, operation, store_name: str, display_name: Optional[str] = None) -> Optional[UploadResult]:
         """Extract document name and URI from operation"""
