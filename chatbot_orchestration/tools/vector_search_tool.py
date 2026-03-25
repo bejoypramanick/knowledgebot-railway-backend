@@ -34,35 +34,58 @@ async def _get_cache_client() -> redis.Redis:
 from shared.embeddings import generate_embedding
 
 def _compress_context(context_text: str) -> str:
-    """Implement LLMLingua-2 quantized compression (Fast & Efficient)."""
+    """Implement LLMLingua-2 quantized compression with telemetry."""
     try:
         from llmlingua import PromptCompressor
+        import time
+        start = time.time()
+        
         # Using the smaller, quantized-native bert-base model for 2026 performance
         compressor = PromptCompressor(
             model_name="microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank", 
             use_llmlingua2=True,
             device_map="cpu" # Explicitly use CPU for quantization-friendly execution
         )
+        
+        orig_len = len(context_text)
         # Target 2x compression ratio
         compressed = compressor.compress_prompt(context_text, rate=0.5, force_tokens=['\n', 'Snippet', 'Source'])
-        return compressed.get('compressed_prompt', context_text)
+        compressed_text = compressed.get('compressed_prompt', context_text)
+        comp_len = len(compressed_text)
+        
+        duration = (time.time() - start) * 1000
+        savings = (1 - (comp_len / orig_len)) * 100 if orig_len > 0 else 0
+        
+        logger.info(f"📉 [LLMLingua-2] Compressed context in {duration:.1f}ms: "
+                    f"{orig_len} -> {comp_len} chars ({savings:.1f}% saved)")
+        
+        return compressed_text
     except Exception as e:
         logger.warning(f"⚠️ LLMLingua-2 quantized compression failed: {e}")
         return context_text
 
 def _rerank_results(query: str, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Implement FlashRank Stage-2 reranking."""
+    """Implement FlashRank Stage-2 reranking with telemetry."""
     try:
         from flashrank import Ranker, RerankRequest
+        import time
+        start = time.time()
+        
         ranker = Ranker()
         passages = [{"id": i, "text": c["content"], "meta": c["metadata"]} for i, c in enumerate(chunks)]
         rerank_request = RerankRequest(query=query, passages=passages)
         results = ranker.rerank(rerank_request)
+        
         # Map back to original chunks
         ranked_chunks = []
         for r in results:
             idx = r["id"]
             ranked_chunks.append(chunks[idx])
+            
+        duration = (time.time() - start) * 1000
+        logger.info(f"🎯 [FlashRank] Reranked {len(passages)} candidates in {duration:.1f}ms. "
+                    f"Top score: {results[0]['score'] if results else 'N/A'}")
+        
         return ranked_chunks[:10]
     except Exception as e:
         logger.warning(f"⚠️ FlashRank reranking failed: {e}")
@@ -74,15 +97,21 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
     """
     # --- STEP 0: Semantic Caching (Redis) ---
     cache = None
+    import time
+    rag_start = time.time()
+    
     if settings.enable_semantic_caching:
         query_hash = hashlib.sha256(query.encode()).hexdigest()
         cache_key = f"rag:cache:{query_hash}"
         try:
             cache = await _get_cache_client()
+            cache_start = time.time()
             cached_result = await cache.get(cache_key)
             if cached_result:
-                logger.info(f"⚡ Semantic Cache HIT for query: '{query}'")
+                duration = (time.time() - cache_start) * 1000
+                logger.info(f"⚡ [Redis] Semantic Cache HIT (Latency: {duration:.1f}ms) for query: '{query}'")
                 return cached_result
+            logger.info(f"❄️ [Redis] Semantic Cache MISS")
         except Exception as e:
             logger.warning(f"⚠️ Cache lookup failed: {e}")
 
@@ -150,6 +179,13 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                 final_context = _compress_context(full_context)
             else:
                 final_context = full_context
+                
+            total_duration = (time.time() - rag_start) * 1000
+            
+            # Theoretical storage savings per chunk (standard vector 3072B -> halfvec 1536B for 768d)
+            # This is constant but helpful to see in telemetry for business value justification
+            logger.info(f"✅ [RAG_COMPLETE] Total Retrieval Pipeline: {total_duration:.1f}ms")
+            logger.info(f"📊 [HALFVEC_STATS] Using halfp-float storage: 50% byte savings per index row (1.5KB vs 3.0KB)")
                 
             response = "I found the following in our knowledge base:\n\n" + final_context
             

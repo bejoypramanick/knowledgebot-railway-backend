@@ -152,9 +152,13 @@ async def process_with_kreuzberg(
             
             data = {
                 'output_format': 'markdown',
-                'extract_chunks': True, # Request chunking
-                'generate_embeddings': False, # We generate embeddings in the worker for full model-agnosticism
-                'chunking_strategy': 'hierarchical' # Use hierarchical semantic chunking
+                'chunking': json.dumps({
+                    "strategy": "semantic",
+                    "max_characters": 1000,
+                    "overlap": 200,
+                    "threshold": 0.85,
+                    "embedding_model": "fast"
+                })
             }
             
             response = await client.post(endpoint, files=files_payload, data=data)
