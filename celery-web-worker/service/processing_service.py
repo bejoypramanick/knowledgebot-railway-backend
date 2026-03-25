@@ -634,6 +634,13 @@ class ProcessingService:
         if not html_upload_success:
             raise Exception(f"Failed to upload HTML to S3 for {page_url}")
 
+        logger.info(
+            f"📦 [KREUZBERG] Temp HTML uploaded for extraction"
+            f" | website_id={website_id}"
+            f" | page_url={page_url}"
+            f" | html_s3_key={html_s3_key}"
+            f" | bucket={s3_file_storage.bucket_name}"
+        )
         logger.info(f"🔍 [KREUZBERG] Verifying temp HTML exists before queueing extraction: {html_s3_key}")
         success, result = s3_file_storage.generate_presigned_url(
             html_s3_key,
@@ -648,6 +655,13 @@ class ProcessingService:
             raise Exception(f"Failed to verify temp HTML {html_s3_key} before extraction: {result}")
 
         try:
+            logger.info(
+                f"📨 [KREUZBERG] Queueing extraction job"
+                f" | website_id={website_id}"
+                f" | page_url={page_url}"
+                f" | html_s3_key={html_s3_key}"
+                f" | bucket={s3_file_storage.bucket_name}"
+            )
             kreuzberg_markdown, kreuzberg_metadata = await process_with_kreuzberg(
                 s3_key=html_s3_key,
                 original_filename=html_filename,

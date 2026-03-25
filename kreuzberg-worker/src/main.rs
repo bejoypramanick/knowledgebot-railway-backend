@@ -136,6 +136,15 @@ async fn build_state() -> Result<AppState> {
         .build()
         .context("failed to build http client")?;
 
+    info!(
+        bucket = %bucket_name,
+        endpoint = %endpoint_url,
+        region = %region,
+        file_redis = %file_redis_client.is_some(),
+        web_redis = %web_redis_client.is_some(),
+        "kreuzberg-worker storage/runtime configured"
+    );
+
     Ok(AppState {
         file_redis_client,
         web_redis_client,
@@ -197,6 +206,14 @@ async fn handle_job(state: &AppState, job: ExtractionJob) -> Result<()> {
 }
 
 async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<ExtractionResult> {
+    info!(
+        job_id = %job.job_id,
+        document_id = %job.document_id,
+        worker_type = %job.worker_type,
+        bucket = %state.bucket_name,
+        s3_key = %job.s3_key,
+        "starting S3-backed extraction job"
+    );
     let file_bytes = download_from_s3(state, &job.s3_key).await?;
     let extraction = extract_and_chunk(&file_bytes).await?;
 
@@ -259,6 +276,17 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
 }
 
 async fn download_from_s3(state: &AppState, s3_key: &str) -> Result<Vec<u8>> {
+    info!(bucket = %state.bucket_name, s3_key = %s3_key, "checking source object before download");
+    state
+        .s3_client
+        .head_object()
+        .bucket(&state.bucket_name)
+        .key(s3_key)
+        .send()
+        .await
+        .with_context(|| format!("failed head_object for S3 key: {s3_key}"))?;
+
+    info!(bucket = %state.bucket_name, s3_key = %s3_key, "downloading source object from S3");
     let response = state
         .s3_client
         .get_object()
