@@ -275,7 +275,8 @@ class ScrapingDAO:
         processed_content_s3_key: str = None,
         filestore_character_count: int = 0,
         filestore_word_count: int = 0,
-        filestore_token_count: int = 0
+        filestore_token_count: int = 0,
+        gemini_state: str = 'pending'
     ) -> Optional[str]:
         """
         Record a child page immediately after it's uploaded to Gemini.
@@ -317,14 +318,14 @@ class ScrapingDAO:
                 file_size, char_count, title, description, crawl_session_id,
                 pages_scraped, processed_content_s3_key,
                 filestore_character_count, filestore_word_count, filestore_token_count,
-                created_at, updated_at
+                gemini_state, created_at, updated_at
             ) VALUES (
                 :parent_id, :page_url, :processing_status,
                 :gemini_file_name, :gemini_file_uri, CAST(:metadata AS jsonb), :depth, :user_role_id,
                 :file_size, :char_count, :title, :description, :crawl_session_id,
                 :pages_scraped, :processed_content_s3_key,
                 :filestore_character_count, :filestore_word_count, :filestore_token_count,
-                NOW(), NOW()
+                :gemini_state, NOW(), NOW()
             ) RETURNING id
         """
 
@@ -346,7 +347,8 @@ class ScrapingDAO:
             "processed_content_s3_key": processed_content_s3_key,
             "filestore_character_count": filestore_character_count,
             "filestore_word_count": filestore_word_count,
-            "filestore_token_count": filestore_token_count
+            "filestore_token_count": filestore_token_count,
+            "gemini_state": gemini_state
         }
 
         try:
@@ -389,7 +391,8 @@ class ScrapingDAO:
         page_count: int,
         total_size_bytes: int,
         total_char_count: int,
-        file_search_metadata: Dict[str, Any]
+        file_search_metadata: Dict[str, Any],
+        gemini_state: str = 'completed'
     ) -> bool:
         """
         Update parent website record with aggregate stats after scraping completes.
@@ -410,6 +413,7 @@ class ScrapingDAO:
                 metadata = :metadata,
                 file_size = :file_size,
                 char_count = :char_count,
+                gemini_state = :gemini_state,
                 processing_status = 'completed',
                 updated_at = NOW()
             WHERE id = :website_id
@@ -420,6 +424,7 @@ class ScrapingDAO:
             "metadata": json.dumps(file_search_metadata),
             "file_size": total_size_bytes,
             "char_count": total_char_count,
+            "gemini_state": gemini_state,
             "website_id": website_id
         }
 
@@ -452,7 +457,8 @@ class ScrapingDAO:
         processed_content_s3_key: str = None,
         filestore_character_count: int = 0,
         filestore_word_count: int = 0,
-        filestore_token_count: int = 0
+        filestore_token_count: int = 0,
+        gemini_state: str = 'completed'
     ) -> bool:
         """
         Update parent website record with single page data.
@@ -482,6 +488,7 @@ class ScrapingDAO:
                 UPDATE scraped_websites
                 SET gemini_file_name = :gemini_file_name,
                     gemini_file_uri = :gemini_file_uri,
+                    gemini_state = :gemini_state,
                     file_size = :file_size,
                     char_count = :char_count,
                     title = :title,
@@ -500,10 +507,12 @@ class ScrapingDAO:
             """
         else:
             # Don't update processing_status - keep it as 'processing' for multi-page crawls
+            # But DO update gemini_state for each page that successfully uploaded
             query = """
                 UPDATE scraped_websites
                 SET gemini_file_name = :gemini_file_name,
                     gemini_file_uri = :gemini_file_uri,
+                    gemini_state = :gemini_state,
                     file_size = :file_size,
                     char_count = :char_count,
                     title = :title,
@@ -534,6 +543,7 @@ class ScrapingDAO:
             "filestore_character_count": filestore_character_count,
             "filestore_word_count": filestore_word_count,
             "filestore_token_count": filestore_token_count,
+            "gemini_state": gemini_state,
             "website_id": website_id
         }
 

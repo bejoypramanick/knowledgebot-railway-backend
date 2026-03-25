@@ -58,6 +58,7 @@ class UploadResult:
     uploaded_at: datetime
     gemini_file_uri: Optional[str] = None
     display_name: Optional[str] = None
+    confirmed: bool = True
 
     @property
     def file_search_metadata(self) -> Dict[str, Any]:

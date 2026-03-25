@@ -956,10 +956,8 @@ class ProcessingService:
         
         logger.info(f"   ⏳ [GEMINI_UPLOAD] Waiting for indexing... (timeout: {max_wait}s)")
         
-        # Keep track of the current operation
-        # google-genai operations.get() handles both string ID and Operation object
-        current_op = operation
-        poll_interval = 2.0
+        # Use explicit tracking for confirmation
+        confirmed_done = False
         
         while True:
             elapsed = time.time() - start_time
@@ -973,6 +971,7 @@ class ProcessingService:
                 # API Spec: Operation object has a 'done' boolean field
                 if not isinstance(current_op, str) and getattr(current_op, 'done', False):
                     logger.info(f"   ✅ [GEMINI_UPLOAD] Indexing completed after {elapsed:.0f}s")
+                    confirmed_done = True
                     break
                 
                 # Check for errors if we have an object
@@ -996,6 +995,7 @@ class ProcessingService:
                 # Success check right after refresh
                 if getattr(current_op, 'done', False):
                     logger.info(f"   ✅ [GEMINI_UPLOAD] Indexing completed after {elapsed:.0f}s")
+                    confirmed_done = True
                     break
                     
             except Exception as e:
@@ -1006,14 +1006,15 @@ class ProcessingService:
                 # This was found necessary for stability during previous indexing spikes.
                 if elapsed > 30:
                     logger.info(f"   ℹ️ [GEMINI_FALLBACK] Assuming completion after {elapsed:.0f}s due to persistent refresh errors.")
+                    confirmed_done = False # Not confirmed by API, just assumed
                     break
                 
                 # Otherwise, continue polling
                 continue
         
-        return await self._extractDocumentNameFromOperation(current_op, job_context.store_name, display_name=display_name)
+        return await self._extractDocumentNameFromOperation(current_op, job_context.store_name, display_name=display_name, confirmed=confirmed_done)
 
-    async def _extractDocumentNameFromOperation(self, operation, store_name: str, display_name: Optional[str] = None) -> Optional[UploadResult]:
+    async def _extractDocumentNameFromOperation(self, operation, store_name: str, display_name: Optional[str] = None, confirmed: bool = True) -> Optional[UploadResult]:
         """Extract document name and URI from operation"""
         # Handle case where operation is still a string (ID)
         if isinstance(operation, str):
@@ -1035,7 +1036,8 @@ class ProcessingService:
                 file_search_store_name=store_name,
                 uploaded_at=datetime.utcnow(),
                 gemini_file_uri=doc_uri,
-                display_name=display_name
+                display_name=display_name,
+                confirmed=confirmed
             )
         
         logger.error(f"   ❌ Upload failed or invalid response - no document_name in operation.response")
@@ -1084,6 +1086,8 @@ class ProcessingService:
             except Exception as tc_err:
                 logger.warning(f"⚠️ [TOKEN_COUNT] Failed to count tokens for {page_data.page_url}: {tc_err}")
 
+            gemini_state = 'completed' if upload_result.confirmed else 'pending'
+            
             if await self._isSinglePageMode(page_data.page_url, job_context.root_url, crawl_config):
                 logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
 
@@ -1099,7 +1103,8 @@ class ProcessingService:
                     processed_content_s3_key=processed_content_s3_key,
                     filestore_character_count=filestore_character_count,
                     filestore_word_count=filestore_word_count,
-                    filestore_token_count=filestore_token_count
+                    filestore_token_count=filestore_token_count,
+                    gemini_state=gemini_state
                 )
 
                 # Save tables metadata (non-blocking)
@@ -1140,7 +1145,8 @@ class ProcessingService:
                     processed_content_s3_key=processed_content_s3_key,
                     filestore_character_count=filestore_character_count,
                     filestore_word_count=filestore_word_count,
-                    filestore_token_count=filestore_token_count
+                    filestore_token_count=filestore_token_count,
+                    gemini_state=gemini_state
                 )
 
                 # Save tables metadata (non-blocking)
@@ -1179,7 +1185,8 @@ class ProcessingService:
                 processed_content_s3_key=processed_content_s3_key,
                 filestore_character_count=filestore_character_count,
                 filestore_word_count=filestore_word_count,
-                filestore_token_count=filestore_token_count
+                filestore_token_count=filestore_token_count,
+                gemini_state=gemini_state
             )
 
             # Save tables metadata for child page (non-blocking)
@@ -1240,7 +1247,8 @@ class ProcessingService:
         processed_content_s3_key: Optional[str] = None,
         filestore_character_count: int = 0,
         filestore_word_count: int = 0,
-        filestore_token_count: int = 0
+        filestore_token_count: int = 0,
+        gemini_state: str = 'completed'
     ) -> bool:
         """Update parent website record with single page data"""
         logger.info(f"💾 [UPDATE_WEBSITE] Updating website {website_id} with page data")
@@ -1259,7 +1267,8 @@ class ProcessingService:
             processed_content_s3_key=processed_content_s3_key,
             filestore_character_count=filestore_character_count,
             filestore_word_count=filestore_word_count,
-            filestore_token_count=filestore_token_count
+            filestore_token_count=filestore_token_count,
+            gemini_state=gemini_state
         )
 
     # ==================== UTILITIES ====================
