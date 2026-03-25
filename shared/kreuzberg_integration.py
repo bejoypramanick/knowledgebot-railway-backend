@@ -157,13 +157,7 @@ async def process_with_kreuzberg(
             unified_config = {
                 "enable_quality_processing": True,
                 "output_format": "markdown",
-                "layout": {"preset": "fast"},
-                "chunking": { # Nest it here
-                    "strategy": "recursive",
-                    "max_characters": 1000,
-                    "overlap": 200,
-                    "enabled": True
-                }
+                "layout": {"preset": "fast"}
             }
 
         data = {

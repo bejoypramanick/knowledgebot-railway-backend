@@ -19,6 +19,7 @@ from shared.kreuzberg_integration import (
     should_use_kreuzberg_for_file,
     create_markdown_temp_file
 )
+from shared.chunking_service import chunking_service
 from shared.file_search import get_file_search_store_by_display_name
 from shared.sqlalchemy_db import get_db_session
 from shared.file_metrics import calculate_metrics
@@ -493,12 +494,9 @@ async def process_file_content(
                     # Content is already KV-formatted by process_with_kreuzberg
                     content_for_upload = markdown_content
                     
-                    # Extract chunks
-                    chunks = kreuzberg_metadata.get("chunks", [])
-                    for chunk in chunks:
-                        if "metadata" not in chunk:
-                            chunk["metadata"] = {}
-                        chunk["metadata"]["filename"] = original_filename
+                    # STEP 4.5: Hierarchical Semantic Chunking via Chonkie
+                    logger.info(f"🧩 [CHUNKING] Applying hierarchical semantic chunking to {original_filename}...")
+                    chunks = await chunking_service.chunk_text(content_for_upload, original_filename)
                     tables_metadata_list = chunks # Use tables_metadata_list temporarily to pass chunks down
                     
                     total_pages = kreuzberg_metadata.get('kreuzberg_metadata', {}).get('page_count', 0)
@@ -651,6 +649,11 @@ async def process_file_content(
         if processed_successfully or detected_mime_type == 'text/markdown':
             logger.info(f"🤖 [VECTOR_DB] Uploading chunks to pgvector - Original: {original_filename}...")
             try:
+                # If no chunks were generated (e.g. raw file or Kreuzberg didn't chunk), use Chonkie
+                if not tables_metadata_list and content_for_upload:
+                    logger.info(f"🧩 [CHUNKING] No chunks found, applying Chonkie to content_for_upload...")
+                    tables_metadata_list = await chunking_service.chunk_text(content_for_upload, original_filename)
+                
                 from shared.vector_dao import vector_dao
                 
                 chunks_to_insert = tables_metadata_list # We temporarily used this variable
