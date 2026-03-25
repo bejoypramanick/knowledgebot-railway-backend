@@ -181,7 +181,7 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
 
     let markdown_key = upload_bytes(
         state,
-        &format!("{}.md", job.artifact_prefix),
+        format!("{}.md", job.artifact_prefix),
         extraction.markdown.as_bytes().to_vec(),
         "text/markdown; charset=utf-8",
     )
@@ -189,7 +189,7 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
 
     let chunks_key = upload_bytes(
         state,
-        &format!("{}_chunks.json", job.artifact_prefix),
+        format!("{}_chunks.json", job.artifact_prefix),
         serde_json::to_vec_pretty(&extraction.chunks)?,
         "application/json",
     )
@@ -201,7 +201,7 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
         Some(
             upload_bytes(
                 state,
-                &format!("{}_tables.json", job.artifact_prefix),
+                format!("{}_tables.json", job.artifact_prefix),
                 serde_json::to_vec_pretty(&extraction.tables)?,
                 "application/json",
             )
@@ -220,7 +220,7 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
 
     let manifest_key = upload_bytes(
         state,
-        &format!("{}_manifest.json", job.artifact_prefix),
+        format!("{}_manifest.json", job.artifact_prefix),
         serde_json::to_vec_pretty(&manifest)?,
         "application/json",
     )
@@ -401,6 +401,7 @@ fn build_extraction_config() -> ExtractionConfig {
     let images = if extract_images {
         Some(ImageExtractionConfig {
             extract_images: true,
+            inject_placeholders: parse_env_bool("KREUZBERG_IMAGE_INJECT_PLACEHOLDERS", false),
             target_dpi: parse_env_i32("KREUZBERG_IMAGE_TARGET_DPI", 300),
             max_image_dimension: parse_env_i32("KREUZBERG_IMAGE_MAX_DIMENSION", 4096),
             auto_adjust_dpi: parse_env_bool("KREUZBERG_IMAGE_AUTO_ADJUST_DPI", true),
@@ -424,8 +425,11 @@ fn build_extraction_config() -> ExtractionConfig {
 
     let pdf_options = Some(PdfConfig {
         allow_single_column_tables: parse_env_bool("KREUZBERG_PDF_ALLOW_SINGLE_COLUMN_TABLES", false),
+        extract_annotations: parse_env_bool("KREUZBERG_PDF_EXTRACT_ANNOTATIONS", false),
         extract_images: parse_env_bool("KREUZBERG_PDF_EXTRACT_IMAGES", false),
         extract_metadata: parse_env_bool("KREUZBERG_PDF_EXTRACT_METADATA", true),
+        top_margin_fraction: parse_env_f32("KREUZBERG_PDF_TOP_MARGIN_FRACTION", 0.0),
+        bottom_margin_fraction: parse_env_f32("KREUZBERG_PDF_BOTTOM_MARGIN_FRACTION", 0.0),
         passwords: pdf_passwords,
         hierarchy: None,
     });
@@ -753,6 +757,13 @@ fn parse_env_f64(name: &str, default: f64) -> f64 {
     env::var(name)
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(default)
+}
+
+fn parse_env_f32(name: &str, default: f32) -> f32 {
+    env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
         .unwrap_or(default)
 }
 
