@@ -428,8 +428,8 @@ fn build_extraction_config() -> ExtractionConfig {
         extract_annotations: parse_env_bool("KREUZBERG_PDF_EXTRACT_ANNOTATIONS", false),
         extract_images: parse_env_bool("KREUZBERG_PDF_EXTRACT_IMAGES", false),
         extract_metadata: parse_env_bool("KREUZBERG_PDF_EXTRACT_METADATA", true),
-        top_margin_fraction: parse_env_f32("KREUZBERG_PDF_TOP_MARGIN_FRACTION", 0.0),
-        bottom_margin_fraction: parse_env_f32("KREUZBERG_PDF_BOTTOM_MARGIN_FRACTION", 0.0),
+        top_margin_fraction: Some(parse_env_f32("KREUZBERG_PDF_TOP_MARGIN_FRACTION", 0.0)),
+        bottom_margin_fraction: Some(parse_env_f32("KREUZBERG_PDF_BOTTOM_MARGIN_FRACTION", 0.0)),
         passwords: pdf_passwords,
         hierarchy: None,
     });
