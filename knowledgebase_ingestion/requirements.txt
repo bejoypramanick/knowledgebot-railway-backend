@@ -46,7 +46,7 @@ celery[redis]>=5.3.0
 redis>=5.0.0
 rq>=1.15.0
 
-# MessagePack for docling-serve result deserialization
+# MessagePack for extractor result deserialization
 msgpack>=1.0.5
 
 # OpenTelemetry

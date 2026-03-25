@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     knowledgebase_ingestion_url: str = "http://localhost:8001"
     website_crawling_url: str = "http://localhost:8002"
     chatbot_orchestration_url: str = "http://localhost:8003"
-    docling_service_url: str = "http://localhost:8004"
+    kreuzberg_service_url: str = "http://localhost:8000"
 
     # API Gateway
     api_gateway_port: int = 8000

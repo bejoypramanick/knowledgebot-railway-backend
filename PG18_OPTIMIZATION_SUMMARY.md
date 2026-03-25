@@ -1,7 +1,7 @@
 # PostgreSQL 18 Complete Database Optimization
 ## Comprehensive Performance Enhancement Across All 19 Tables
 
-**Last Updated:** 2026-03-21
+**Last Updated:** 2026-03-25
 **Commit:** 46bcf54
 **Migration File:** `sql/migrations/011_pg18_comprehensive_optimization.sql`
 
@@ -241,8 +241,8 @@ CREATE INDEX idx_scraped_websites_metadata_retry ON scraped_websites((metadata->
 #### file_uploads (23 columns + 2 virtual)
 - **Added:** file_category, is_successful virtual columns
 - **Compression:** 5 columns (URIs, keys, metadata)
-- **Indexes:** 9 (covering processing pipeline, docling perf, user files)
-- **Impact:** User file list 2x faster, docling pipeline visibility 4x faster
+- **Indexes:** 9 (covering processing pipeline, extractor perf, user files)
+- **Impact:** User file list 2x faster, extractor pipeline visibility 4x faster
 
 #### scraped_websites (24 columns + 1 virtual)
 - **Added:** url_domain virtual column
@@ -462,7 +462,7 @@ GROUP BY provider;
 
 -- 5. File processing pipeline
 SELECT processing_status, COUNT(*),
-       AVG(docling_processing_time_ms)
+       AVG(extractor_processing_time_ms)
 FROM file_uploads
 WHERE processing_status != 'completed'
 GROUP BY processing_status;

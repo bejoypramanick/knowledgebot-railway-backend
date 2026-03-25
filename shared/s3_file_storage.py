@@ -200,7 +200,7 @@ class S3FileStorage:
         """
         Verify that an S3 object exists before generating presigned URLs.
 
-        This prevents 404 errors when docling-serve tries to download from presigned URLs.
+        This prevents 404 errors when the extractor server tries to download from presigned URLs.
         Uses HEAD request which is faster than GET.
 
         Args:

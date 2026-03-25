@@ -1,6 +1,6 @@
 """
 Kreuzberg Document Intelligence Integration
-Replaces docling-serve with a fast, synchronous REST API call to the Kreuzberg container.
+Provides a fast, synchronous REST API call to the Kreuzberg container.
 """
 import asyncio
 import time
@@ -130,19 +130,24 @@ async def process_with_kreuzberg(
     logger.info(f"[KREUZBERG] MIME Type: {mime_type}")
     logger.info(f"[KREUZBERG] API URL: {endpoint}")
     
-    # DNS Diagnostics
+    # 2. DNS & Connectivity Diagnostics
     try:
         import socket
         hostname = endpoint.split("//")[-1].split(":")[0].split("/")[0]
         ip_addr = socket.gethostbyname(hostname)
-        logger.info(f"[KREUZBERG_DNS] Resolved {hostname} to {ip_addr}")
+        logger.info(f"🌐 [KREUZBERG_DNS] Resolved {hostname} to {ip_addr}")
     except Exception as dns_err:
         logger.warning(f"⚠️ [KREUZBERG_DNS] Could not resolve hostname {hostname}: {dns_err}")
-        
+        # Fallback to localhost if internal domain fails in development/local
+        if ".railway.internal" in endpoint:
+            fallback_endpoint = endpoint.replace("kreuzberg.railway.internal", "localhost")
+            logger.info(f"🔄 [KREUZBERG_FALLBACK] Attempting fallback to {fallback_endpoint}...")
+            endpoint = fallback_endpoint
+
     logger.info("=" * 80)
 
     try:
-        # 1. Download file from S3 into memory
+        # 3. Download file from S3 into memory
         file_bytes = await download_file_from_s3(presigned_url)
 
         # 2. Prepare Kreuzberg API Request

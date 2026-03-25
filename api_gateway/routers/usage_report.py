@@ -63,7 +63,7 @@ async def _fetch_all_data():
                    total_tables_count, total_table_rows_input,
                    total_table_chars_input, total_table_chars_output,
                    total_table_input_tokens, total_table_output_tokens,
-                   processed_by_docling, created_at
+                   processed_by_extractor, created_at
             FROM file_uploads WHERE created_at >= :since ORDER BY created_at DESC
         """), {"since": since})).fetchall()]
 

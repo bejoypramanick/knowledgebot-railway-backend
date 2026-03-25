@@ -69,7 +69,7 @@ celery_app.conf.update(
     },
     # Result backend configuration
     result_expires=3600,  # Results expire after 1 hour
-    # Task timeout (35 minutes: 30min docling timeout + 5min for S3/Gemini operations)
+    # Task timeout (35 minutes: 30min extractor timeout + 5min for S3/Gemini operations)
     task_soft_time_limit=2100,  # 35 minutes
     task_time_limit=2200,  # 35 minutes + 100s buffer
 )

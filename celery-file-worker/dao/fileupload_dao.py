@@ -55,10 +55,10 @@ class FileUploadDAO:
         char_count: int,
         sha256_hash: str,
         metadata: Dict[str, Any],
-        processed_by_docling: bool = False,
-        docling_processing_time_ms: int = None,
-        docling_images_extracted: int = 0,
-        docling_images_with_ocr: int = 0,
+        processed_by_extractor: bool = False,
+        extractor_processing_time_ms: int = None,
+        extractor_images_extracted: int = 0,
+        extractor_images_with_ocr: int = 0,
         original_file_extension: str = None,
         original_mime_type: str = None,
         processed_content_s3_key: str = None,
@@ -78,7 +78,7 @@ class FileUploadDAO:
         logger.info(f"   Gemini File: {gemini_file_name}")
         logger.info(f"   File Size: {file_size:,} bytes")
         logger.info(f"   Char Count: {char_count:,}")
-        logger.info(f"   Processed by Docling: {processed_by_docling}")
+        logger.info(f"   Processed by Extractor: {processed_by_extractor}")
 
         query = """
             UPDATE file_uploads
@@ -89,10 +89,10 @@ class FileUploadDAO:
                 char_count = :char_count,
                 sha256_hash = :sha256_hash,
                 metadata = CAST(:metadata AS jsonb),
-                processed_by_docling = :processed_by_docling,
-                docling_processing_time_ms = :docling_processing_time_ms,
-                docling_images_extracted = :docling_images_extracted,
-                docling_images_with_ocr = :docling_images_with_ocr,
+                processed_by_extractor = :processed_by_extractor,
+                extractor_processing_time_ms = :extractor_processing_time_ms,
+                extractor_images_extracted = :extractor_images_extracted,
+                extractor_images_with_ocr = :extractor_images_with_ocr,
                 file_extension = :original_file_extension,
                 mime_type = :original_mime_type,
                 processed_content_s3_key = :processed_content_s3_key,
@@ -114,10 +114,10 @@ class FileUploadDAO:
             "char_count": char_count,
             "sha256_hash": sha256_hash,
             "metadata": json.dumps(metadata),
-            "processed_by_docling": processed_by_docling,
-            "docling_processing_time_ms": docling_processing_time_ms,
-            "docling_images_extracted": docling_images_extracted,
-            "docling_images_with_ocr": docling_images_with_ocr,
+            "processed_by_extractor": processed_by_extractor,
+            "extractor_processing_time_ms": extractor_processing_time_ms,
+            "extractor_images_extracted": extractor_images_extracted,
+            "extractor_images_with_ocr": extractor_images_with_ocr,
             "original_file_extension": original_file_extension,
             "original_mime_type": original_mime_type,
             "processed_content_s3_key": processed_content_s3_key,

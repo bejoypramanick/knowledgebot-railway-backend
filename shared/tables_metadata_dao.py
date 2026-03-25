@@ -20,7 +20,7 @@ async def save_tables_metadata(
     Insert per-table metadata rows and update aggregate columns on the parent record.
 
     Args:
-        tables_metadata: List of dicts from process_docling_content(), each with:
+        tables_metadata: List of dicts from process_extractor_content(), each with:
             table_index, table_column_count_input, table_row_count_input,
             table_character_count_input, table_word_count_input,
             table_word_count_output, table_character_count_output,

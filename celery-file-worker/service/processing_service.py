@@ -284,7 +284,7 @@ async def process_file_content(
     1. Query database for file details
     2. Download from S3
     3. Validation (extension, MIME, size, duplicates)
-    4. Format conversion (HTML→Markdown, PDF→Markdown via Docling)
+    4. Format conversion (HTML→Markdown, PDF→Markdown via Kreuzberg)
     5. Gemini upload
     6. Database record creation
     7. Delete from S3
@@ -294,13 +294,13 @@ async def process_file_content(
     file_service = FileService()
     start_time = time.perf_counter()
     tmp_path = None
-    json_tmp_path = None  # Temporary file for Docling JSON response
+    json_tmp_path = None  # Temporary file for Kreuzberg JSON response
 
     # Initialize Kreuzberg tracking variables
-    processed_by_kreuzberg = False
-    kreuzberg_processing_time_ms = 0
-    docling_images_extracted = 0
-    docling_images_with_ocr = 0
+    processed_by_extractor = False
+    extractor_processing_time_ms = 0
+    extractor_images_extracted = 0
+    extractor_images_with_ocr = 0
     original_file_extension = None
     original_mime_type = None
     char_count = 0
@@ -402,7 +402,7 @@ async def process_file_content(
         logger.info(f"🔍 [DEBUG] presigned_url length: {len(presigned_url) if presigned_url else 'None'}")
         logger.info(f"🔍 [DEBUG] presigned_url starts with http: {presigned_url.startswith('http') if presigned_url else 'None'}")
 
-        # No need to create temp files - docling service will download directly
+        # No need to create temp files - kreuzberg service will download directly
         tmp_path = None  # Not used with presigned URL approach
 
         # STEP 3: VALIDATION PHASE
@@ -460,14 +460,14 @@ async def process_file_content(
         content_for_upload = ""
         tables_metadata_list = []
         total_pages = 0
-        processed_by_docling = False
-        docling_processing_time_ms = 0
-        docling_images_extracted = 0
-        docling_images_with_ocr = 0
+        processed_by_extractor = False
+        extractor_processing_time_ms = 0
+        extractor_images_extracted = 0
+        extractor_images_with_ocr = 0
         processed_content_s3_key = None
         char_count = 0
 
-        # STEP 4: FORMAT CONVERSION PHASE - Use Docling for all supported formats (returns JSON)
+        # STEP 4: FORMAT CONVERSION PHASE - Use Kreuzberg for all supported formats (returns JSON)
         json_tmp_path = None
         processed_successfully = False
 
@@ -487,8 +487,8 @@ async def process_file_content(
                 )
 
                 if markdown_content:
-                    processed_by_kreuzberg = True
-                    kreuzberg_processing_time_ms = kreuzberg_metadata.get('processing_time_ms', 0)
+                    processed_by_extractor = True
+                    extractor_processing_time_ms = kreuzberg_metadata.get('processing_time_ms', 0)
                     
                     # Content is already KV-formatted by process_with_kreuzberg
                     content_for_upload = markdown_content
@@ -614,7 +614,7 @@ async def process_file_content(
             if not settings.kreuzberg_enabled:
                 logger.info(f"📝 [ROUTING] File doesn't require kreuzberg processing, sending raw to Gemini API")
             else:
-                logger.info(f"📝 [ROUTING] File type {detected_mime_type} doesn't require docling processing, sending raw to Gemini API")
+                logger.info(f"📝 [ROUTING] File type {detected_mime_type} doesn't require kreuzberg processing, sending raw to Gemini API")
             
             # Read local file content for metrics if it's a text/markdown file
             if tmp_path and os.path.exists(tmp_path):
@@ -678,19 +678,8 @@ async def process_file_content(
                     else:
                         logger.info(f"✅ Uploaded {len(chunks_to_insert)} chunks with provider-agnostic embeddings to vector DB")
                 else:
-                    logger.warning(f"⚠️ No chunks produced, creating a single chunk from the file content")
-                    if content_for_upload:
-                        dummy_chunk = {
-                            "text": content_for_upload,
-                            "metadata": {"filename": original_filename}
-                        }
-                        success = await vector_dao.batch_insert_chunks(
-                            chunks=[dummy_chunk], 
-                            document_id=file_id,
-                            document_type='file'
-                        )
-                        if not success:
-                            final_state = "failed"
+                    logger.error(f"   ❌ No chunks produced by extractor for file {file_id}")
+                    raise Exception(f"No chunks produced by extractor for file {file_id}")
                 
                 # Clear tables_metadata_list since we used it for chunks and don't want it saved as tables
                 tables_metadata_list = []
@@ -756,10 +745,10 @@ async def process_file_content(
                         'document_name': document_name,
                         'uploaded_at': gemini_processed_at.isoformat() if gemini_processed_at else None
                     },
-                    processed_by_docling=processed_by_docling,
-                    docling_processing_time_ms=docling_processing_time_ms,
-                    docling_images_extracted=docling_images_extracted,
-                    docling_images_with_ocr=docling_images_with_ocr,
+                    processed_by_extractor=processed_by_extractor,
+                    extractor_processing_time_ms=extractor_processing_time_ms,
+                    extractor_images_extracted=extractor_images_extracted,
+                    extractor_images_with_ocr=extractor_images_with_ocr,
                     original_file_extension=original_file_extension,
                     original_mime_type=original_mime_type,
                     processed_content_s3_key=processed_content_s3_key,
@@ -837,10 +826,10 @@ async def process_file_content(
                 logger.info(f"   ⏱️  Time: {processing_time:.2f}s")
                 logger.info(f"   📊 Size: {file_size} bytes")
                 logger.info(f"   📝 Char Count: {char_count:,}")
-                logger.info(f"   🔧 Docling: {processed_by_docling}")
-                if processed_by_docling:
-                    logger.info(f"   ⏱️  Docling Time: {docling_processing_time_ms}ms")
-                    logger.info(f"   🖼️  Images: {docling_images_extracted} (OCR: {docling_images_with_ocr})")
+                logger.info(f"   🔧 Kreuzberg: {processed_by_kreuzberg}")
+                if processed_by_kreuzberg:
+                    logger.info(f"   ⏱️  Kreuzberg Time: {kreuzberg_processing_time_ms}ms")
+                    logger.info(f"   🖼️  Images: {kreuzberg_images_extracted} (OCR: {kreuzberg_images_with_ocr})")
                 logger.info(f"   🔐 Hash: {sha256_hash}")
 
                 return {

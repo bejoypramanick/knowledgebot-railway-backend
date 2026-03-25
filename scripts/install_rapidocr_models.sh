@@ -1,10 +1,10 @@
 #!/bin/bash
 
 ##############################################################################
-# RapidOCR Model Installer for Docling
+# RapidOCR Model Installer for Extractor
 #
 # This script downloads and installs all required RapidOCR models for
-# docling-serve to work in offline mode (with DOCLING_SERVE_ARTIFACTS_PATH set)
+# extractor server to work in offline mode
 #
 # Usage: bash install_rapidocr_models.sh [DATA_PATH]
 # Default DATA_PATH: /data
@@ -30,7 +30,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}RapidOCR Model Installer for Docling${NC}"
+echo -e "${BLUE}RapidOCR Model Installer for Extractor${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "${YELLOW}Target directory: $DATA_PATH${NC}"
@@ -135,8 +135,8 @@ echo -e "${GREEN}Installation Complete!${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
-echo "1. Ensure DOCLING_SERVE_ARTIFACTS_PATH=/data is set"
-echo "2. Restart docling-serve container"
+echo "1. Ensure EXTRACTOR_ARTIFACTS_PATH=/data is set"
+echo "2. Restart extractor container"
 echo "3. Models should now load without warnings"
 echo ""
 echo -e "${YELLOW}Directory Structure:${NC}"

@@ -20,7 +20,7 @@ def format_service_name(service_name: str) -> str:
         chatbot_orchestration → Chatbot Orchestration
         knowledgebase_ingestion → Knowledgebase Ingestion
         website_crawling → Website Crawling
-        docling_service → Docling Service
+        kreuzberg_service → Kreuzberg Service
         configuration → Configuration
     """
     # Mapping of service names to display names
@@ -29,7 +29,7 @@ def format_service_name(service_name: str) -> str:
         'chatbot_orchestration': 'Chatbot Orchestration',
         'knowledgebase_ingestion': 'Knowledgebase Ingestion',
         'website_crawling': 'Website Crawling',
-        'docling_service': 'Docling Service',
+        'kreuzberg_service': 'Kreuzberg Service',
         'configuration': 'Configuration',
     }
 
@@ -356,7 +356,7 @@ class PerformanceDAO:
             {"service": format_service_name("api_gateway"), "uptime": 99.9},
             {"service": format_service_name("chatbot_orchestration"), "uptime": 99.8},
             {"service": format_service_name("configuration"), "uptime": 99.9},
-            {"service": format_service_name("docling_service"), "uptime": 98.5},
+            {"service": format_service_name("kreuzberg_service"), "uptime": 98.5},
             {"service": format_service_name("knowledgebase_ingestion"), "uptime": 99.7},
             {"service": format_service_name("website_crawling"), "uptime": 99.6}
         ]
@@ -504,7 +504,7 @@ class PerformanceDAO:
                 # If no data for this month, create entries for all known services with 0 uptime
                 if not services_for_month:
                     all_services = ['API Gateway', 'Chatbot Orchestration', 'Configuration',
-                                   'Docling Service', 'Knowledgebase Ingestion', 'Website Crawling']
+                                   'Extractor Service', 'Knowledgebase Ingestion', 'Website Crawling']
                     services_for_month = {
                         service: {
                             "uptime": 0,
@@ -539,7 +539,7 @@ class PerformanceDAO:
                 current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
                 empty_months = []
                 all_services = ['API Gateway', 'Chatbot Orchestration', 'Configuration',
-                               'Docling Service', 'Knowledgebase Ingestion', 'Website Crawling']
+                               'Extractor Service', 'Knowledgebase Ingestion', 'Website Crawling']
 
                 for i in range(5, -1, -1):
                     month_date = current_month

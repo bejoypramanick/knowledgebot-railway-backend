@@ -6,7 +6,7 @@ rootDirectory = "."
 # Celery worker for file processing queue
 # Note: WORKDIR in Dockerfile is /app/celery-file-worker, so no need for cd
 # Using prefork pool for better asyncio compatibility
-# Sequential processing: 1 file at a time to prevent docling service overload
+# Sequential processing: 1 file at a time to prevent extractor service overload
 # Concurrency: 1 worker (prefork process)
 startCommand = "celery -A celery_app worker -Q file_processing -l info --pool=prefork --concurrency=1 --max-tasks-per-child=50"
 
@@ -16,7 +16,7 @@ restartPolicyMaxRetries = 10
 
 # Environment variables needed (set in Railway dashboard):
 # - REDIS_URL or FILE_REDIS_URL (DB 0 for Celery file queue)
-# - DOCLING_REDIS_URL (DB 2 for Docling RQ queue, auto-constructed from REDIS_URL if not set)
+# - EXTRACTOR_REDIS_URL (DB 2 for Extractor queue, auto-constructed from REDIS_URL if not set)
 # - DATABASE_URL=postgresql://...
 # - GEMINI_API_KEY=...
 # - GEMINI_FILE_SEARCH_STORE_NAME=knowledgebotsearchstore-xxxxx
@@ -25,4 +25,4 @@ restartPolicyMaxRetries = 10
 # - File uploads (process_file_upload_task)
 # - File status: Queued → processing → completed/failed
 # - Celery queue: file_processing (Redis DB 0)
-# - Enqueues document conversion to Docling RQ workers (Redis DB 2)
+# - Enqueues document conversion to Extractor workers (Redis DB 2)

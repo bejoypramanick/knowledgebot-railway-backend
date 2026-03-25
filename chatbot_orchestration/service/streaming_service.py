@@ -1315,7 +1315,7 @@ class StreamingService:
                 logger.info("🔗 GROUNDING TRUTH & DATA SOURCES:")
                 logger.info(f"   Source: Gemini FileStore ({settings.chatbot_model} model)")
                 logger.info("   Search Type: Knowledge base with file retrieval")
-                logger.info("   Processing: Raw docling output formatted by Gemini")
+                logger.info("   Processing: Raw extractor output formatted by Gemini")
                 logger.info("   Response Format: HTML with proper citations")
                 logger.info("   Data Quality: Grounded in uploaded knowledge base files")
                 logger.info("-" * 100)

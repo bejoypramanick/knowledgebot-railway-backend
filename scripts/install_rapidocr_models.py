@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """
-RapidOCR Model Installer for Docling
+RapidOCR Model Installer for Extractor
 
 This script downloads and installs all required RapidOCR models for
-docling-serve to work in offline mode (with DOCLING_SERVE_ARTIFACTS_PATH set)
-
-Usage:
-    python install_rapidocr_models.py [--data-path /data]
+extractor server to work in offline mode
 """
 
 import os
@@ -26,7 +23,7 @@ NC = '\033[0m'  # No Color
 
 
 class RapidOCRInstaller:
-    """Install RapidOCR models for docling"""
+    """Install RapidOCR models for extractor"""
 
     # Model URLs - using GitHub raw content
     MODELS = {
@@ -67,7 +64,7 @@ class RapidOCRInstaller:
     def print_header(self):
         """Print installation header"""
         print(f"{BLUE}{'='*50}{NC}")
-        print(f"{BLUE}RapidOCR Model Installer for Docling{NC}")
+        print(f"{BLUE}RapidOCR Model Installer for Extractor{NC}")
         print(f"{BLUE}{'='*50}{NC}")
         print(f"{YELLOW}Target directory: {self.data_path}{NC}")
         print()
@@ -199,8 +196,8 @@ class RapidOCRInstaller:
         print(f"{BLUE}{'='*50}{NC}\n")
 
         print(f"{YELLOW}Next Steps:{NC}")
-        print("1. Ensure DOCLING_SERVE_ARTIFACTS_PATH=/data is set on Railway")
-        print("2. Restart docling-serve container")
+        print("1. Ensure EXTRACTOR_ARTIFACTS_PATH=/data is set on Railway")
+        print("2. Restart extractor container")
         print("3. Models should now load without warnings")
         print()
 
@@ -234,7 +231,7 @@ class RapidOCRInstaller:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Install RapidOCR models for docling-serve'
+        description='Install RapidOCR models for extractor'
     )
     parser.add_argument(
         '--data-path',

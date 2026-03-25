@@ -1,6 +1,6 @@
 """
 Extract mathematical equations from PDF as images and use Gemini Vision
-to accurately read them (avoiding docling's OCR errors).
+to accurately read them (avoiding extractor OCR errors).
 """
 import json
 import asyncio
@@ -10,11 +10,11 @@ from concurrent.futures import ThreadPoolExecutor
 from core.ai import get_genai_client
 from shared.otel_logger import get_otel_logger
 
-logger = get_otel_logger("equation_extractor", "docling")
+logger = get_otel_logger("equation_extractor", "extractor")
 
 
 async def extract_and_fix_equations_with_vision(
-    docling_json: str,
+    kreuzberg_json: str,
     pdf_images: Optional[List[bytes]] = None
 ) -> str:
     """
@@ -24,7 +24,7 @@ async def extract_and_fix_equations_with_vision(
     If no images provided, attempts to extract from docling's image data.
 
     Args:
-        docling_json: Raw docling JSON output
+        kreuzberg_json: Raw kreuzberg JSON output
         pdf_images: Optional list of page images (bytes) from PDF
 
     Returns:
@@ -33,19 +33,19 @@ async def extract_and_fix_equations_with_vision(
     logger.info("[EQUATIONS_VISION] Starting equation extraction via Gemini Vision...")
 
     try:
-        # Parse docling JSON to find equation regions
-        doc = json.loads(docling_json)
+        # Parse Kreuzberg JSON to find equation regions
+        doc = json.loads(kreuzberg_json)
     except (json.JSONDecodeError, TypeError):
-        logger.warning("[EQUATIONS_VISION] Could not parse docling JSON")
+        logger.warning("[EQUATIONS_VISION] Could not parse Kreuzberg JSON")
         return ""
 
-    # Check if docling has extracted images with bounding boxes
+    # Check if extractor has extracted images with bounding boxes
     pictures = doc.get("pictures", [])
     if not pictures:
-        logger.info("[EQUATIONS_VISION] No pictures/images found in docling output")
+        logger.info("[EQUATIONS_VISION] No pictures/images found in extractor output")
         return ""
 
-    logger.info(f"[EQUATIONS_VISION] Found {len(pictures)} images in docling output")
+    logger.info(f"[EQUATIONS_VISION] Found {len(pictures)} images in extractor output")
 
     try:
         genai_client = get_genai_client()
@@ -139,9 +139,9 @@ correct them based on mathematical context."""
         return ""
 
 
-def identify_equation_regions(docling_json: str) -> List[Dict[str, Any]]:
+def identify_equation_regions(kreuzberg_json: str) -> List[Dict[str, Any]]:
     """
-    Identify regions in docling output that likely contain equations.
+    Identify regions in extractor output that likely contain equations.
 
     Looks for:
     - Text with mathematical symbols
@@ -149,13 +149,13 @@ def identify_equation_regions(docling_json: str) -> List[Dict[str, Any]]:
     - Regions with suspected OCR errors
 
     Args:
-        docling_json: Raw docling JSON
+        kreuzberg_json: Raw kreuzberg JSON
 
     Returns:
         List of suspected equation regions
     """
     try:
-        doc = json.loads(docling_json)
+        doc = json.loads(kreuzberg_json)
     except (json.JSONDecodeError, TypeError):
         return []
 

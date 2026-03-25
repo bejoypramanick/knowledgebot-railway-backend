@@ -18,7 +18,7 @@ Complete consolidated database schema for the Knowledgebot platform. All DDLs ha
 - ✅ **Role-Based Access Control** - User, admin, and human agent roles
 - ✅ **RAG Integration** - Gemini FileSearch and cached content support
 - ✅ **Session Management** - Complete chat session tracking with assignments
-- ✅ **Knowledge Base** - File uploads and website scraping with Docling integration
+- ✅ **Knowledge Base** - File uploads and website scraping with Extractor integration
 - ✅ **Monitoring** - Health checks, metrics, and notifications
 - ✅ **Performance Optimized** - Strategic indexes for query optimization
 
@@ -117,10 +117,10 @@ All sequences configured with:
 **file_uploads**
 - Uploaded document files
 - Gemini integration: gemini_file_name, gemini_file_uri, gemini_state
-- Docling processing: processed_by_docling, docling_processing_time_ms, docling_images_extracted
+- Extractor processing: processed_by_extractor, extractor_processing_time_ms, extractor_images_extracted
 - Processing status: pending, processing, completed, failed, cancelled
 - S3 integration: processed_content_s3_key (from migration 004)
-- Conditional indexes for pending/processing files and Docling processing
+- Conditional indexes for pending/processing files and Extractor processing
 - SHA256 hash for duplicate detection
 
 **scraped_websites**
@@ -485,6 +485,7 @@ For issues or questions:
 
 ---
 
-**Last Updated:** 2026-03-20
+**Last Updated:** 2026-03-25
 **Status:** ✅ Production-Ready
 **File:** `database_schema_production.sql`
+```

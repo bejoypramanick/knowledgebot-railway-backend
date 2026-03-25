@@ -222,21 +222,21 @@ class ProcessingService:
             job_context: JobContext,
             crawl_config: CrawlConfig
         ) -> Optional[PageMetrics]:
-            """Process one page: convert (docling) → upload → record"""
+            """Process one page: convert (kreuzberg) → upload → record"""
             logger.info(f"📄 [PIPELINE] Processing: {page_data.page_url}")
 
             try:
                 start_time = time.time()
 
-                # Convert HTML to markdown via docling
+                # Convert HTML to markdown via kreuzberg
                 # HTML is pre-cleaned by crawl4ai (menus, navbars, ads removed)
                 try:
                     markdown_content, processed_content_s3_key, chunks = await self._preparePageAsMarkdown(
                         page_data.page_html, page_data.page_url, website_id=job_context.website_id, remove_ads=True
                     )
-                except Exception as docling_error:
-                    logger.error(f"   ❌ Docling processing failed: {docling_error}")
-                    logger.warning(f"   ⏭️ Skipping page due to docling error")
+                except Exception as kreuzberg_error:
+                    logger.error(f"   ❌ Kreuzberg processing failed: {kreuzberg_error}")
+                    logger.warning(f"   ⏭️ Skipping page due to kreuzberg error")
                     return None
 
                 page_data = PageData(
@@ -274,39 +274,8 @@ class ProcessingService:
                         return None
                     logger.info(f"   ✅ Uploaded {len(chunks)} chunks with provider-agnostic embeddings to vector DB")
                 else:
-                    logger.warning(f"   ⚠️ No chunks produced by Kreuzberg for {page_data.page_url}")
-                    if page_data.markdown:
-                        # ⚠️ FALLBACK: Kreuzberg returned 0 chunks but we have markdown.
-                        # Manually split into reasonable chunks (1000 chars) and embed each one
-                        # so they are actually searchable in the vector DB.
-                        CHUNK_SIZE = 1000
-                        md = page_data.markdown
-                        fallback_chunks = []
-                        for i in range(0, len(md), CHUNK_SIZE):
-                            snippet = md[i:i + CHUNK_SIZE]
-                            if snippet.strip():
-                                fallback_chunks.append({
-                                    "text": snippet,
-                                    "content": snippet,
-                                    "metadata": {"title": page_data.title, "url": page_data.page_url, "chunk_index": i // CHUNK_SIZE}
-                                })
-                        
-                        logger.info(f"   🔄 [FALLBACK] Created {len(fallback_chunks)} manual chunks from {len(md)} chars of markdown")
-                        
-                        # Generate embeddings for fallback chunks (same path as normal chunks)
-                        from shared.embeddings import batch_generate_embeddings
-                        fallback_texts = [c["text"] for c in fallback_chunks]
-                        fallback_embeddings = await batch_generate_embeddings(fallback_texts)
-                        for i, embedding in enumerate(fallback_embeddings):
-                            if i < len(fallback_chunks):
-                                fallback_chunks[i]["embedding"] = embedding
-                        
-                        await vector_dao.batch_insert_chunks(
-                            chunks=fallback_chunks,
-                            document_id=job_context.website_id,
-                            document_type='website'
-                        )
-                        logger.info(f"   ✅ [FALLBACK] Inserted {len(fallback_chunks)} embedded fallback chunks into vector DB")
+                    logger.error(f"   ❌ No chunks produced by Kreuzberg for {page_data.page_url}")
+                    raise Exception(f"No chunks produced by extractor for {page_data.page_url}")
 
                 self._current_page_data = page_data
                 
@@ -654,7 +623,7 @@ class ProcessingService:
 
     async def _preparePageAsMarkdown(self, html_content: str, page_url: str, website_id: Optional[str] = None, remove_ads: bool = True) -> Tuple[str, Optional[str], list]:
         """
-        Process HTML with docling queue (same as file worker).
+        Process HTML with kreuzberg queue (same as file worker).
         HTML is pre-cleaned by crawl4ai to remove menus, navbars, ads.
         Extracts: text + tables, with text-based equation reconstruction.
 
@@ -787,7 +756,7 @@ class ProcessingService:
             extracted_docs = await self._processEmbeddedDocuments(file_links)
             return await self._appendDocumentsToMarkdown(page_markdown, extracted_docs)
         except Exception as e:
-            logger.warning(f"⚠️ [DOCLING] Error: {e}")
+            logger.warning(f"⚠️ [KREUZBERG] Error: {e}")
             return page_markdown
 
     async def _findDocumentLinksInHTML(self, html_content: str, page_url: str) -> List[Dict]:
@@ -795,7 +764,7 @@ class ProcessingService:
         from bs4 import BeautifulSoup
 
         soup = BeautifulSoup(html_content, 'lxml')
-        docling_supported = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls'}
+        kreuzberg_supported = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls'}
 
         file_links = []
         for link in soup.find_all('a', href=True):
@@ -803,14 +772,14 @@ class ProcessingService:
             if not href.startswith(('http://', 'https://')):
                 href = urljoin(page_url, href)
 
-            if any(urlparse(href).path.lower().endswith(ext) for ext in docling_supported):
+            if any(urlparse(href).path.lower().endswith(ext) for ext in kreuzberg_supported):
                 file_links.append({'url': href, 'text': link.get_text(strip=True) or 'Document'})
 
-        logger.info(f"📎 [DOCLING] Found {len(file_links)} embedded files")
+        logger.info(f"📎 [KREUZBERG] Found {len(file_links)} embedded files")
         return file_links[:5]
 
     async def _processEmbeddedDocuments(self, file_links: List[Dict]) -> List[Dict]:
-        """Process all files through docling service"""
+        """Process all files through kreuzberg service"""
         import httpx
 
         extracted_docs = []
@@ -823,7 +792,7 @@ class ProcessingService:
         return extracted_docs
 
     async def _processEmbeddedDocument(self, client: Any, file_link: Dict) -> Optional[Dict]:
-        """Process single file through docling"""
+        """Process single file through kreuzberg"""
         file_url = file_link['url']
 
         try:

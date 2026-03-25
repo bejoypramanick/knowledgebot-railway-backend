@@ -110,7 +110,7 @@ def process_file_upload_task(
         logger.error("=" * 80)
         logger.error(f"📄 [FILE] File ID: {file_id}")
         logger.error(f"⏱️  [TIMEOUT] Task was killed due to timeout")
-        logger.error(f"💡 [HINT] File may be too large or docling queue is backed up")
+        logger.error(f"💡 [HINT] File may be too large or extractor queue is backed up")
         
         # Mark file as failed in database
         try:
@@ -127,7 +127,7 @@ def process_file_upload_task(
         
         return {
             "success": False,
-            "error": "Processing timeout (35 minutes) - file may be too large or docling queue is backed up"
+            "error": "Processing timeout (35 minutes) - file may be too large or extractor queue is backed up"
         }
 
     except Exception as e:

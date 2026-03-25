@@ -6,7 +6,7 @@ instead of PostgreSQL on every page load.
 
 Cache is warmed on server start and invalidated on mutations.
 
-Redis DB layout: DB0=file tasks, DB1=web tasks, DB2=docling RQ,
+Redis DB layout: DB0=file tasks, DB1=web tasks, DB2=extractor,
 DB3=pub/sub+presence, DB4=agent cache, DB5=session UUID cache,
 DB6=chat store, DB7=UI cache (this module)
 """
