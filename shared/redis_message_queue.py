@@ -216,17 +216,16 @@ class RedisMessageQueue:
         worker_type = message.get("worker_type", "file")
         connection = self._web_connection if worker_type == "web" else self._file_connection
         if connection is None:
-            logger.error("❌ %s Redis not available, cannot publish extraction task", worker_type)
+            logger.error(f"❌ {worker_type} Redis not available, cannot publish extraction task")
             return False
 
         try:
             message_json = json.dumps(message)
             connection.rpush(self.EXTRACT_TASK_QUEUE, message_json)
             logger.info(
-                "📤 [EXTRACT] Published %s task: job_id=%s document_id=%s",
-                worker_type,
-                message.get("job_id"),
-                message.get("document_id"),
+                f"📤 [EXTRACT] Published {worker_type} task:"
+                f" job_id={message.get('job_id')}"
+                f" document_id={message.get('document_id')}"
             )
             return True
         except Exception as e:
@@ -245,10 +244,9 @@ class RedisMessageQueue:
                 _, message_json = result
                 message = json.loads(message_json)
                 logger.info(
-                    "📥 [EXTRACT] Received %s task: job_id=%s document_id=%s",
-                    worker_type,
-                    message.get("job_id"),
-                    message.get("document_id"),
+                    f"📥 [EXTRACT] Received {worker_type} task:"
+                    f" job_id={message.get('job_id')}"
+                    f" document_id={message.get('document_id')}"
                 )
                 return message
             return None
@@ -261,7 +259,7 @@ class RedisMessageQueue:
         worker_type = message.get("worker_type", "file")
         connection = self._web_connection if worker_type == "web" else self._file_connection
         if connection is None:
-            logger.error("❌ %s Redis not available, cannot publish extraction result", worker_type)
+            logger.error(f"❌ {worker_type} Redis not available, cannot publish extraction result")
             return False
 
         try:
@@ -269,10 +267,9 @@ class RedisMessageQueue:
             message_json = json.dumps(message)
             connection.rpush(queue_name, message_json)
             logger.info(
-                "📤 [EXTRACT_RESULT] Published %s result: job_id=%s status=%s",
-                worker_type,
-                message.get("job_id"),
-                message.get("status"),
+                f"📤 [EXTRACT_RESULT] Published {worker_type} result:"
+                f" job_id={message.get('job_id')}"
+                f" status={message.get('status')}"
             )
             return True
         except Exception as e:
@@ -292,10 +289,9 @@ class RedisMessageQueue:
                 _, message_json = result
                 message = json.loads(message_json)
                 logger.info(
-                    "📥 [EXTRACT_RESULT] Received %s result: job_id=%s status=%s",
-                    worker_type,
-                    message.get("job_id"),
-                    message.get("status"),
+                    f"📥 [EXTRACT_RESULT] Received {worker_type} result:"
+                    f" job_id={message.get('job_id')}"
+                    f" status={message.get('status')}"
                 )
                 return message
             return None
