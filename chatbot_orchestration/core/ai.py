@@ -34,16 +34,25 @@ def get_model():
     try:
         if provider == "google":
             api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-            return GoogleModel(model_name, api_key=api_key)
+            if api_key and not os.getenv("GEMINI_API_KEY"):
+                os.environ["GEMINI_API_KEY"] = api_key
+            return GoogleModel(model_name)
         elif provider == "openai":
             api_key = os.getenv("OPENAI_API_KEY") or settings.openai_api_key
-            return OpenAIModel(model_name, api_key=api_key)
+            if api_key and not os.getenv("OPENAI_API_KEY"):
+                os.environ["OPENAI_API_KEY"] = api_key
+            return OpenAIModel(model_name)
         elif provider == "anthropic":
             api_key = os.getenv("ANTHROPIC_API_KEY") or settings.anthropic_api_key
-            return AnthropicModel(model_name, api_key=api_key)
+            if api_key and not os.getenv("ANTHROPIC_API_KEY"):
+                os.environ["ANTHROPIC_API_KEY"] = api_key
+            return AnthropicModel(model_name)
         else:
             logger.warning(f"⚠️ Unknown provider '{provider}', falling back to Google")
-            return GoogleModel(model_name, api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
+            api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+            if api_key and not os.getenv("GEMINI_API_KEY"):
+                os.environ["GEMINI_API_KEY"] = api_key
+            return GoogleModel(model_name)
     except Exception as e:
         logger.error(f"❌ Failed to initialize model {model_name} for {provider}: {e}")
         return None
