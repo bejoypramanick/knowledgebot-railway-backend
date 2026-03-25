@@ -286,7 +286,7 @@ async def process_file_content(
     2. Download from S3
     3. Validation (extension, MIME, size, duplicates)
     4. Format conversion (HTML→Markdown, PDF→Markdown via Kreuzberg)
-    5. Gemini upload
+    5. Chunking, embeddings, and pgvector ingestion
     6. Database record creation
     7. Delete from S3
 
@@ -295,7 +295,7 @@ async def process_file_content(
     file_service = FileService()
     start_time = time.perf_counter()
     tmp_path = None
-    json_tmp_path = None  # Temporary file for Kreuzberg JSON response
+    markdown_tmp_path = None
 
     # Initialize Kreuzberg tracking variables
     processed_by_extractor = False
@@ -306,7 +306,7 @@ async def process_file_content(
     original_mime_type = None
     char_count = 0
     total_pages = 0
-    tables_metadata_list = []
+    semantic_chunks = []
     processed_content_s3_key = None
 
     async def get_file_details_by_task_id(celery_task_id: str) -> Optional[Dict[str, Any]]:
@@ -399,9 +399,6 @@ async def process_file_content(
 
         presigned_url = result
         logger.info(f"✅ [S3] Generated presigned URL for {s3_key}")
-        logger.info(f"🔍 [DEBUG] presigned_url type: {type(presigned_url)}")
-        logger.info(f"🔍 [DEBUG] presigned_url length: {len(presigned_url) if presigned_url else 'None'}")
-        logger.info(f"🔍 [DEBUG] presigned_url starts with http: {presigned_url.startswith('http') if presigned_url else 'None'}")
 
         # No need to create temp files - kreuzberg service will download directly
         tmp_path = None  # Not used with presigned URL approach
@@ -459,7 +456,7 @@ async def process_file_content(
 
         # Initialize metrics variables
         content_for_upload = ""
-        tables_metadata_list = []
+        semantic_chunks = []
         total_pages = 0
         processed_by_extractor = False
         extractor_processing_time_ms = 0
@@ -468,8 +465,8 @@ async def process_file_content(
         processed_content_s3_key = None
         char_count = 0
 
-        # STEP 4: FORMAT CONVERSION PHASE - Use Kreuzberg for all supported formats (returns JSON)
-        json_tmp_path = None
+        # STEP 4: FORMAT CONVERSION PHASE
+        markdown_tmp_path = None
         processed_successfully = False
 
         # Route all supported files to Kreuzberg (including HTML)
@@ -477,7 +474,6 @@ async def process_file_content(
             logger.info(f"📄 [ROUTING] Routing {original_filename} to Kreuzberg pipeline")
             
             try:
-                logger.info(f"🔍 [DEBUG] About to call process_with_kreuzberg with presigned_url: {presigned_url}")
                 markdown_content, kreuzberg_metadata = await process_with_kreuzberg(
                     presigned_url=presigned_url,
                     original_filename=original_filename,
@@ -490,32 +486,10 @@ async def process_file_content(
                 if markdown_content:
                     processed_by_extractor = True
                     extractor_processing_time_ms = kreuzberg_metadata.get('processing_time_ms', 0)
-                    
-                    # Content is already KV-formatted by process_with_kreuzberg
                     content_for_upload = markdown_content
-                    
-                    # STEP 4.5: Hierarchical Semantic Chunking via Chonkie
-                    logger.info(f"🧩 [CHUNKING] Applying hierarchical semantic chunking to {original_filename}...")
-                    chunks = await chunking_service.chunk_text(content_for_upload, original_filename)
-                    tables_metadata_list = chunks # Use tables_metadata_list temporarily to pass chunks down
-                    
-                    total_pages = kreuzberg_metadata.get('kreuzberg_metadata', {}).get('page_count', 0)
 
-                    # Log the final merged content being sent to Gemini
-                    logger.info(f"📤 [KREUZBERG_TO_GEMINI] Final KV-formatted content for Gemini FileStore:")
-                    lines = content_for_upload.split('\n')
-                    for line in lines[:10]:
-                        logger.info(f"   | {line}")
-                    if len(lines) > 10:
-                        logger.info(f"   | ... ({len(lines)-10} more lines)")
-                    logger.info(f"    Content Format: Markdown with formatted tables")
-                    logger.info(f"    Total Size: {len(content_for_upload)} characters")
-                    logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.md")
-                    logger.info(f"📋 [KREUZBERG_FINAL_MARKDOWN] === BEGIN MERGED CONTENT ===")
-                    # Log full content in chunks to avoid log truncation
-                    for chunk_start in range(0, len(content_for_upload), 10000):
-                        logger.info(content_for_upload[chunk_start:chunk_start + 10000])
-                    logger.info(f"📋 [KREUZBERG_FINAL_MARKDOWN] === END MERGED CONTENT ===")
+                    semantic_chunks = await chunking_service.chunk_text(content_for_upload, original_filename)
+                    total_pages = kreuzberg_metadata.get('kreuzberg_metadata', {}).get('page_count', 0)
 
                     # Upload converted markdown to S3 for later download
                     md_filename = original_filename.rsplit('.', 1)[0] + '.md'
@@ -528,67 +502,20 @@ async def process_file_content(
                         if md_success:
                             processed_content_s3_key = md_s3_result
                             logger.info(f"✅ [S3_MD_UPLOAD] Converted markdown uploaded to S3: {processed_content_s3_key}")
-                        else:
-                            logger.warning(f"⚠️ [S3_MD_UPLOAD] Failed to upload markdown to S3: {md_s3_result}")
                     except Exception as md_upload_err:
                         logger.warning(f"⚠️ [S3_MD_UPLOAD] Error uploading markdown to S3: {md_upload_err}")
 
                     # Create temporary Markdown file from converted content
                     tmp_path = create_markdown_temp_file(content_for_upload)
-
-                    # Log temporary file creation and verify content
-                    temp_file_size = os.path.getsize(tmp_path)
-                    logger.info(f"📁 [TEMP_FILE_CREATED] Temporary Markdown file created from Kreuzberg response:")
-                    logger.info(f"    File Path: {tmp_path}")
-                    logger.info(f"    File Size: {temp_file_size} bytes")
-                    logger.info(f"    Format: Markdown")
-
-                    # Verify and log the actual content in the temporary file
-                    try:
-                        with open(tmp_path, 'r', encoding='utf-8') as f:
-                            temp_content = f.read()
-                            temp_lines = len(temp_content.splitlines())
-                            temp_words = len(temp_content.split())
-
-                            logger.info(f"📝 [TEMP_FILE_CONTENT_VERIFIED] Content written to temporary file:")
-                            logger.info(f"    Characters: {len(temp_content)}")
-                            logger.info(f"    Lines: {temp_lines}")
-                            logger.info(f"    Words: {temp_words}")
-
-                            if len(temp_content) < 10000:
-                                # For smaller files, log the complete content
-                                logger.info(f"📋 [TEMP_FILE_FULL_CONTENT] Complete file content (< 10KB):")
-                                logger.info(f"┌─────────────────────────────────────────────────────────────────┐")
-                                logger.info(f"{temp_content}")
-                                logger.info(f"└─────────────────────────────────────────────────────────────────┘")
-                            else:
-                                # For larger files, log preview
-                                preview_length = 2000
-                                logger.info(f"📋 [TEMP_FILE_PREVIEW] File content preview (first 2000 chars of {len(temp_content)}):")
-                                logger.info(f"┌─────────────────────────────────────────────────────────────────┐")
-                                logger.info(f"{temp_content[:preview_length]}...")
-                                logger.info(f"└─────────────────────────────────────────────────────────────────┘")
-                    except Exception as e:
-                        logger.error(f"❌ [TEMP_FILE_ERROR] Could not verify temporary file content: {e}")
-
-                    # Store the JSON temporary file path for later use
-                    json_tmp_path = tmp_path
-
-                    # Switch to processed artifact
+                    markdown_tmp_path = tmp_path
                     original_tmp_path = tmp_path
 
-                    # Update filename and MIME type - Kreuzberg converts to Markdown
                     original_filename = original_filename.rsplit('.', 1)[0] + '.md'
                     detected_mime_type = 'text/markdown'
-                    logger.info(f"📋 [CONTENT_FORMAT_MD] Kreuzberg output is Markdown - "
-                              f"File will be uploaded to Gemini FileStore as: {original_filename} (MIME: {detected_mime_type})")
 
                     processed_successfully = True
-                    logger.info(f"✅ [KREUZBERG_PROCESSING_COMPLETE] Successfully processed document to Markdown format: {original_filename} "
-                              f"(Original: {original_filename.rsplit('.', 1)[0]}.*)")
                 else:
                     error_msg = kreuzberg_metadata.get("error", "Kreuzberg processing failed")
-                    logger.error(f"❌ [KREUZBERG] Processing failed for {original_filename}: {error_msg}")
                     if tmp_path and os.path.exists(tmp_path):
                         os.unlink(tmp_path)
                     return {
@@ -596,7 +523,6 @@ async def process_file_content(
                         "error": f"Kreuzberg processing failed: {error_msg}"
                     }
             except Exception as e:
-                logger.error(f"❌ [KREUZBERG] Unexpected error: {e}")
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
                 return {
@@ -650,13 +576,13 @@ async def process_file_content(
             logger.info(f"🤖 [VECTOR_DB] Uploading chunks to pgvector - Original: {original_filename}...")
             try:
                 # If no chunks were generated (e.g. raw file or Kreuzberg didn't chunk), use Chonkie
-                if not tables_metadata_list and content_for_upload:
+                if not semantic_chunks and content_for_upload:
                     logger.info(f"🧩 [CHUNKING] No chunks found, applying Chonkie to content_for_upload...")
-                    tables_metadata_list = await chunking_service.chunk_text(content_for_upload, original_filename)
+                    semantic_chunks = await chunking_service.chunk_text(content_for_upload, original_filename)
                 
                 from shared.vector_dao import vector_dao
                 
-                chunks_to_insert = tables_metadata_list # We temporarily used this variable
+                chunks_to_insert = semantic_chunks
                 
                 if chunks_to_insert:
                     # Generate embeddings using our model-agnostic utility
@@ -681,11 +607,9 @@ async def process_file_content(
                     else:
                         logger.info(f"✅ Uploaded {len(chunks_to_insert)} chunks with provider-agnostic embeddings to vector DB")
                 else:
-                    logger.error(f"   ❌ No chunks produced by extractor for file {file_id}")
-                    raise Exception(f"No chunks produced by extractor for file {file_id}")
+                    raise Exception(f"No chunks produced for file {file_id}")
                 
-                # Clear tables_metadata_list since we used it for chunks and don't want it saved as tables
-                tables_metadata_list = []
+                semantic_chunks = []
                     
             except Exception as e:
                 logger.error(f"❌ [VECTOR_DB] Error uploading chunks: {e}")
@@ -693,15 +617,14 @@ async def process_file_content(
 
             # STEP 7: DATABASE UPDATE PHASE
             try:
-                # Calculate char_count from JSON content
-                if json_tmp_path and os.path.exists(json_tmp_path):
+                if markdown_tmp_path and os.path.exists(markdown_tmp_path):
                     try:
-                        with open(json_tmp_path, 'r', encoding='utf-8') as f:
-                            json_content = f.read()
-                        char_count = len(json_content)
-                        logger.info(f"📊 [METRICS] Calculated for {original_filename}: {char_count:,} characters from JSON")
+                        with open(markdown_tmp_path, 'r', encoding='utf-8') as f:
+                            markdown_file_content = f.read()
+                        char_count = len(markdown_file_content)
+                        logger.info(f"📊 [METRICS] Calculated for {original_filename}: {char_count:,} characters from markdown")
                     except Exception as me:
-                        logger.warning(f"⚠️ Could not calculate char_count from JSON: {me}")
+                        logger.warning(f"⚠️ Could not calculate char_count from markdown: {me}")
 
                 # Use the new DAO to update file record with ALL processing data
                 from dao.fileupload_dao import FileUploadDAO
@@ -769,19 +692,7 @@ async def process_file_content(
 
                 logger.info(f"✅ [DB_UPDATE] Updated file record with all processing data, File ID: {file_id}")
 
-                # Save per-table metadata and update aggregates
-                if tables_metadata_list:
-                    try:
-                        from shared.tables_metadata_dao import save_tables_metadata
-                        await save_tables_metadata(tables_metadata_list, file_upload_id=file_id)
-                    except Exception as tm_err:
-                        logger.warning(f"⚠️ [TABLES_META] Non-blocking error saving table metadata: {tm_err}")
-
-                # STEP 8: S3 CLEANUP PHASE - Delete ALL S3 files after successful Gemini upload
-                # After uploading to Gemini FileSearch, we no longer need S3 files:
-                # - Raw file: converted to markdown, no longer needed
-                # - Processed markdown: now in Gemini FileSearch for search/download
-                logger.info(f"🧹 [S3_CLEANUP] Cleaning up ALL S3 files after successful Gemini upload")
+                logger.info(f"🧹 [S3_CLEANUP] Cleaning up S3 files after successful vector ingestion")
 
                 # Delete raw upload file (no longer needed)
                 if s3_key:
@@ -794,9 +705,6 @@ async def process_file_content(
                     except Exception as s3_cleanup_error:
                         logger.warning(f"⚠️ [S3_CLEANUP] Error deleting raw file from S3: {s3_cleanup_error}")
 
-                # Delete processed markdown file (now safely stored in Gemini FileSearch)
-                # Check RETAIN_MD_FILE environment variable to decide whether to delete
-                # Note: Manual atomic delete operations will still delete retained files
                 retain_md_file = os.getenv("RETAIN_MD_FILE", "false").lower() == "true"
                 
                 if processed_content_s3_key:
@@ -813,26 +721,25 @@ async def process_file_content(
                         except Exception as s3_cleanup_error:
                             logger.warning(f"⚠️ [S3_CLEANUP] Error deleting processed markdown from S3: {s3_cleanup_error}")
 
-                logger.info(f"✅ [S3_CLEANUP] All S3 files cleaned up - content now in Gemini FileSearch only")
+                logger.info(f"✅ [S3_CLEANUP] S3 cleanup completed")
 
                 # Delete temporary local files
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
-                if json_tmp_path and os.path.exists(json_tmp_path):
-                    os.unlink(json_tmp_path)
+                if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+                    os.unlink(markdown_tmp_path)
                 logger.info(f"✅ [CLEANUP] Cleaned up temporary local files")
 
                 processing_time = time.perf_counter() - start_time
                 logger.info(f"✅ [SUCCESS] File processing completed: {original_filename}")
-                logger.info(f"   📁 Gemini Document: {document_name}")
+                logger.info(f"   📁 Vector Document: {document_name}")
                 logger.info(f"   🗄️  Database ID: {file_id}")
                 logger.info(f"   ⏱️  Time: {processing_time:.2f}s")
                 logger.info(f"   📊 Size: {file_size} bytes")
                 logger.info(f"   📝 Char Count: {char_count:,}")
-                logger.info(f"   🔧 Kreuzberg: {processed_by_kreuzberg}")
-                if processed_by_kreuzberg:
-                    logger.info(f"   ⏱️  Kreuzberg Time: {kreuzberg_processing_time_ms}ms")
-                    logger.info(f"   🖼️  Images: {kreuzberg_images_extracted} (OCR: {kreuzberg_images_with_ocr})")
+                logger.info(f"   🔧 Kreuzberg: {processed_by_extractor}")
+                if processed_by_extractor:
+                    logger.info(f"   ⏱️  Kreuzberg Time: {extractor_processing_time_ms}ms")
                 logger.info(f"   🔐 Hash: {sha256_hash}")
 
                 return {
@@ -840,14 +747,14 @@ async def process_file_content(
                     "file_id": str(file_id),
                     "status": final_state,
                     "processing_time_seconds": processing_time,
-                    "gemini_document_name": document_name,
+                    "vector_document_name": document_name,
                     "original_filename": original_filename,
                     "file_display_name": file_display_name,
                     "file_size": file_size,
                     "mime_type": detected_mime_type,
                     "sha256_hash": sha256_hash,
                     "char_count": char_count,
-                    "processed_by_docling": processed_by_docling
+                    "processed_by_extractor": processed_by_extractor
                 }
 
             except Exception as e:
@@ -866,8 +773,8 @@ async def process_file_content(
                 # Cleanup on failure
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
-                if json_tmp_path and os.path.exists(json_tmp_path):
-                    os.unlink(json_tmp_path)
+                if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+                    os.unlink(markdown_tmp_path)
 
                 return {
                     "success": False,
@@ -900,10 +807,10 @@ async def process_file_content(
             except:
                 pass
 
-        if json_tmp_path and os.path.exists(json_tmp_path):
+        if markdown_tmp_path and os.path.exists(markdown_tmp_path):
             try:
-                os.unlink(json_tmp_path)
-                logger.debug(f"✅ Deleted markdown temp file: {json_tmp_path}")
+                os.unlink(markdown_tmp_path)
+                logger.debug(f"✅ Deleted markdown temp file: {markdown_tmp_path}")
             except:
                 pass
 

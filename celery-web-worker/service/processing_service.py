@@ -623,60 +623,31 @@ class ProcessingService:
 
     async def _preparePageAsMarkdown(self, html_content: str, page_url: str, website_id: Optional[str] = None, remove_ads: bool = True) -> Tuple[str, Optional[str], list]:
         """
-        Process HTML with kreuzberg queue (same as file worker).
-        HTML is pre-cleaned by crawl4ai to remove menus, navbars, ads.
-        Extracts: text + tables, with text-based equation reconstruction.
-
+        Process HTML with Kreuzberg, then chunk the returned markdown with Chonkie.
         """
-        logger.info(f"📄 [KREUZBERG_WEB] Processing page with Kreuzberg: {page_url}")
-        logger.info(f"📄 [KREUZBERG_WEB] HTML size: {len(html_content)} bytes")
-
-        # Create URL hash for file naming
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
-
-        # 0. Clean HTML using Trafilatura (Noise Removal: menus, ads, headers, footers)
-        logger.info(f"✨ [HTML_CLEANING] Cleaning HTML for: {page_url}")
         cleaned_html = clean_html_with_trafilatura(html_content, url=page_url)
-        
-        # Log cleaning results
-        html_hash = hashlib.md5(cleaned_html.encode('utf-8')).hexdigest()[:8]
-        logger.info(f"📄 [HTML_HASH] Cleaned HTML hash: {html_hash} (Was: {hashlib.md5(html_content.encode('utf-8')).hexdigest()[:8]})")
-
-        # 1. Upload cleaned HTML to S3 temporarily as input for Kreuzberg
         html_filename = f"page_{url_hash}.html"
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
             file_data=cleaned_html.encode('utf-8'),
             original_filename=html_filename,
-            file_type="web-worker-temp"  # Temporary storage
+            file_type="web-worker-temp"
         )
 
         if not html_upload_success:
-            logger.error(f"❌ [S3_HTML_UPLOAD] Failed to upload HTML to S3")
             raise Exception(f"Failed to upload HTML to S3 for {page_url}")
 
-        logger.info(f"✅ [S3_HTML_UPLOAD] HTML uploaded: {html_s3_key}")
-
-        # 2. Generate presigned URL for Kreuzberg to access
-        logger.info(f"🔗 [S3] Generating presigned URL for S3 object: {html_s3_key}")
         success, result = s3_file_storage.generate_presigned_url(html_s3_key, expiration=3600)
         if not success:
-            logger.error(f"❌ [S3] Failed to generate presigned URL: {result}")
-            # Cleanup temp HTML
             try:
                 await s3_file_storage.delete_file(html_s3_key)
-            except:
+            except Exception:
                 pass
             raise Exception(f"Failed to generate presigned URL: {result}")
 
         presigned_url = result
-        logger.info(f"✅ [S3] Generated presigned URL for {html_s3_key}")
-        logger.info(f"🔍 [DEBUG] presigned_url type: {type(presigned_url)}")
-        logger.info(f"🔍 [DEBUG] presigned_url length: {len(presigned_url) if presigned_url else 'None'}")
-        logger.info(f"🔍 [DEBUG] presigned_url starts with http: {presigned_url.startswith('http') if presigned_url else 'None'}")
 
-        # 3. Call Kreuzberg via REST API
         try:
-            logger.info(f"🔍 [DEBUG] About to call process_with_kreuzberg with presigned_url: {presigned_url}")
             kreuzberg_markdown, kreuzberg_metadata = await process_with_kreuzberg(
                 presigned_url=presigned_url,
                 original_filename=html_filename,
@@ -686,19 +657,14 @@ class ProcessingService:
                 source_name=page_url
             )
 
-            # Validate markdown_content is not empty/None
             if not kreuzberg_markdown:
                 error_detail = kreuzberg_metadata.get('error', 'unknown') if kreuzberg_metadata else 'unknown'
-                logger.error(f"❌ [KREUZBERG_ERROR] Kreuzberg processing failed: {error_detail}")
                 raise Exception(f"Kreuzberg processing failed for {page_url}: {error_detail}")
 
-            # Content is already KV-formatted by process_with_kreuzberg
-            logger.info(f"✅ [KREUZBERG_KV] Using manual KV-formatted markdown for {page_url}")
             markdown_content = kreuzberg_markdown
-            chunks = kreuzberg_metadata.get("chunks", [])
-            total_pages = 0 # Not applicable for HTML
+            from shared.chunking_service import chunking_service
+            chunks = await chunking_service.chunk_text(markdown_content, html_filename)
 
-            # Add source URL to all chunks metadata
             for chunk in chunks:
                 if "metadata" not in chunk:
                     chunk["metadata"] = {}
@@ -706,7 +672,6 @@ class ProcessingService:
                 if hasattr(self, "_current_page_data") and getattr(self._current_page_data, "title", None):
                     chunk["metadata"]["title"] = self._current_page_data.title
 
-            # 7. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"
             md_success, md_s3_key = await s3_file_storage.upload_file(
                 file_data=markdown_content.encode('utf-8'),
@@ -715,27 +680,20 @@ class ProcessingService:
             )
 
             processed_content_s3_key = md_s3_key if md_success else None
-            logger.info(f"✅ [S3_MD_UPLOAD] Processed markdown uploaded: {processed_content_s3_key}")
 
-            # 9. Cleanup temporary HTML from S3
             try:
                 await s3_file_storage.delete_file(html_s3_key)
-                logger.info(f"🗑️ [CLEANUP] Deleted temporary HTML: {html_s3_key}")
             except Exception as cleanup_err:
                 logger.warning(f"⚠️ [CLEANUP] Failed to delete temp HTML: {cleanup_err}")
 
             return markdown_content, processed_content_s3_key, chunks
 
         except Exception as kreuzberg_err:
-            logger.error(f"❌ [KREUZBERG_ERROR] Kreuzberg processing failed: {kreuzberg_err}")
-
-            # Cleanup temp HTML
             try:
                 await s3_file_storage.delete_file(html_s3_key)
-            except:
+            except Exception:
                 pass
 
-            # Re-raise error
             raise Exception(f"Kreuzberg processing failed for {page_url}: {kreuzberg_err}")
 
     async def _extractDocumentsFromPage(

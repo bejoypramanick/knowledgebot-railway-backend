@@ -13,7 +13,7 @@ from .streaming_service import streaming_service
 logger = get_otel_logger("agent_service", "chatbot-orchestration")
 
 class PydanticAIGatewayService:
-    """Main service class for Pydantic AI integration with Gemini FileSearch.
+    """Main service class for Pydantic AI integration with pgvector retrieval.
     
     This is the simplified main service after refactoring.
     Most functionality has been moved to specialized modules:

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class SearchResult(BaseModel):
-    """Search result from Gemini FileSearch with comprehensive metadata."""
+    """Search result metadata for grounded knowledge retrieval."""
     # Original fields
     file_name: str
     content: str

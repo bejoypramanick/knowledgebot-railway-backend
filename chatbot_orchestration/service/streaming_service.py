@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any, Dict, List, AsyncGenerator
 import sys
-from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart, BuiltinToolCallPart, BuiltinToolReturnPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart, BuiltinToolCallPart, BuiltinToolReturnPart, ToolCallPart, ToolReturnPart
 from shared.otel_logger import get_otel_logger, set_session_id
 
 from ..core.dependencies import ChatSessionDeps
@@ -598,7 +598,7 @@ class StreamingService:
                 logger.info("🚀 Intelligent RAG Mode: Letting agent control knowledge base search")
                 logger.info(f"📝 Agent will analyze: '{message[:100]}...'")
                 logger.info(f"📚 Agent has access to {len(pydantic_messages)} messages of conversation history")
-                logger.info(f"🔧 Agent tools: FileSearchTool (builtin)")
+                logger.info(f"🔧 Agent tools: search_knowledge_base (pgvector)")
 
                 # Log what the agent is receiving
                 logger.info("=" * 100)
@@ -606,7 +606,7 @@ class StreamingService:
                 logger.info(f"   Current User Message: {message[:150]}...")
                 logger.info(f"   Message History Length: {len(pydantic_messages)} messages")
                 logger.info(f"   Context Window: Full conversation context provided")
-                logger.info(f"   Available Tools: FileSearchTool (builtin)")
+                logger.info(f"   Available Tools: search_knowledge_base (pgvector)")
                 logger.info(f"   Session Dependencies: Initialized")
                 logger.info("=" * 100)
                 sys.stdout.flush()
@@ -823,7 +823,7 @@ class StreamingService:
                     logger.info("=" * 100)
                     logger.info(f"📝 Input message: '{message}'")
                     logger.info(f"📚 Conversation history length: {len(pydantic_messages)} messages")
-                    logger.info(f"🔧 Tools available: FileSearchTool (builtin)")
+                    logger.info(f"🔧 Tools available: search_knowledge_base (pgvector)")
                     sys.stdout.flush()
 
                     tool_calls_made = []
@@ -836,20 +836,20 @@ class StreamingService:
                             for j, part in enumerate(msg.parts):
                                 part_type = type(part).__name__
 
-                                # Detect & log tool CALLS (the query sent to FileSearch)
-                                if isinstance(part, BuiltinToolCallPart):
+                                # Detect & log tool CALLS
+                                if isinstance(part, (BuiltinToolCallPart, ToolCallPart)):
                                     tool_name = getattr(part, 'tool_name', 'unknown')
                                     tool_calls_made.append(tool_name)
                                     tool_args = getattr(part, 'args', {})
                                     logger.info(f"   ✅ Tool called: {tool_name}")
-                                    logger.info(f"   🔍 [FILESEARCH_QUERY] Args: {tool_args}")
+                                    logger.info(f"   🔍 [TOOL_QUERY] Args: {tool_args}")
 
-                                # Detect & log tool RETURNS (the actual FileSearch grounding content)
-                                elif isinstance(part, BuiltinToolReturnPart):
+                                # Detect & log tool RETURNS
+                                elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)):
                                     tool_name = getattr(part, 'tool_name', 'unknown')
                                     content = getattr(part, 'content', '')
                                     logger.info("=" * 100)
-                                    logger.info(f"📚 [RAG_GROUNDING] FileSearch return from tool: {tool_name}")
+                                    logger.info(f"📚 [RAG_GROUNDING] Tool return from: {tool_name}")
                                     logger.info(f"📚 [RAG_GROUNDING] Content length: {len(str(content))} chars")
                                     logger.info("=" * 100)
                                     # Log full grounding content in chunks to avoid OTEL truncation
@@ -871,7 +871,7 @@ class StreamingService:
                     logger.info(f"📊 SUMMARY: {len(tool_calls_made)} tools called: {tool_calls_made if tool_calls_made else 'NONE'}")
                     if len(tool_calls_made) == 0 and len(pydantic_messages) > 0:
                         logger.warning("⚠️  WARNING: This is a follow-up (history exists) but NO tools were called!")
-                        logger.warning("⚠️  Expected: FileSearch should have been used")
+                        logger.warning("⚠️  Expected: search_knowledge_base should have been used")
                     logger.info("=" * 100)
 
 
@@ -991,47 +991,26 @@ class StreamingService:
                                                 full_response = text_content  # ← KEY FIX: Use the latest response
                                                 chunk_count += 1
 
-                                    # Log FileSearch builtin tool call (query)
-                                    if isinstance(part, BuiltinToolCallPart) and getattr(part, 'tool_name', '') == 'file_search':
+                                    # Log pgvector search tool call
+                                    if isinstance(part, (BuiltinToolCallPart, ToolCallPart)) and getattr(part, 'tool_name', '') == 'search_knowledge_base':
                                         tool_call_count += 1
                                         logger.info("=" * 80)
-                                        logger.info("🔍 FILESEARCH BUILTIN TOOL CALL")
+                                        logger.info("🔍 PGVECTOR TOOL CALL")
                                         logger.info(f"   Tool Name: {part.tool_name}")
                                         logger.info(f"   Tool Call ID: {getattr(part, 'tool_call_id', 'N/A')}")
                                         logger.info(f"   Args: {getattr(part, 'args', {})}")
                                         logger.info(f"   Tool Call #{tool_call_count} in this response")
                                         logger.info("=" * 80)
 
-                                    # Log FileSearch builtin tool return (grounding data + retrieved contexts)
-                                    elif isinstance(part, BuiltinToolReturnPart) and getattr(part, 'tool_name', '') == 'file_search':
+                                    # Log pgvector tool return
+                                    elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)) and getattr(part, 'tool_name', '') == 'search_knowledge_base':
                                         logger.info("=" * 80)
-                                        logger.info("📄 FILESEARCH BUILTIN TOOL RESPONSE (GROUNDING DATA)")
+                                        logger.info("📄 PGVECTOR TOOL RESPONSE (GROUNDING DATA)")
                                         logger.info(f"   Tool Name: {part.tool_name}")
                                         logger.info(f"   Tool Call ID: {getattr(part, 'tool_call_id', 'N/A')}")
                                         logger.info(f"   Content Type: {type(part.content).__name__}")
-
-                                        if isinstance(part.content, list):
-                                            logger.info(f"   Retrieved Contexts: {len(part.content)} results")
-                                            for ctx_idx, ctx in enumerate(part.content):
-                                                if isinstance(ctx, dict):
-                                                    title = ctx.get('title', 'N/A')
-                                                    uri = ctx.get('uri', 'N/A')
-                                                    file_search_store = ctx.get('file_search_store', 'N/A')
-                                                    text = ctx.get('text', '')
-                                                    text_preview = text[:500] if text else '<empty>'
-                                                    logger.info(f"   --- Retrieved Context #{ctx_idx + 1} ---")
-                                                    logger.info(f"   Title: {title}")
-                                                    logger.info(f"   URI: {uri}")
-                                                    logger.info(f"   FileSearch Store: {file_search_store}")
-                                                    logger.info(f"   Text Length: {len(text)} chars")
-                                                    logger.info(f"   Text Preview: {text_preview}")
-                                                else:
-                                                    logger.info(f"   --- Retrieved Context #{ctx_idx + 1} (non-dict) ---")
-                                                    logger.info(f"   Type: {type(ctx).__name__}")
-                                                    logger.info(f"   Value: {str(ctx)[:500]}")
-                                        else:
-                                            content_str = str(part.content)
-                                            logger.info(f"   Content (non-list): {content_str[:1000]}")
+                                        content_str = str(part.content)
+                                        logger.info(f"   Content: {content_str[:2000]}")
 
                                         logger.info("=" * 80)
 
@@ -1084,9 +1063,9 @@ class StreamingService:
 
                         if not is_greeting:
                             logger.error(f"TOOL CALL REQUIREMENT NOT MET: query='{message[:80]}', tools=0")
-                            logger.error(f"🚨 CRITICAL: Agent should have used FileSearchTool for non-greeting query")
+                            logger.error(f"🚨 CRITICAL: Agent should have used search_knowledge_base for non-greeting query")
                             logger.error(f"🚨 Response was: {full_response[:100]}...")
-                            logger.error(f"🚨 This indicates the agent is not using the builtin FileSearch tool")
+                            logger.error(f"🚨 This indicates the agent is not using the pgvector retrieval tool")
 
                 except Exception as result_error:
                     logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)
@@ -1122,42 +1101,14 @@ class StreamingService:
                 logger.info(f"✅ Removed Time-to-Solve metadata if present")
 
                 # ================================================================
-                # CITATION POST-PROCESSING: Extract from BuiltinToolReturnPart
+                # CITATION POST-PROCESSING
                 # ================================================================
-                # Pydantic AI's FileSearchTool returns BuiltinToolReturnPart with
-                # tool_name='file_search' and content containing retrieved_contexts
-                # (list of dicts with title, text, uri, file_search_store fields).
-                # Extract titles, map to original URLs, then make [N] markers clickable.
+                # The pgvector tool currently returns formatted text context rather than
+                # a structured citation payload, so there is no automatic source
+                # URL extraction step here.
                 citation_urls = []
                 try:
-                    # Step 1: Extract doc titles from BuiltinToolReturnPart
-                    doc_titles = []
-                    for msg in all_messages:
-                        if hasattr(msg, 'parts'):
-                            for part in msg.parts:
-                                if isinstance(part, BuiltinToolReturnPart) and part.tool_name == 'file_search':
-                                    retrieved_contexts = part.content if isinstance(part.content, list) else []
-                                    for ctx in retrieved_contexts:
-                                        if isinstance(ctx, dict):
-                                            title = ctx.get('title', '')
-                                            if title and title not in doc_titles:
-                                                doc_titles.append(title)
-
-                    if doc_titles:
-                        logger.info(f"📎 [CITATION_POST] Extracted {len(doc_titles)} doc titles from FileSearch: {doc_titles}")
-
-                        # Step 2: Map titles to original URLs
-                        from ..tools.knowledge_tools import _batch_lookup_urls_by_gemini_file_names
-                        url_map = await _batch_lookup_urls_by_gemini_file_names(doc_titles)
-                        logger.info(f"📎 [CITATION_POST] URL mapping result: {len(url_map)}/{len(doc_titles)} resolved")
-
-                        # Build ordered citation URL list (preserving FileSearch order)
-                        seen_urls = set()
-                        for title in doc_titles:
-                            url = url_map.get(title)
-                            if url and url not in seen_urls:
-                                citation_urls.append(url)
-                                seen_urls.add(url)
+                    logger.info("📎 [CITATION_POST] No structured citation payload available for pgvector tool")
 
                     if citation_urls:
                         logger.info(f"📎 [CITATION_POST] Found {len(citation_urls)} citation URLs: {citation_urls}")
@@ -1187,7 +1138,7 @@ class StreamingService:
                         else:
                             logger.info(f"📎 [CITATION_POST] Replaced {markers_replaced} inline markers")
                     else:
-                        logger.info("📎 [CITATION_POST] No FileSearch citations found in response")
+                        logger.info("📎 [CITATION_POST] No structured citations found in response")
                 except Exception as citation_error:
                     logger.warning(f"📎 [CITATION_POST] Citation processing failed (non-fatal): {citation_error}")
 
@@ -1210,51 +1161,6 @@ class StreamingService:
                     logger.info(f"📁 ✅ Full response now includes agent debug section (total length: {len(full_response)} chars)")
                 else:
                     logger.info("📁 ❌ No agent download links added - both URLs are None")
-
-                # Extract FileSearch debug sections from tool responses and add to final response
-                filesearch_debug_sections = []
-                for msg in all_messages:
-                    if hasattr(msg, 'parts'):
-                        for part in msg.parts:
-                            # Check if this is a tool return part with FileSearch download links
-                            if hasattr(part, 'content') and isinstance(part.content, str):
-                                content = part.content
-                                
-                                # Look for FileSearch Debug Details format
-                                debug_pattern = r'📁\s*\*\*FileSearch Debug Details\*\*:\s*([^\n]+)'
-                                debug_matches = re.findall(debug_pattern, content)
-                                for debug_section in debug_matches:
-                                    if debug_section not in filesearch_debug_sections:
-                                        filesearch_debug_sections.append(debug_section)
-                                        logger.info(f"📁 ✅ Extracted FileSearch debug section from tool response: {debug_section}")
-                                
-                                # Also look for legacy RAG Debug Details format for backward compatibility
-                                legacy_rag_pattern = r'📁\s*\*\*RAG Debug Details\*\*:\s*([^\n]+)'
-                                legacy_rag_matches = re.findall(legacy_rag_pattern, content)
-                                for debug_section in legacy_rag_matches:
-                                    if debug_section not in filesearch_debug_sections:
-                                        filesearch_debug_sections.append(debug_section)
-                                        logger.info(f"📁 ✅ Extracted legacy RAG debug section from tool response: {debug_section}")
-                                
-                                # Also look for very legacy RAG Response Details format
-                                legacy_pattern = r'📁\s*\*\*RAG Response Details\*\*:\s*\[([^\]]+)\]\((https?://[^)]+)\)'
-                                legacy_matches = re.findall(legacy_pattern, content)
-                                for link_text, url in legacy_matches:
-                                    legacy_section = f"[{link_text}]({url})"
-                                    if legacy_section not in filesearch_debug_sections:
-                                        filesearch_debug_sections.append(legacy_section)
-                                        logger.info(f"📁 ✅ Extracted very legacy RAG S3 link from tool response: {url}")
-
-                # Add extracted FileSearch debug sections to final response
-                for i, debug_section in enumerate(filesearch_debug_sections):
-                    filesearch_download_section = f"\n\n📁 **FileSearch Debug Details**: {debug_section}"
-                    full_response += filesearch_download_section
-                    logger.info(f"📁 ✅ Added FileSearch debug section {i+1} to final response: {debug_section}")
-
-                if filesearch_debug_sections:
-                    logger.info(f"📁 ✅ Final response now includes {len(filesearch_debug_sections)} FileSearch debug section(s)")
-                else:
-                    logger.info("📁 ❌ No FileSearch debug sections found in tool responses")
 
                 # 📤 BROADCAST AI RESPONSE TO ADMIN CHANNEL (so admins see AI responses in real-time)
                 try:
@@ -1304,7 +1210,7 @@ class StreamingService:
             if full_response.strip():
                 # Log the complete response with grounding truth and metadata
                 logger.info("=" * 100)
-                logger.info("📝 GEMINI RESPONSE WITH GROUNDING TRUTH")
+                logger.info("📝 MODEL RESPONSE WITH GROUNDING TRUTH")
                 logger.info(f"   Session ID: {session_id}")
                 logger.info(f"   User Query: {message[:100]}...")
                 logger.info(f"   User Email: {user_email}")
@@ -1313,11 +1219,11 @@ class StreamingService:
                 logger.info(f"   Response Chunks: {chunk_count}")
                 logger.info("-" * 100)
                 logger.info("🔗 GROUNDING TRUTH & DATA SOURCES:")
-                logger.info(f"   Source: Gemini FileStore ({settings.chatbot_model} model)")
-                logger.info("   Search Type: Knowledge base with file retrieval")
-                logger.info("   Processing: Raw extractor output formatted by Gemini")
+                logger.info(f"   Source: pgvector knowledge base ({settings.chatbot_model} model)")
+                logger.info("   Search Type: Hybrid pgvector + full-text retrieval")
+                logger.info("   Processing: Retrieved chunk context formatted by the model")
                 logger.info("   Response Format: HTML with proper citations")
-                logger.info("   Data Quality: Grounded in uploaded knowledge base files")
+                logger.info("   Data Quality: Grounded in vectorized knowledge base chunks")
                 logger.info("-" * 100)
                 logger.info("📋 COMPLETE GEMINI RESPONSE CONTENT:")
                 logger.info(full_response)
@@ -1333,7 +1239,7 @@ class StreamingService:
                             "chunk_count": chunk_count,
                             "response_length": len(full_response),
                             "tool_calls": tool_call_count,
-                            "grounding_sources": "Gemini FileStore",
+                            "grounding_sources": "pgvector",
                             "response_format": "HTML with citations"
                         }
                     )
@@ -1357,7 +1263,7 @@ class StreamingService:
                 "chunk_count": chunk_count,
                 "tool_calls": tool_call_count,
                 "timestamp": int(time.time()),
-                "grounding_sources": "Gemini FileStore",
+                "grounding_sources": "pgvector",
                 "response_format": "HTML with citations"
             }
             
@@ -1380,7 +1286,7 @@ class StreamingService:
                         "chunk_count": chunk_count,
                         "tool_calls": tool_call_count,
                         "timestamp": int(time.time()),
-                        "grounding_sources": "Gemini FileStore",
+                        "grounding_sources": "pgvector",
                         "response_format": "HTML with citations",
                         "message": f"AI responded to customer in session {session_id}"
                     }
@@ -1408,8 +1314,8 @@ class StreamingService:
             logger.info(f"   Total Tool Calls Executed: {tool_call_count}")
             logger.info(f"   Total Response Chunks: {chunk_count}")
             logger.info(f"   Final Response Length: {len(full_response)} characters")
-            logger.info("   Grounding Truth: Response based on Gemini FileStore search results")
-            logger.info("   Primary Data Source: Gemini FileStore knowledge base")
+            logger.info("   Grounding Truth: Response based on pgvector search results")
+            logger.info("   Primary Data Source: pgvector knowledge base")
             logger.info("   Response Format: HTML with proper citations")
             logger.info("   Completion Status: Successfully completed streaming")
             logger.info("=" * 80)
@@ -1421,7 +1327,7 @@ class StreamingService:
                 "total_chunks": chunk_count,
                 "total_length": len(full_response),
                 "tool_calls": tool_call_count,
-                "grounding_sources": "Gemini FileStore",
+                "grounding_sources": "pgvector",
                 "response_format": "HTML with citations",
                 "completion_status": "success",
                 "timestamp": int(time.time())
