@@ -154,27 +154,47 @@ async def process_with_kreuzberg(
             # Official API spec uses 'files' (plural)
             files_payload = [('files', (original_filename, file_bytes, mime_type))]
             
-            config_payload = {
-                "layout_detection": "fast",
-                "pdf_hierarchy": True,
-                "language_detection": {"enabled": True},
+            # Main extraction config (what you called config_payload)
+            config_payload: Dict[str, Any] = {
                 "enable_quality_processing": True,
-                "extract_tables": True
+                "output_format": "markdown",          # or "plain", "html", "djot"
+                "language_detection": {
+                    "enabled": True,
+                    "min_confidence": 0.8,            # optional
+                    "detect_multiple": False          # optional
+                },
+                "layout": {                           # replaces old "layout_detection"
+                    "preset": "fast",                 # "fast" or "accurate"
+                    "apply_heuristics": True
+                },
+                "pdf_options": {
+                    "hierarchy": {                    # replaces old "pdf_hierarchy"
+                        "enabled": True,
+                        "k_clusters": 6               # 3=fast, 6=balanced, 7=detailed
+                    }
+                },
+                # Table extraction is usually automatic when using layout + OCR
+                # If you need more control, add OCR config (see below)
             }
-            
-            semantic_chunking = {
-                "strategy": "semantic",
-                "max_characters": 1000,
-                "overlap": 200,
-                "threshold": 0.85,
-                "embedding_model": "fast",
-                "enabled": True
+
+            # Chunking config (semantic-style via embeddings)
+            semantic_chunking: Dict[str, Any] = {
+                "max_chars": 1000,
+                "max_overlap": 200,
+                "embedding": {                        # This enables semantic chunking
+                    "model": "fast",                  # preset: "fast", "balanced", "quality"
+                    "normalize": True
+                }
+                # Optional extras:
+                # "preset": "semantic",           # if supported in your version
+                # "trim": True,
             }
-            
-            data = {
-                'output_format': 'markdown',
-                'chunking': json.dumps(semantic_chunking), 
-                'config': json.dumps(config_payload)
+
+            # Final form data for the POST request
+            data: Dict[str, str] = {
+                'output_format': 'markdown',                  # can be here or inside config
+                'config': json.dumps(config_payload),
+                'chunking': json.dumps(semantic_chunking)
             }
             
             return await client.post(target_url, files=files_payload, data=data)
