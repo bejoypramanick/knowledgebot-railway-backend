@@ -154,55 +154,37 @@ async def process_with_kreuzberg(
             # Official API spec uses 'files' (plural)
             files_payload = [('files', (original_filename, file_bytes, mime_type))]
             
-            # Main extraction config (what you called config_payload)
-            config_payload: Dict[str, Any] = {
+            unified_config = {
                 "enable_quality_processing": True,
-                "output_format": "markdown",          # or "plain", "html", "djot"
-                "language_detection": {
-                    "enabled": True,
-                    "min_confidence": 0.8,            # optional
-                    "detect_multiple": False          # optional
-                },
-                "layout": {                           # replaces old "layout_detection"
-                    "preset": "fast",                 # "fast" or "accurate"
-                    "apply_heuristics": True
-                },
-                "pdf_options": {
-                    "hierarchy": {                    # replaces old "pdf_hierarchy"
-                        "enabled": True,
-                        "k_clusters": 6               # 3=fast, 6=balanced, 7=detailed
-                    }
-                },
-                # Table extraction is usually automatic when using layout + OCR
-                # If you need more control, add OCR config (see below)
+                "output_format": "markdown",
+                "layout": {"preset": "fast"},
+                "chunking": { # Nest it here
+                    "strategy": "recursive",
+                    "max_characters": 1000,
+                    "overlap": 200,
+                    "enabled": True
+                }
             }
 
-            # Chunking config (semantic-style via embeddings)
-            semantic_chunking = {
-                "strategy": "recursive",    # <--- No "meaning" check, just structure
-                "max_characters": 1000,
-                "overlap": 200,
-                "enabled": True
-            }
-
-            # Final form data for the POST request
-            data: Dict[str, str] = {
-                'output_format': 'markdown',                  # can be here or inside config
-                'config': json.dumps(config_payload),
-                'chunking': json.dumps(semantic_chunking)
-            }
+        data = {
+            "config": json.dumps(unified_config),
+            "output_format": "markdown"
+        }
             
-            return await client.post(target_url, files=files_payload, data=data)
+        return await client.post(target_url, files=files_payload, data=data)
+
+    response: Optional[httpx.Response] = None
+    last_err: Optional[Exception] = None
 
     try:
         try:
             response = await perform_request(endpoint)
-        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.NetworkError) as conn_err:
+        except (httpx.RequestError, httpx.NetworkError) as conn_err:
             # TRIPLE-STACK FALLBACK:
             # 1. Primary endpoint failed.
             # 2. Try simple service discovery (http://kreuzberg:8000)
             
-            logger.warning(f"⚠️ [KREUZBERG_CONNECT_FAIL] Primary endpoint {endpoint} failed: {conn_err}")
+            logger.warning(f"⚠️ [KREUZBERG_CONNECT_FAIL] Primary endpoint {endpoint} failed: {type(conn_err).__name__}: {conn_err}")
             
             # Sequence of fallbacks to try
             fallbacks = []
@@ -216,15 +198,21 @@ async def process_with_kreuzberg(
                 try:
                     logger.info(f"🔄 [KREUZBERG_FALLBACK] Attempting fallback to {fallback_url}...")
                     response = await perform_request(fallback_url)
-                    if response:
+                    if response is not None:
                         endpoint = fallback_url 
                         break
-                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.NetworkError) as fb_err:
-                    logger.warning(f"⚠️ [KREUZBERG_FALLBACK_FAIL] Fallback {fallback_url} failed: {fb_err}")
+                except (httpx.RequestError, httpx.NetworkError) as fb_err:
+                    logger.warning(f"⚠️ [KREUZBERG_FALLBACK_FAIL] Fallback {fallback_url} failed: {type(fb_err).__name__}: {fb_err}")
                     last_err = fb_err
             
-            if not response:
-                raise last_err
+            if response is None:
+                if last_err:
+                    raise last_err
+                else:
+                    raise Exception("Failed to connect to Kreuzberg and no fallbacks succeeded.")
+
+        if response is None:
+            return None, {"error": "No response received from Kreuzberg."}
 
         if response.status_code != 200:
             logger.error(f"[KREUZBERG] API returned error {response.status_code}: {response.text}")
