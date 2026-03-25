@@ -453,9 +453,11 @@ fn resolve_mime_type(job: &ExtractionJob, file_bytes: &[u8]) -> Result<String> {
         }
     }
 
-    detect_mime_type_from_bytes(file_bytes)
-        .or_else(|_| validate_mime_type("application/octet-stream"))
-        .map(|mime| mime.to_string())
+    Ok(
+        detect_mime_type_from_bytes(file_bytes)
+            .or_else(|_| validate_mime_type("application/octet-stream"))
+            .map(|mime| mime.to_string())?,
+    )
 }
 
 fn build_extraction_config() -> ExtractionConfig {
