@@ -276,15 +276,37 @@ class ProcessingService:
                 else:
                     logger.warning(f"   ⚠️ No chunks produced by Kreuzberg for {page_data.page_url}")
                     if page_data.markdown:
-                        dummy_chunk = {
-                            "text": page_data.markdown,
-                            "metadata": {"title": page_data.title, "url": page_data.page_url}
-                        }
+                        # ⚠️ FALLBACK: Kreuzberg returned 0 chunks but we have markdown.
+                        # Manually split into reasonable chunks (1000 chars) and embed each one
+                        # so they are actually searchable in the vector DB.
+                        CHUNK_SIZE = 1000
+                        md = page_data.markdown
+                        fallback_chunks = []
+                        for i in range(0, len(md), CHUNK_SIZE):
+                            snippet = md[i:i + CHUNK_SIZE]
+                            if snippet.strip():
+                                fallback_chunks.append({
+                                    "text": snippet,
+                                    "content": snippet,
+                                    "metadata": {"title": page_data.title, "url": page_data.page_url, "chunk_index": i // CHUNK_SIZE}
+                                })
+                        
+                        logger.info(f"   🔄 [FALLBACK] Created {len(fallback_chunks)} manual chunks from {len(md)} chars of markdown")
+                        
+                        # Generate embeddings for fallback chunks (same path as normal chunks)
+                        from shared.embeddings import batch_generate_embeddings
+                        fallback_texts = [c["text"] for c in fallback_chunks]
+                        fallback_embeddings = await batch_generate_embeddings(fallback_texts)
+                        for i, embedding in enumerate(fallback_embeddings):
+                            if i < len(fallback_chunks):
+                                fallback_chunks[i]["embedding"] = embedding
+                        
                         await vector_dao.batch_insert_chunks(
-                            chunks=[dummy_chunk], 
+                            chunks=fallback_chunks,
                             document_id=job_context.website_id,
                             document_type='website'
                         )
+                        logger.info(f"   ✅ [FALLBACK] Inserted {len(fallback_chunks)} embedded fallback chunks into vector DB")
 
                 self._current_page_data = page_data
                 
