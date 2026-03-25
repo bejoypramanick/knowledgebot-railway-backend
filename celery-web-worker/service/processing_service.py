@@ -958,6 +958,8 @@ class ProcessingService:
         
         # Use explicit tracking for confirmation
         confirmed_done = False
+        current_op = operation
+        poll_interval = 2.0
         
         while True:
             elapsed = time.time() - start_time
@@ -966,34 +968,20 @@ class ProcessingService:
                 logger.error(f"   ❌ [GEMINI_TIMEOUT] Timeout indexing after {elapsed:.0f}s (Status: {status})")
                 return None
             
-            # 2. Check if operation is done
+            # Refresh operation status
             try:
-                # API Spec: Operation object has a 'done' boolean field
-                if not isinstance(current_op, str) and getattr(current_op, 'done', False):
-                    logger.info(f"   ✅ [GEMINI_UPLOAD] Indexing completed after {elapsed:.0f}s")
-                    confirmed_done = True
-                    break
-                
-                # Check for errors if we have an object
-                if not isinstance(current_op, str) and hasattr(current_op, 'error') and current_op.error:
-                    logger.error(f"   ❌ [GEMINI_UPLOAD] Operation failed: {current_op.error}")
-                    return None
-                    
-            except Exception as e:
-                logger.warning(f"   ⚠️ Error checking operation state: {e}")
-            
-            # Adaptive polling interval (Exponential backoff up to 10s)
-            await asyncio.sleep(poll_interval)
-            poll_interval = min(poll_interval * 1.5, 10.0)
-            
-            # 3. Refresh operation status
-            try:
-                # Polymorphic refresh: genai_client.operations.get accepts string or object
+                # Refresh operation status using the client
                 current_op = await genai_client.operations.get(current_op)
                 logger.info(f"   ⏳ [GEMINI_INDEX...] {elapsed:.0f}s elapsed (Interval: {poll_interval:.1f}s)")
                 
-                # Success check right after refresh
+                # Success check
                 if getattr(current_op, 'done', False):
+                    # Check for errors if operation IS done
+                    op_error = getattr(current_op, 'error', None)
+                    if op_error:
+                        logger.error(f"   ❌ [GEMINI_UPLOAD] Operation failed: {op_error}")
+                        return None
+                        
                     logger.info(f"   ✅ [GEMINI_UPLOAD] Indexing completed after {elapsed:.0f}s")
                     confirmed_done = True
                     break
@@ -1001,18 +989,44 @@ class ProcessingService:
             except Exception as e:
                 logger.warning(f"   ⚠️ [GEMINI_REFRESH_ERR] Error refreshing status: {e}")
                 
-                # Legacy Fallback: If we can't refresh, but significant time has passed ($30s),
+                # Legacy Fallback: If we can't refresh, but significant time has passed (30s),
                 # assume the operation completed and move to extraction. 
-                # This was found necessary for stability during previous indexing spikes.
                 if elapsed > 30:
                     logger.info(f"   ℹ️ [GEMINI_FALLBACK] Assuming completion after {elapsed:.0f}s due to persistent refresh errors.")
                     confirmed_done = False # Not confirmed by API, just assumed
                     break
-                
-                # Otherwise, continue polling
-                continue
+            
+            # Adaptive polling interval (Exponential backoff up to 10s)
+            await asyncio.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 10.0)
         
-        return await self._extractDocumentNameFromOperation(current_op, job_context.store_name, display_name=display_name, confirmed=confirmed_done)
+        # After operation is done/assumed done, we should confirm the file is actually ACTIVE in the store
+        # This addresses the user's request: "after uploading file can we just query the filesearch to confirm that the file status is active"
+        upload_result = await self._extractDocumentNameFromOperation(current_op, job_context.store_name, display_name=display_name, confirmed=confirmed_done)
+        
+        if upload_result and confirmed_done:
+            try:
+                # Query the store to check actual file state
+                logger.info(f"   🔍 [FILE_STATUS] Verifying file status for {upload_result.document_name}...")
+                file_metadata = await genai_client.file_search_stores.get_file(name=upload_result.document_name)
+                
+                # Safer check for state field
+                actual_state = getattr(file_metadata, 'state', None)
+                if actual_state:
+                    state_str = str(actual_state).upper()
+                    logger.info(f"   📊 [FILE_STATUS] Actual state in Gemini: {state_str}")
+                    if 'ACTIVE' not in state_str:
+                        logger.warning(f"   ⚠️ [FILE_STATUS] File is not yet ACTIVE (State: {state_str}). Setting confirmed=False.")
+                        upload_result.confirmed = False
+                    else:
+                        logger.info(f"   ✅ [FILE_STATUS] File is ACTIVE!")
+                        upload_result.confirmed = True
+            except Exception as e:
+                logger.warning(f"   ⚠️ [FILE_STATUS_ERR] Could not verify file status via FileSearch Store: {e}")
+                # We don't fail here, but we mark as unconfirmed to be safe
+                upload_result.confirmed = False
+                
+        return upload_result
 
     async def _extractDocumentNameFromOperation(self, operation, store_name: str, display_name: Optional[str] = None, confirmed: bool = True) -> Optional[UploadResult]:
         """Extract document name and URI from operation"""
@@ -1076,7 +1090,7 @@ class ProcessingService:
                 import os
                 token_client = get_web_genai_client()
                 if token_client:
-                    token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
+                    token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"))
                     token_response = token_client.models.count_tokens(
                         model=token_model,
                         contents=md_content
@@ -1101,9 +1115,10 @@ class ProcessingService:
                     char_count=metrics.get('char_count', 0),
                     mark_completed=True,  # Single-page mode - mark as completed
                     processed_content_s3_key=processed_content_s3_key,
-                    filestore_character_count=filestore_character_count,
+                    filestore_char_count=filestore_character_count,
                     filestore_word_count=filestore_word_count,
                     filestore_token_count=filestore_token_count,
+                    md_file_size=len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0,
                     gemini_state=gemini_state
                 )
 
@@ -1143,9 +1158,10 @@ class ProcessingService:
                     char_count=metrics.get('char_count', 0),
                     mark_completed=False,  # Multi-page mode - keep status as 'processing'
                     processed_content_s3_key=processed_content_s3_key,
-                    filestore_character_count=filestore_character_count,
+                    filestore_char_count=filestore_character_count,
                     filestore_word_count=filestore_word_count,
                     filestore_token_count=filestore_token_count,
+                    md_file_size=len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0,
                     gemini_state=gemini_state
                 )
 
@@ -1183,9 +1199,10 @@ class ProcessingService:
                 description=page_data.description,
                 crawl_session_id=page_data.session_id,
                 processed_content_s3_key=processed_content_s3_key,
-                filestore_character_count=filestore_character_count,
+                filestore_char_count=filestore_character_count,
                 filestore_word_count=filestore_word_count,
                 filestore_token_count=filestore_token_count,
+                md_file_size=len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0,
                 gemini_state=gemini_state
             )
 
@@ -1245,9 +1262,10 @@ class ProcessingService:
         char_count: int,
         mark_completed: bool = True,
         processed_content_s3_key: Optional[str] = None,
-        filestore_character_count: int = 0,
+        filestore_char_count: int = 0,
         filestore_word_count: int = 0,
         filestore_token_count: int = 0,
+        md_file_size: int = 0,
         gemini_state: str = 'completed'
     ) -> bool:
         """Update parent website record with single page data"""
@@ -1265,9 +1283,10 @@ class ProcessingService:
             file_search_metadata=upload_result.file_search_metadata,
             mark_completed=mark_completed,
             processed_content_s3_key=processed_content_s3_key,
-            filestore_character_count=filestore_character_count,
+            filestore_char_count=filestore_char_count,
             filestore_word_count=filestore_word_count,
             filestore_token_count=filestore_token_count,
+            md_file_size=md_file_size,
             gemini_state=gemini_state
         )
 

@@ -111,28 +111,84 @@ async def process_with_gemini(
             logger.error("❌ [GEMINI] Failed to create upload operation")
             raise Exception("Gemini operation creation failed")
 
-        # Wait for the upload operation to complete
-        start_time = time.time()
-        max_wait_time = 300  # 5 minutes
+        # Wait for the upload operation to complete (robust polling)
+        wait_start_time = time.time()
+        max_wait_time = 600  # 10 minutes
         document_name = None
-        final_state = "PENDING"
-        gemini_processed_at = None
+        document_uri = None
+        poll_interval = 2.0
+        confirmed_done = False
 
-        while not operation.done:
-            elapsed = time.time() - start_time
+        while True:
+            elapsed = time.time() - wait_start_time
             if elapsed > max_wait_time:
-                logger.error(f"❌ Timeout waiting for file upload to complete")
-                raise Exception("File upload timeout")
+                logger.error(f"❌ [GEMINI_TIMEOUT] Timeout after {elapsed:.0f}s")
+                raise Exception(f"Gemini upload timeout after {elapsed:.0f}s")
 
-            await asyncio.sleep(5)
-            operation = genai_client.operations.get(operation)
+            try:
+                # Refresh operation status
+                operation = genai_client.operations.get(operation)
+                
+                if operation.done:
+                    # Check for errors
+                    op_error = getattr(operation, 'error', None)
+                    if op_error:
+                        logger.error(f"❌ [GEMINI_ERROR] Operation failed: {op_error}")
+                        raise Exception(f"Gemini operation failed: {op_error}")
+                        
+                    logger.info(f"✅ [GEMINI_UPLOAD] Operation completed in {elapsed:.0f}s")
+                    confirmed_done = True
+                    break
+            except Exception as poll_err:
+                logger.warning(f"⚠️ [GEMINI_POLL] Error refreshing status: {poll_err}")
+                if elapsed > 60: # Fallback if persistent errors but significant time passed
+                    logger.info(f"ℹ️ [GEMINI_FALLBACK] Assuming completion after {elapsed:.0f}s due to polling errors")
+                    confirmed_done = False
+                    break
+
+            await asyncio.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 10.0)
 
         # FileSearch upload returns result in response.document_name
         if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
             document_name = operation.response.document_name
-            final_state = "ACTIVE"
-            gemini_processed_at = datetime.utcnow()
+            # Try to get URI if available
+            document_uri = getattr(operation.response, 'uri', None) if hasattr(operation.response, 'uri') else None
+            logger.info(f"✅ [GEMINI] FileSearch document: {document_name}")
+            if document_uri:
+                logger.info(f"📎 [GEMINI] Document URI: {document_uri}")
 
+        # STEP 6.5: CONFIRM ACTIVE STATUS
+        # Default to pending until confirmed ACTIVE
+        final_state = 'pending'
+        
+        if document_name and confirmed_done:
+            try:
+                logger.info(f"🔍 [FILE_STATUS] Verifying status for {document_name}...")
+                file_metadata = genai_client.file_search_stores.get_file(name=document_name)
+                
+                actual_state = getattr(file_metadata, 'state', None)
+                if actual_state:
+                    state_str = str(actual_state).upper()
+                    logger.info(f"📊 [FILE_STATUS] Actual state: {state_str}")
+                    if 'ACTIVE' in state_str:
+                        logger.info(f"✅ [FILE_STATUS] File is ACTIVE!")
+                        final_state = 'completed'
+                    else:
+                        logger.warning(f"⚠️ [FILE_STATUS] File is not yet ACTIVE (State: {state_str}).")
+                        final_state = 'pending'
+                else:
+                    # If no state field, assume completed if the operation was confirmed done
+                    final_state = 'completed' if confirmed_done else 'pending'
+            except Exception as status_err:
+                logger.warning(f"⚠️ [FILE_STATUS_ERR] Could not verify status via FileSearch Store: {status_err}")
+                final_state = 'completed' if confirmed_done else 'pending'
+        else:
+            final_state = 'pending' if document_name else 'failed'
+
+        gemini_processed_at = datetime.utcnow()
+
+        if document_name:
             # Create a placeholder file object with the document name
             class FileSearchDocument:
                 def __init__(self, name):
@@ -629,64 +685,113 @@ async def process_file_content(
                     logger.error(f"❌ [GEMINI] Failed to create upload operation")
                     raise Exception("Gemini operation creation failed")
 
-                # Wait for the upload operation to complete
+                # Wait for the upload operation to complete (robust polling)
                 wait_start_time = time.time()
-                max_wait_time = 300  # 5 minutes
+                max_wait_time = 600  # 10 minutes for large/complex files
                 document_name = None
-                final_state = "PENDING"
-                gemini_processed_at = None
+                document_uri = None
+                final_state = "pending" # Default to pending until confirmed ACTIVE
+                gemini_processed_at = datetime.utcnow()
+                poll_interval = 2.0
+                confirmed_done = False
 
-                while not operation.done:
+                while True:
                     elapsed = time.time() - wait_start_time
                     if elapsed > max_wait_time:
-                        logger.error(f"❌ Timeout waiting for file upload to complete")
-                        raise Exception("File upload timeout")
+                        logger.error(f"❌ [GEMINI_TIMEOUT] Timeout after {elapsed:.0f}s")
+                        raise Exception(f"Gemini upload timeout after {elapsed:.0f}s")
 
-                    await asyncio.sleep(5)
-                    operation = genai_client.operations.get(operation)
+                    try:
+                        # Refresh operation status
+                        operation = genai_client.operations.get(operation)
+                        
+                        if operation.done:
+                            # Check for errors
+                            op_error = getattr(operation, 'error', None)
+                            if op_error:
+                                logger.error(f"❌ [GEMINI_ERROR] Operation failed: {op_error}")
+                                raise Exception(f"Gemini operation failed: {op_error}")
+                                
+                            logger.info(f"✅ [GEMINI_UPLOAD] Operation completed in {elapsed:.0f}s")
+                            confirmed_done = True
+                            break
+                    except Exception as poll_err:
+                        logger.warning(f"⚠️ [GEMINI_POLL] Error refreshing status: {poll_err}")
+                        if elapsed > 60: # Fallback if persistent errors but significant time passed
+                            logger.info(f"ℹ️ [GEMINI_FALLBACK] Assuming completion after {elapsed:.0f}s due to polling errors")
+                            confirmed_done = False
+                            break
+
+                    await asyncio.sleep(poll_interval)
+                    poll_interval = min(poll_interval * 1.5, 10.0)
 
                 # FileSearch upload returns result in response.document_name
                 if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
                     document_name = operation.response.document_name
-                    final_state = "ACTIVE"
-                    gemini_processed_at = datetime.utcnow()
+                    # Try to get URI if available
+                    document_uri = getattr(operation.response, 'uri', None) if hasattr(operation.response, 'uri') else None
+                    logger.info(f"✅ [GEMINI] FileSearch document: {document_name}")
+                    if document_uri:
+                        logger.info(f"📎 [GEMINI] Document URI: {document_uri}")
 
-                    # Log complete Gemini FileStore response after successful upload
-                    logger.info(f"📦 [GEMINI_UPLOAD_RESPONSE] Complete FileStore upload response received:")
-                    logger.info(f"    Document Name: {document_name}")
-                    logger.info(f"    Final State: {final_state}")
-                    logger.info(f"    Processed At: {gemini_processed_at.isoformat()}")
-                    logger.info(f"    Operation Type: {type(operation).__name__}")
-                    logger.info(f"    Response Details: {operation.response}")
-                    logger.info(f"📋 [GEMINI_UPLOAD_FULL_RESPONSE] Full operation response:")
-                    logger.info(f"┌─────────────────────────────────────────────────────────────────┐")
-                    logger.info(f"Operation: {operation}")
-                    logger.info(f"└─────────────────────────────────────────────────────────────────┘")
-                    
-                    # Create a placeholder file object with the document name
-                    class FileSearchDocument:
-                        def __init__(self, name):
-                            self.name = name
-                            self.uri = None
-
-                    uploaded_file = FileSearchDocument(document_name)
-                    file_search_metadata = {
-                        'type': 'file_search',
-                        'file_search_store_name': file_search_store_name,
-                        'document_name': document_name,
-                        'uploaded_at': gemini_processed_at.isoformat()
-                    }
-
-                    logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. Document: {document_name}")
-                    logger.info(f"📝 [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
+                # STEP 6.5: CONFIRM ACTIVE STATUS
+                # This addresses the user's request to query filesearch to confirm status is active
+                if document_name and confirmed_done:
+                    try:
+                        logger.info(f"🔍 [FILE_STATUS] Verifying status for {document_name}...")
+                        file_metadata = genai_client.file_search_stores.get_file(name=document_name)
+                        
+                        actual_state = getattr(file_metadata, 'state', None)
+                        if actual_state:
+                            state_str = str(actual_state).upper()
+                            logger.info(f"📊 [FILE_STATUS] Actual state: {state_str}")
+                            # Use 'completed' for database state if ACTIVE
+                            if 'ACTIVE' in state_str:
+                                logger.info(f"✅ [FILE_STATUS] File is ACTIVE!")
+                                final_state = 'completed'
+                            else:
+                                logger.warning(f"⚠️ [FILE_STATUS] File is not yet ACTIVE (State: {state_str}). Setting state to pending.")
+                                final_state = 'pending'
+                        else:
+                            # If no state field, assume completed if the operation was confirmed done
+                            final_state = 'completed'
+                    except Exception as status_err:
+                        logger.warning(f"⚠️ [FILE_STATUS_ERR] Could not verify status via FileSearch Store: {status_err}")
+                        final_state = 'pending' # Safe fallback
                 else:
-                    logger.error(f"❌ [GEMINI] Upload failed - no document_name in response: {operation}")
-                    logger.error(f"📦 [GEMINI_RESPONSE] Failed operation details:")
-                    logger.error(f"Operation: {operation}")
-                    logger.error(f"Has response: {hasattr(operation, 'response')}")
-                    if hasattr(operation, 'response'):
-                        logger.error(f"Response: {operation.response}")
-                    raise Exception("FileSearch upload failed - no document returned")
+                    # Not confirmed or no document name
+                    final_state = 'pending' if document_name else 'failed'
+
+                gemini_processed_at = datetime.utcnow()
+
+                # Log complete Gemini FileStore response after successful upload
+                logger.info(f"📦 [GEMINI_UPLOAD_RESPONSE] Complete FileStore upload response received:")
+                logger.info(f"    Document Name: {document_name}")
+                logger.info(f"    Final State: {final_state}")
+                logger.info(f"    Processed At: {gemini_processed_at.isoformat()}")
+                logger.info(f"    Operation Type: {type(operation).__name__}")
+                logger.info(f"    Response Details: {getattr(operation, 'response', 'N/A')}")
+                logger.info(f"📋 [GEMINI_UPLOAD_FULL_RESPONSE] Full operation response:")
+                logger.info(f"┌─────────────────────────────────────────────────────────────────┐")
+                logger.info(f"Operation: {operation}")
+                logger.info(f"└─────────────────────────────────────────────────────────────────┘")
+                
+                # Create a placeholder file object with the document name
+                class FileSearchDocument:
+                    def __init__(self, name):
+                        self.name = name
+                        self.uri = None
+
+                uploaded_file = FileSearchDocument(document_name)
+                file_search_metadata = {
+                    'type': 'file_search',
+                    'file_search_store_name': file_search_store_name,
+                    'document_name': document_name,
+                    'uploaded_at': gemini_processed_at.isoformat()
+                }
+
+                logger.info(f"✅ [GEMINI] Phase complete. Document: {document_name}")
+                logger.info(f"📝 [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
 
             except Exception as e:
                 logger.error(f"❌ [GEMINI] Error uploading to FileSearch: {e}")
@@ -717,13 +822,14 @@ async def process_file_content(
                     document_uri = uploaded_file.uri
                 
                 # Compute filestore metrics from the markdown content sent to Gemini
-                filestore_character_count = len(content_for_upload) if content_for_upload else 0
+                filestore_char_count = len(content_for_upload) if content_for_upload else 0
                 filestore_word_count = len(content_for_upload.split()) if content_for_upload and content_for_upload.strip() else 0
                 filestore_token_count = 0
+                md_file_size = len(content_for_upload.encode('utf-8')) if content_for_upload else 0
 
                 # Count tokens via Gemini API
                 try:
-                    token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
+                    token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"))
                     token_response = genai_client.models.count_tokens(
                         model=token_model,
                         contents=content_for_upload
@@ -755,9 +861,10 @@ async def process_file_content(
                     original_file_extension=original_file_extension,
                     original_mime_type=original_mime_type,
                     processed_content_s3_key=processed_content_s3_key,
-                    filestore_character_count=filestore_character_count,
+                    filestore_char_count=filestore_char_count,
                     filestore_word_count=filestore_word_count,
                     filestore_token_count=filestore_token_count,
+                    md_file_size=md_file_size,
                     total_pages=total_pages
                 )
 

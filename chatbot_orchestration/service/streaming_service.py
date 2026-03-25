@@ -1530,7 +1530,7 @@ class StreamingService:
             from ..core.token_tracker import track_gemini_usage_detailed
             import os
 
-            model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
+            model_name = os.getenv("GEMINI_MODEL_NAME", os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"))
 
             # Try to get actual token usage from run object first
             input_tokens = 0
@@ -1665,7 +1665,7 @@ class StreamingService:
             import os
             from concurrent.futures import ThreadPoolExecutor
             loop = asyncio.get_event_loop()
-            token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
+            token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"))
 
             from ..core.ai import get_genai_client
             genai_client = get_genai_client()
@@ -1952,7 +1952,7 @@ class StreamingService:
 
             # Count tokens for each step in parallel
             genai_client = get_genai_client()
-            token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", "gemini-2.0-flash")
+            token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"))
             if genai_client:
                 loop = asyncio.get_event_loop()
                 executor = ThreadPoolExecutor(max_workers=min(len(steps), 8))
