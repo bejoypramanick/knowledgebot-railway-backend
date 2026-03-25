@@ -951,40 +951,48 @@ class ProcessingService:
         genai_client = get_genai_client().aio
         
         start_time = time.time()
-        max_wait = 120  # Reduced from 300s to 120s (2 minutes)
+        # Increased from 120s to 600s for robust indexing of complex documents
+        max_wait = 600
         
-        logger.info(f"   ⏳ Waiting for upload... (timeout: {max_wait}s)")
+        logger.info(f"   ⏳ [GEMINI_UPLOAD] Waiting for indexing... (timeout: {max_wait}s)")
         
         # Keep track of the current operation object
         current_operation = operation
+        poll_interval = 2.0
         
         while True:
             elapsed = time.time() - start_time
             if elapsed > max_wait:
-                logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
+                status = getattr(current_operation, 'status', 'unknown')
+                logger.error(f"   ❌ [GEMINI_TIMEOUT] Timeout indexing after {elapsed:.0f}s (Status: {status})")
                 return None
-            
-            logger.info(f"   ⏳ Waiting for upload... ({elapsed:.0f}s)")
             
             # Check if operation is done
             try:
+                # API Spec: Operation object has a 'done' boolean field
                 if getattr(current_operation, 'done', False):
-                    logger.info(f"   ✅ Upload completed after {elapsed:.0f}s")
+                    logger.info(f"   ✅ [GEMINI_UPLOAD] Indexing completed after {elapsed:.0f}s")
                     break
-            except AttributeError as e:
-                logger.warning(f"   ⚠️ Error checking operation.done: {e}")
+                
+                # If error is present in the operation result
+                if hasattr(current_operation, 'error') and current_operation.error:
+                    logger.error(f"   ❌ [GEMINI_UPLOAD] Operation failed: {current_operation.error}")
+                    return None
+                    
+            except Exception as e:
+                logger.warning(f"   ⚠️ Error checking operation state: {e}")
             
-            await asyncio.sleep(2)
+            # Adaptive polling interval (Exponential backoff up to 10s)
+            await asyncio.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 10.0)
             
             # Refresh operation status
             try:
-                current_operation = await genai_client.operations.get(current_operation)
+                current_operation = await genai_client.operations.get(current_operation.name)
+                logger.info(f"   ⏳ [GEMINI_INDEX...] {elapsed:.0f}s elapsed (Interval: {poll_interval:.1f}s)")
             except Exception as e:
-                logger.warning(f"   ⚠️ Error refreshing operation status: {e}")
-                # If we can't refresh, assume it's done after some time
-                if elapsed > 30:
-                    logger.info(f"   ℹ️ Assuming operation completed after {elapsed:.0f}s due to API errors")
-                    break
+                logger.warning(f"   ⚠️ [GEMINI_REFRESH_ERR] Error refreshing status: {e}")
+                # We don't break here, we wait for the next interval to try again
                 continue
         
         return await self._extractDocumentNameFromOperation(current_operation, job_context.store_name, display_name=display_name)
