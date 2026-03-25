@@ -24,6 +24,7 @@ const DEFAULT_RESULT_QUEUE: &str = "kreuzberg_extraction_results";
 struct ExtractionJob {
     job_id: String,
     document_id: String,
+    worker_type: String,
     presigned_url: String,
     artifact_prefix: String,
     #[serde(default = "default_result_queue")]
@@ -34,6 +35,7 @@ struct ExtractionJob {
 struct ExtractionResult {
     job_id: String,
     document_id: String,
+    worker_type: String,
     status: String,
     manifest_s3_key: Option<String>,
     error: Option<String>,
@@ -48,7 +50,8 @@ struct ExtractedChunk {
 
 #[derive(Clone)]
 struct AppState {
-    redis_client: redis::Client,
+    file_redis_client: Option<redis::Client>,
+    web_redis_client: Option<redis::Client>,
     s3_client: S3Client,
     http_client: HttpClient,
     bucket_name: String,
@@ -92,9 +95,6 @@ fn init_tracing() {
 }
 
 async fn build_state() -> Result<AppState> {
-    let redis_url = env_var("EXTRACT_REDIS_URL")
-        .or_else(|_| env_var("FILE_REDIS_URL"))
-        .context("missing EXTRACT_REDIS_URL or FILE_REDIS_URL")?;
     let task_queue = env::var("EXTRACT_TASK_QUEUE").unwrap_or_else(|_| DEFAULT_TASK_QUEUE.to_string());
     let bucket_name = env::var("RAILWAY_BUCKET_NAME")
         .or_else(|_| env::var("RAILWAY_VOLUME_NAME"))
@@ -105,8 +105,18 @@ async fn build_state() -> Result<AppState> {
     let secret_key = env_var("RAILWAY_STORAGE_SECRET_KEY")?;
     let region = env::var("RAILWAY_REGION").unwrap_or_else(|_| "us-east-1".to_string());
 
-    let redis_client = redis::Client::open(redis_url.clone())
-        .with_context(|| format!("invalid redis url: {redis_url}"))?;
+    let file_redis_client = env::var("FILE_REDIS_URL")
+        .ok()
+        .map(|url| redis::Client::open(url.clone()).with_context(|| format!("invalid FILE_REDIS_URL: {url}")))
+        .transpose()?;
+    let web_redis_client = env::var("WEB_REDIS_URL")
+        .ok()
+        .map(|url| redis::Client::open(url.clone()).with_context(|| format!("invalid WEB_REDIS_URL: {url}")))
+        .transpose()?;
+
+    if file_redis_client.is_none() && web_redis_client.is_none() {
+        return Err(anyhow!("missing FILE_REDIS_URL and WEB_REDIS_URL"));
+    }
 
     let creds = Credentials::new(access_key, secret_key, None, None, "railway-storage");
     let shared_config = aws_config::defaults(BehaviorVersion::latest())
@@ -127,7 +137,8 @@ async fn build_state() -> Result<AppState> {
         .context("failed to build http client")?;
 
     Ok(AppState {
-        redis_client,
+        file_redis_client,
+        web_redis_client,
         s3_client,
         http_client,
         bucket_name,
@@ -136,19 +147,28 @@ async fn build_state() -> Result<AppState> {
 }
 
 fn pop_job(state: &AppState) -> Result<Option<ExtractionJob>> {
-    let mut conn = state.redis_client.get_connection()?;
-    let result: Option<(String, String)> = redis::cmd("BLPOP")
-        .arg(&state.task_queue)
-        .arg(5)
-        .query(&mut conn)?;
+    if let Some(job) = pop_job_from_client(state.file_redis_client.as_ref(), &state.task_queue, "file")? {
+        return Ok(Some(job));
+    }
+    if let Some(job) = pop_job_from_client(state.web_redis_client.as_ref(), &state.task_queue, "web")? {
+        return Ok(Some(job));
+    }
+    Ok(None)
+}
 
+fn pop_job_from_client(
+    client: Option<&redis::Client>,
+    task_queue: &str,
+    worker_type: &str,
+) -> Result<Option<ExtractionJob>> {
+    let Some(client) = client else {
+        return Ok(None);
+    };
+    let mut conn = client.get_connection()?;
+    let result: Option<(String, String)> = redis::cmd("BLPOP").arg(task_queue).arg(1).query(&mut conn)?;
     if let Some((_queue, payload)) = result {
         let job: ExtractionJob = serde_json::from_str(&payload).context("invalid extraction payload")?;
-        info!(
-            job_id = %job.job_id,
-            document_id = %job.document_id,
-            "received extraction job"
-        );
+        info!(job_id = %job.job_id, document_id = %job.document_id, worker_type = %worker_type, "received extraction job");
         Ok(Some(job))
     } else {
         Ok(None)
@@ -163,6 +183,7 @@ async fn handle_job(state: &AppState, job: ExtractionJob) -> Result<()> {
             ExtractionResult {
                 job_id: job.job_id.clone(),
                 document_id: job.document_id.clone(),
+                worker_type: job.worker_type.clone(),
                 status: "failed".to_string(),
                 manifest_s3_key: None,
                 error: Some(err.to_string()),
@@ -229,6 +250,7 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
     Ok(ExtractionResult {
         job_id: job.job_id.clone(),
         document_id: job.document_id.clone(),
+        worker_type: job.worker_type.clone(),
         status: "completed".to_string(),
         manifest_s3_key: Some(manifest_key),
         error: None,
@@ -705,7 +727,13 @@ async fn upload_bytes(state: &AppState, key: String, body: Vec<u8>, content_type
 }
 
 fn publish_result(state: &AppState, queue_name: &str, result: &ExtractionResult) -> Result<()> {
-    let mut conn = state.redis_client.get_connection()?;
+    let client = if result.worker_type == "web" {
+        state.web_redis_client.as_ref()
+    } else {
+        state.file_redis_client.as_ref()
+    }
+    .ok_or_else(|| anyhow!("missing redis client for worker_type {}", result.worker_type))?;
+    let mut conn = client.get_connection()?;
     let payload = serde_json::to_string(result)?;
     let _: () = conn.rpush(queue_name, payload)?;
     info!(

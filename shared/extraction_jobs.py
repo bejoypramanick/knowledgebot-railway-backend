@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 import uuid
 
 
@@ -23,6 +23,7 @@ class ExtractionJob:
 
     job_id: str
     document_id: str
+    worker_type: str
     presigned_url: str
     artifact_prefix: str
     reply_channel: str = "kreuzberg_extraction_results"
@@ -36,6 +37,7 @@ class ExtractionJob:
         cls,
         *,
         document_id: str,
+        worker_type: str,
         presigned_url: str,
         artifact_prefix: str,
         reply_channel: str = "kreuzberg_extraction_results",
@@ -43,6 +45,7 @@ class ExtractionJob:
         return cls(
             job_id=str(uuid.uuid4()),
             document_id=document_id,
+            worker_type=worker_type,
             presigned_url=presigned_url,
             artifact_prefix=artifact_prefix,
             reply_channel=reply_channel,
@@ -55,6 +58,7 @@ class ExtractionResult:
 
     job_id: str
     document_id: str
+    worker_type: str
     status: str
     manifest_s3_key: Optional[str] = None
     error: Optional[str] = None

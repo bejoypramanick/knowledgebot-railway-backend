@@ -53,6 +53,7 @@ async def process_with_kreuzberg(
     try:
         job = client.create_job(
             document_id=source_id or original_filename,
+            worker_type=worker_type,
             presigned_url=presigned_url,
             artifact_prefix=artifact_prefix,
             reply_channel=reply_channel,
@@ -65,7 +66,7 @@ async def process_with_kreuzberg(
         timeout_at = time.time() + KREUZBERG_REDIS_TIMEOUT
         result = None
         while time.time() < timeout_at:
-            result = await asyncio.to_thread(client.get_result, 1, reply_channel)
+            result = await asyncio.to_thread(client.get_result, 1, reply_channel, worker_type)
             if result:
                 break
             await asyncio.sleep(KREUZBERG_POLL_INTERVAL)
