@@ -5,7 +5,8 @@ use aws_sdk_s3::{config::Region, primitives::ByteStream, Client as S3Client};
 use chrono::Utc;
 use kreuzberg::{
     detect_mime_type_from_bytes, extract_bytes, validate_mime_type, ChunkingConfig, ChunkerType,
-    ExtractionConfig, OutputFormat as ContentOutputFormat, PageConfig, Table,
+    ExtractionConfig, ImageExtractionConfig, LanguageDetectionConfig, OcrConfig,
+    OutputFormat as ContentOutputFormat, PageConfig, PdfConfig, Table, TesseractConfig,
 };
 use redis::Commands;
 use reqwest::Client as HttpClient;
@@ -261,19 +262,17 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     let mime_type = detect_mime_type_from_bytes(file_bytes)
         .or_else(|_| validate_mime_type("application/octet-stream"))
         .context("unable to validate or detect mime type for extraction")?;
-    let chunk_size = parse_env_usize("KREUZBERG_CHUNK_MAX_CHARACTERS", 1200);
-    let chunk_overlap = parse_env_usize("KREUZBERG_CHUNK_OVERLAP", 150);
-
-    let extraction_config = ExtractionConfig {
-        output_format: ContentOutputFormat::Markdown,
-        pages: Some(PageConfig {
-            extract_pages: true,
-            insert_page_markers: false,
-            ..Default::default()
-        }),
-        include_document_structure: true,
-        ..Default::default()
-    };
+    let extraction_config = build_extraction_config();
+    let chunk_size = extraction_config
+        .chunking
+        .as_ref()
+        .map(|cfg| cfg.max_characters)
+        .unwrap_or(1200);
+    let chunk_overlap = extraction_config
+        .chunking
+        .as_ref()
+        .map(|cfg| cfg.overlap)
+        .unwrap_or(150);
 
     let result = extract_bytes(file_bytes, &mime_type, &extraction_config)
         .await
@@ -283,16 +282,14 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     let markdown = inject_table_kv_sections(&result.content, &enriched_tables);
     let page_count = result.pages.as_ref().map(|pages| pages.len()).unwrap_or(0);
 
-    let chunking_config = ExtractionConfig {
-        chunking: Some(ChunkingConfig {
-            max_characters: chunk_size,
-            overlap: chunk_overlap,
-            chunker_type: ChunkerType::Markdown,
-            ..Default::default()
-        }),
-        output_format: ContentOutputFormat::Markdown,
+    let mut chunking_config = extraction_config.clone();
+    chunking_config.chunking = Some(ChunkingConfig {
+        max_characters: chunk_size,
+        overlap: chunk_overlap,
+        chunker_type: ChunkerType::Markdown,
         ..Default::default()
-    };
+    });
+    chunking_config.output_format = ContentOutputFormat::Markdown;
 
     let chunked_markdown = extract_bytes(markdown.as_bytes(), "text/markdown", &chunking_config)
         .await
@@ -365,6 +362,101 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     });
 
     Ok(ExtractionArtifacts { markdown, chunks, tables, metadata })
+}
+
+fn build_extraction_config() -> ExtractionConfig {
+    let ocr_enabled = parse_env_bool("KREUZBERG_OCR_ENABLED", false);
+    let force_ocr = parse_env_bool("KREUZBERG_FORCE_OCR", false);
+    let detect_languages = parse_env_bool("KREUZBERG_LANGUAGE_DETECTION_ENABLED", false);
+    let extract_images = parse_env_bool("KREUZBERG_IMAGE_EXTRACTION_ENABLED", false);
+    let extract_pages = parse_env_bool("KREUZBERG_PAGE_EXTRACT_PAGES", true);
+    let insert_page_markers = parse_env_bool("KREUZBERG_PAGE_INSERT_MARKERS", false);
+
+    let ocr = if ocr_enabled {
+        Some(OcrConfig {
+            backend: env::var("KREUZBERG_OCR_BACKEND").unwrap_or_else(|_| "tesseract".to_string()),
+            language: env::var("KREUZBERG_OCR_LANGUAGE").unwrap_or_else(|_| "eng".to_string()),
+            tesseract_config: Some(TesseractConfig {
+                psm: parse_env_i32("KREUZBERG_TESSERACT_PSM", 3),
+                oem: parse_env_i32("KREUZBERG_TESSERACT_OEM", 3),
+                enable_table_detection: parse_env_bool("KREUZBERG_TESSERACT_ENABLE_TABLE_DETECTION", true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+    } else {
+        None
+    };
+
+    let language_detection = if detect_languages {
+        Some(LanguageDetectionConfig {
+            enabled: true,
+            min_confidence: parse_env_f64("KREUZBERG_LANGUAGE_DETECTION_MIN_CONFIDENCE", 0.8),
+            detect_multiple: parse_env_bool("KREUZBERG_LANGUAGE_DETECTION_DETECT_MULTIPLE", false),
+        })
+    } else {
+        None
+    };
+
+    let images = if extract_images {
+        Some(ImageExtractionConfig {
+            extract_images: true,
+            target_dpi: parse_env_i32("KREUZBERG_IMAGE_TARGET_DPI", 300),
+            max_image_dimension: parse_env_i32("KREUZBERG_IMAGE_MAX_DIMENSION", 4096),
+            auto_adjust_dpi: parse_env_bool("KREUZBERG_IMAGE_AUTO_ADJUST_DPI", true),
+            min_dpi: parse_env_i32("KREUZBERG_IMAGE_MIN_DPI", 72),
+            max_dpi: parse_env_i32("KREUZBERG_IMAGE_MAX_DPI", 600),
+        })
+    } else {
+        None
+    };
+
+    let pdf_passwords = env::var("KREUZBERG_PDF_PASSWORDS")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty());
+
+    let pdf_options = Some(PdfConfig {
+        allow_single_column_tables: parse_env_bool("KREUZBERG_PDF_ALLOW_SINGLE_COLUMN_TABLES", false),
+        extract_images: parse_env_bool("KREUZBERG_PDF_EXTRACT_IMAGES", false),
+        extract_metadata: parse_env_bool("KREUZBERG_PDF_EXTRACT_METADATA", true),
+        passwords: pdf_passwords,
+        hierarchy: None,
+    });
+
+    ExtractionConfig {
+        chunking: Some(ChunkingConfig {
+            max_characters: parse_env_usize("KREUZBERG_CHUNK_MAX_CHARACTERS", 1200),
+            overlap: parse_env_usize("KREUZBERG_CHUNK_OVERLAP", 150),
+            chunker_type: ChunkerType::Markdown,
+            ..Default::default()
+        }),
+        enable_quality_processing: parse_env_bool("KREUZBERG_ENABLE_QUALITY_PROCESSING", true),
+        force_ocr,
+        images,
+        include_document_structure: parse_env_bool("KREUZBERG_INCLUDE_DOCUMENT_STRUCTURE", true),
+        language_detection,
+        max_concurrent_extractions: env::var("KREUZBERG_MAX_CONCURRENT_EXTRACTIONS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok()),
+        ocr,
+        output_format: ContentOutputFormat::Markdown,
+        pages: Some(PageConfig {
+            extract_pages,
+            insert_page_markers,
+            marker_format: env::var("KREUZBERG_PAGE_MARKER_FORMAT")
+                .unwrap_or_else(|_| "\n\n<!-- PAGE {page_num} -->\n\n".to_string()),
+        }),
+        pdf_options,
+        use_cache: parse_env_bool("KREUZBERG_USE_CACHE", true),
+        ..Default::default()
+    }
 }
 
 #[derive(Clone)]
@@ -647,5 +739,26 @@ fn parse_env_usize(name: &str, default: usize) -> usize {
     env::var(name)
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn parse_env_i32(name: &str, default: i32) -> i32 {
+    env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(default)
+}
+
+fn parse_env_f64(name: &str, default: f64) -> f64 {
+    env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(default)
+}
+
+fn parse_env_bool(name: &str, default: bool) -> bool {
+    env::var(name)
+        .ok()
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(default)
 }
