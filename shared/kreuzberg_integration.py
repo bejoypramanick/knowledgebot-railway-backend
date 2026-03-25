@@ -145,9 +145,9 @@ async def process_with_kreuzberg(
         logger.info(f"[KREUZBERG] Sending extraction request into {endpoint}...")
         
         async with httpx.AsyncClient(timeout=KREUZBERG_API_TIMEOUT) as client:
-            # We use 'files' (plural) as per previous working commits
+            # Official API spec uses 'files' (plural)
             files_payload = [
-                ('file', (original_filename, file_bytes, mime_type))
+                ('files', (original_filename, file_bytes, mime_type))
             ]
             
             data = {
