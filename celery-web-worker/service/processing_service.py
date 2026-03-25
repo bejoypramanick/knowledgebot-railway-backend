@@ -634,13 +634,18 @@ class ProcessingService:
         if not html_upload_success:
             raise Exception(f"Failed to upload HTML to S3 for {page_url}")
 
-        success, result = s3_file_storage.generate_presigned_url(html_s3_key, expiration=3600)
+        logger.info(f"🔗 [KREUZBERG] Preparing verified presigned URL for temp HTML: {html_s3_key}")
+        success, result = s3_file_storage.generate_presigned_url(
+            html_s3_key,
+            expiration=3600,
+            verify_exists=True,
+        )
         if not success:
             try:
                 await s3_file_storage.delete_file(html_s3_key)
             except Exception:
                 pass
-            raise Exception(f"Failed to generate presigned URL: {result}")
+            raise Exception(f"Failed to generate verified presigned URL for temp HTML {html_s3_key}: {result}")
 
         presigned_url = result
 
