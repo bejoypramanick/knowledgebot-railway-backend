@@ -31,6 +31,16 @@ async def _download_s3_json(s3_key: str) -> Any:
     return json.loads(payload.decode("utf-8"))
 
 
+def _json_safe_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _json_safe_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 async def process_with_kreuzberg(
     presigned_url: str,
     original_filename: str,
@@ -47,12 +57,13 @@ async def process_with_kreuzberg(
     reply_channel = f"kreuzberg_extraction_results:{source_id or original_filename}:{int(start_time * 1000)}"
     client = ExtractionWorkerClient()
     artifact_prefix = f"processing/processed/{source_id or original_filename}"
+    document_id = _json_safe_value(source_id or original_filename)
 
     logger.info(f"[KREUZBERG] Queueing extraction for {original_filename} via Redis worker")
 
     try:
         job = client.create_job(
-            document_id=source_id or original_filename,
+            document_id=document_id,
             worker_type=worker_type,
             presigned_url=presigned_url,
             artifact_prefix=artifact_prefix,
