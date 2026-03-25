@@ -109,7 +109,7 @@ async def process_with_kreuzberg(
         logger.info(f"[KREUZBERG] Attempting extraction request to {target_url}...")
         async with httpx.AsyncClient(timeout=KREUZBERG_API_TIMEOUT) as client:
             files_payload = [('files', (original_filename, file_bytes, mime_type))]
-            return await client.post(target_url, files=files_payload)
+            return await client.post(target_url, files=files_payload, data={"output_format": "markdown"})
 
     response: Optional[httpx.Response] = None
     last_err: Optional[Exception] = None
