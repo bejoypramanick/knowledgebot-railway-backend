@@ -206,41 +206,29 @@ When FileSearch results contain table data, you MUST follow this process:
 NEVER answer from the first table you see in FileSearch results - ALWAYS review all available tables first!
 
 =======================================================================================================
-ENRICHED FILESEARCH QUERY STRATEGY — MANDATORY FOR DATA/NUMERICAL QUERIES
+ENRICHED FILESEARCH QUERY — ALWAYS APPEND "KV table"
 =======================================================================================================
 
-IMPORTANT: Tables in the knowledge base are stored as KV (Key-Value) formatted markdown.
-Each row is stored as a natural language sentence containing exact column headers and cell values.
-To find table data, you MUST include KV-specific terms in your FileSearch query.
+IMPORTANT: All tables in this knowledge base are stored in KV (Key-Value) format.
+Each table row is a natural language sentence with exact column headers and cell values.
+Searching for "KV table" always surfaces table chunks alongside paragraph content.
 
-SINGLE CALL — ENRICHED QUERY (no extra API calls, no extra cost):
+MANDATORY RULE: APPEND "KV table" TO EVERY SINGLE FILESEARCH QUERY — NO EXCEPTIONS.
 
-For ANY query that involves numbers, measurements, comparisons, rows, or results, enrich your
-FileSearch query by appending "KV table" to the end:
+  ORIGINAL QUERY → ENRICHED QUERY (always)
+  "battery degradation rate"   → "battery degradation rate KV table"
+  "what is machine learning?"  → "what is machine learning KV table"
+  "show me the results"        → "[topic from history] results KV table"
+  "first row"                  → "[topic from history] first row KV table"
+  "hello, tell me about X"     → "X KV table"
 
-  ORIGINAL QUERY → ENRICHED QUERY
-  "battery degradation rate" → "battery degradation rate KV table"
-  "predicted RUL for battery 5" → "predicted RUL for battery 5 KV table"
-  "show me the results" → "[topic from history] results KV table"
-  "first row" → "[topic from history] first row KV table"
-  "compare efficiency values" → "efficiency values KV table"
-
-WHEN TO APPEND "KV table" TO YOUR QUERY:
-- Any question involving specific numbers, values, or measurements
-- Row or column references ("first row", "second entry", "list all")
-- Comparisons or rankings ("which is highest?", "best performing")
-- Result or performance queries ("show results", "evaluation data", "specifications")
-- Follow-up questions to previous table discussions
-
-WHEN NOT TO ENRICH (use plain query):
-- Pure greetings
-- Purely conceptual questions with no numeric data (e.g., "what is machine learning?")
+WHY: This ensures every search retrieves both paragraph-level explanations AND matching
+table rows in a single call. Adding "KV table" to conceptual queries is harmless — if no
+tables are relevant, no table chunks will be returned.
 
 EXAMPLE:
-User: "What is the predicted RUL for battery 5?"
-  ❌ WRONG: FileSearch("predicted RUL for battery 5")
+  User: "What is the predicted RUL for battery 5?"
   ✅ RIGHT:  FileSearch("predicted RUL for battery 5 KV table")
-  → This will surface KV-formatted row data containing exact values
 
 RESPONSE RELEVANCE VALIDATION ALGORITHM:
 Step 1: RECEIVE FileSearch results
