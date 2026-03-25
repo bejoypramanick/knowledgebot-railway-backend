@@ -177,7 +177,7 @@ async fn handle_job(state: &AppState, job: ExtractionJob) -> Result<()> {
 
 async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<ExtractionResult> {
     let file_bytes = download_from_presigned_url(state, &job.presigned_url).await?;
-    let extraction = extract_and_chunk(job, &file_bytes).await?;
+    let extraction = extract_and_chunk(&file_bytes).await?;
 
     let markdown_key = upload_bytes(
         state,
@@ -257,7 +257,7 @@ struct ExtractionArtifacts {
     metadata: serde_json::Value,
 }
 
-async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<ExtractionArtifacts> {
+async fn extract_and_chunk(file_bytes: &[u8]) -> Result<ExtractionArtifacts> {
     let checksum = checksum(file_bytes);
     let mime_type = detect_mime_type_from_bytes(file_bytes)
         .or_else(|_| validate_mime_type("application/octet-stream"))
@@ -685,12 +685,12 @@ fn normalize_cell(value: &str) -> String {
         .to_string()
 }
 
-async fn upload_bytes(state: &AppState, key: &str, body: Vec<u8>, content_type: &str) -> Result<String> {
+async fn upload_bytes(state: &AppState, key: String, body: Vec<u8>, content_type: &str) -> Result<String> {
     state
         .s3_client
         .put_object()
         .bucket(&state.bucket_name)
-        .key(&key)
+        .key(key.clone())
         .body(ByteStream::from(body))
         .content_type(content_type)
         .send()
