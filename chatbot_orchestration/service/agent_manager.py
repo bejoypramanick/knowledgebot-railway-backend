@@ -208,11 +208,32 @@ class AgentManager:
             logger.error(f"❌ Failed to build system prompt: {prompt_error}")
             raise
 
+        # Create Gemini explicit context cache (system prompt + tool declarations)
+        cache_name = None
+        try:
+            from ..core.cache_manager import gemini_cache_manager
+            
+            # Extract standard model name from get_model or env
+            model_name = os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite")
+            
+            cache_name = await gemini_cache_manager.ensure_cache(
+                system_prompt=system_prompt,
+                tool_functions=[search_knowledge_base],
+                model_name=model_name,
+            )
+            if cache_name:
+                logger.info(f"Gemini cache active: {cache_name}")
+            else:
+                logger.info("Gemini cache not available, using inline system prompt (fallback)")
+        except Exception as cache_error:
+            logger.warning(f"Gemini cache creation failed: {cache_error}, using fallback")
+
         # Get standard model wrapper based on chosen LLM
         logger.info("Creating agent for session")
         try:
-            from ..core.ai import get_model
-            model = get_model()
+            from ..core.cached_google_model import CachedGoogleModel
+            model_name = os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite")
+            model = CachedGoogleModel(model_name)
             
             if not model:
                  raise RuntimeError("Failed to initialize model provider")
@@ -234,11 +255,22 @@ class AgentManager:
         # Cache the agent instance and related data for this session
         self.agent_cache[session_id] = agent
         self.system_prompt_cache[session_id] = system_prompt
+        # Store cache_name locally if cached
+        if not hasattr(self, 'cache_name_cache'):
+            self.cache_name_cache = {}
+        self.cache_name_cache[session_id] = cache_name
+        
         logger.info(f"Agent cached for session: {session_id}")
 
         logger.info(f"CREATE_AGENT COMPLETED - Session: {session_id}")
 
         return agent
+
+    def get_cached_cache_name(self, session_id: str) -> Optional[str]:
+        """Get cached Gemini context cache_name if it exists."""
+        if hasattr(self, 'cache_name_cache'):
+            return self.cache_name_cache.get(session_id)
+        return None
 
 # Global agent manager instance
 agent_manager = AgentManager()
