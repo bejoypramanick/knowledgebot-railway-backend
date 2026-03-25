@@ -16,6 +16,7 @@ _genai_client = None
 _LEGACY_GOOGLE_EMBEDDING_FALLBACKS = {
     "text-embedding-004": "gemini-embedding-001",
 }
+_GOOGLE_BATCH_EMBED_LIMIT = 100
 
 def get_genai_client():
     from google import genai
@@ -98,8 +99,13 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
             last_error = None
             for candidate_model in _google_embedding_model_candidates(model):
                 try:
-                    response = client.models.embed_content(model=candidate_model, contents=texts)
-                    return [e.values for e in response.embeddings] if response.embeddings else []
+                    all_embeddings: List[List[float]] = []
+                    for i in range(0, len(texts), _GOOGLE_BATCH_EMBED_LIMIT):
+                        batch = texts[i:i + _GOOGLE_BATCH_EMBED_LIMIT]
+                        response = client.models.embed_content(model=candidate_model, contents=batch)
+                        batch_embeddings = [e.values for e in response.embeddings] if response.embeddings else []
+                        all_embeddings.extend(batch_embeddings)
+                    return all_embeddings
                 except Exception as e:
                     last_error = e
                     if _is_google_model_not_found_error(e) and candidate_model != _google_embedding_model_candidates(model)[-1]:
