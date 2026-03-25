@@ -178,16 +178,11 @@ async def process_with_kreuzberg(
             }
 
             # Chunking config (semantic-style via embeddings)
-            semantic_chunking: Dict[str, Any] = {
-                "max_chars": 1000,
-                "max_overlap": 200,
-                "embedding": {                        # This enables semantic chunking
-                    "model": "fast",                  # preset: "fast", "balanced", "quality"
-                    "normalize": True
-                }
-                # Optional extras:
-                # "preset": "semantic",           # if supported in your version
-                # "trim": True,
+            semantic_chunking = {
+                "strategy": "recursive",    # <--- No "meaning" check, just structure
+                "max_characters": 1000,
+                "overlap": 200,
+                "enabled": True
             }
 
             # Final form data for the POST request
