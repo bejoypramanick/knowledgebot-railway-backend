@@ -12,6 +12,7 @@ import redis.asyncio as redis
 # Import our dependencies
 from ..core.dependencies import ChatSessionDeps
 from ..core.ai import get_genai_client
+from ..core.config import settings
 
 logger = get_otel_logger("vector_search_tool", "chatbot-orchestration")
 
@@ -72,16 +73,18 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
     Advanced Knowledge Base Search with Hybrid Search, Reranking, Compression, and Caching.
     """
     # --- STEP 0: Semantic Caching (Redis) ---
-    query_hash = hashlib.sha256(query.encode()).hexdigest()
-    cache_key = f"rag:cache:{query_hash}"
-    try:
-        cache = await _get_cache_client()
-        cached_result = await cache.get(cache_key)
-        if cached_result:
-            logger.info(f"⚡ Semantic Cache HIT for query: '{query}'")
-            return cached_result
-    except Exception as e:
-        logger.warning(f"⚠️ Cache lookup failed: {e}")
+    cache = None
+    if settings.enable_semantic_caching:
+        query_hash = hashlib.sha256(query.encode()).hexdigest()
+        cache_key = f"rag:cache:{query_hash}"
+        try:
+            cache = await _get_cache_client()
+            cached_result = await cache.get(cache_key)
+            if cached_result:
+                logger.info(f"⚡ Semantic Cache HIT for query: '{query}'")
+                return cached_result
+        except Exception as e:
+            logger.warning(f"⚠️ Cache lookup failed: {e}")
 
     logger.info(f"🔍 Starting advanced retrieval for: '{query}'")
     
@@ -96,7 +99,6 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
             await db.execute(text("SET LOCAL hnsw.ef_search = 100"))
             
             # --- STEP 1: Hybrid Search (Vector + FTS) ---
-            # Combining pgvector cosine similarity and Postgres Full-Text Search rank
             hybrid_query = """
                 WITH vector_matches AS (
                     SELECT id, content, metadata, document_id, document_type,
@@ -125,29 +127,34 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
             if not rows:
                 return "No relevant information found in the knowledge base."
             
-            # --- STEP 2: FlashRank Reranking ---
+            # --- STEP 2: Reranking ---
             chunks = [dict(row) for row in rows]
-            top_chunks = _rerank_results(query, chunks)
+            if settings.enable_reranking:
+                top_chunks = _rerank_results(query, chunks)
+            else:
+                top_chunks = chunks[:10]
                 
-            # --- STEP 3: Format & LLMLingua-2 Compression ---
+            # --- STEP 3: Format & Compression ---
             formatted_chunks = []
             for i, chunk in enumerate(top_chunks):
                 doc_id, doc_type = str(chunk['document_id']), chunk['document_type']
                 content = chunk['content']
                 score = f"{float(chunk['hybrid_score']):.3f}"
                 
-                # Compress individual large chunks or the full context? 
-                # Compressing full context is better for token saving.
                 chunk_str = f"Source {i+1} ({doc_type} {doc_id}, Score: {score}):\n{content}\n"
                 formatted_chunks.append(chunk_str)
                 
             full_context = "\n".join(formatted_chunks)
-            compressed_context = _compress_context(full_context)
             
-            response = "I found the following in our knowledge base:\n\n" + compressed_context
+            if settings.enable_context_compression:
+                final_context = _compress_context(full_context)
+            else:
+                final_context = full_context
+                
+            response = "I found the following in our knowledge base:\n\n" + final_context
             
             # --- STEP 4: Update Cache & Session State ---
-            if cache:
+            if cache and settings.enable_semantic_caching:
                 await cache.set(cache_key, response, ex=3600) # Cache for 1 hour
 
             if ctx.deps.session_id:

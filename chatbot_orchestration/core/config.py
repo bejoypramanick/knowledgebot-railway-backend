@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     
+    # RAG Optimization Flags
+    enable_reranking: bool = True
+    enable_context_compression: bool = True
+    enable_semantic_caching: bool = True
+    
     # Citation Configuration
     enable_citations: bool = True  # Enable DB lookup for inline citation URLs
     
