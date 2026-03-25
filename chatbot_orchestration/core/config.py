@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     
     # Embedding Configuration
     embedding_provider: str = "google"
-    embedding_model: str = "text-embedding-004"
+    embedding_model: str = "gemini-embedding-001"
 
     # API Keys (provide via Railway env vars)
     openai_api_key: Optional[str] = None

@@ -6,12 +6,16 @@ from shared.otel_logger import get_otel_logger
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "google").lower()
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
 
 logger = get_otel_logger("embeddings", "shared")
 
 # Lazy clients
 _genai_client = None
+
+_LEGACY_GOOGLE_EMBEDDING_FALLBACKS = {
+    "text-embedding-004": "gemini-embedding-001",
+}
 
 def get_genai_client():
     from google import genai
@@ -24,6 +28,19 @@ def get_genai_client():
             logger.error(f"❌ Failed to initialize Gemini client for embeddings: {e}")
     return _genai_client
 
+
+def _google_embedding_model_candidates(model: str) -> List[str]:
+    candidates = [model]
+    fallback = _LEGACY_GOOGLE_EMBEDDING_FALLBACKS.get(model)
+    if fallback and fallback not in candidates:
+        candidates.append(fallback)
+    return candidates
+
+
+def _is_google_model_not_found_error(exc: Exception) -> bool:
+    error_text = str(exc)
+    return "404" in error_text or "NOT_FOUND" in error_text
+
 async def generate_embedding(query: str) -> List[float]:
     """Generate an embedding vector using the configured provider."""
     provider = os.getenv("EMBEDDING_PROVIDER", EMBEDDING_PROVIDER).lower()
@@ -35,8 +52,17 @@ async def generate_embedding(query: str) -> List[float]:
             if not client:
                 logger.error("❌ Gemini client not available for embeddings")
                 return []
-            response = client.models.embed_content(model=model, contents=query)
-            return response.embeddings[0].values if response.embeddings else []
+            last_error = None
+            for candidate_model in _google_embedding_model_candidates(model):
+                try:
+                    response = client.models.embed_content(model=candidate_model, contents=query)
+                    return response.embeddings[0].values if response.embeddings else []
+                except Exception as e:
+                    last_error = e
+                    if _is_google_model_not_found_error(e) and candidate_model != _google_embedding_model_candidates(model)[-1]:
+                        logger.warning(f"⚠️ Google embedding model '{candidate_model}' not found. Retrying with fallback model.")
+                        continue
+                    raise last_error
             
         elif provider == "openai":
             from openai import AsyncOpenAI
@@ -69,8 +95,17 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
             client = get_genai_client()
             if not client:
                 return []
-            response = client.models.embed_content(model=model, contents=texts)
-            return [e.values for e in response.embeddings] if response.embeddings else []
+            last_error = None
+            for candidate_model in _google_embedding_model_candidates(model):
+                try:
+                    response = client.models.embed_content(model=candidate_model, contents=texts)
+                    return [e.values for e in response.embeddings] if response.embeddings else []
+                except Exception as e:
+                    last_error = e
+                    if _is_google_model_not_found_error(e) and candidate_model != _google_embedding_model_candidates(model)[-1]:
+                        logger.warning(f"⚠️ Google embedding model '{candidate_model}' not found. Retrying with fallback model.")
+                        continue
+                    raise last_error
             
         elif provider == "openai":
             from openai import AsyncOpenAI
