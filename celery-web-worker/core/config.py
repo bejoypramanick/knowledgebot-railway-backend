@@ -24,9 +24,6 @@ class Settings(BaseSettings):
     # Chatbot Configuration
     chatbot_model: str = "gemini-2.5-flash-lite"
 
-    # Gemini FileSearch Store Configuration (required from Railway env)
-    gemini_file_search_store_name: Optional[str] = None  # FileSearch store display name - MUST be set in Railway env
-
     # Kreuzberg Service Configuration
     kreuzberg_enabled: bool = Field(default=True, env="KREUZBERG_ENABLED")  # Set to False to disable kreuzberg and use raw uploads
     kreuzberg_api_url: str = Field(default="http://localhost:8000", env="KREUZBERG_API_URL")

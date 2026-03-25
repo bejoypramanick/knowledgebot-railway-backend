@@ -3,9 +3,8 @@ Atomic Deletion Service for Files and Websites
 Handles complete cleanup in a single atomic transaction:
 1. Stop Celery process
 2. Remove from Redis queue
-3. Delete from Gemini FileStore
-4. Delete from S3
-5. Update database record as deleted
+3. Delete from S3
+4. Update database record as deleted
 """
 import asyncio
 import json
@@ -50,7 +49,7 @@ class AtomicDeletionService:
                     # Start transaction (implicit in SQLAlchemy async session)
                     # Step 1: Get file details
                     result = await session.execute(text("""
-                        SELECT id, original_filename, gemini_file_name, gemini_file_uri,
+                        SELECT id, original_filename, storage_document_name, storage_document_uri,
                                celery_task_id, processing_status, s3_key, processed_content_s3_key, sha256_hash
                         FROM file_uploads
                         WHERE id = :id
@@ -66,7 +65,7 @@ class AtomicDeletionService:
                     logger.info(f"📄 [FILE_DETAILS] Found: {file_record['original_filename']}")
                     logger.info(f"   Status: {file_record['processing_status']}")
                     logger.info(f"   Celery Task ID: {file_record['celery_task_id']}")
-                    logger.info(f"   Gemini File: {file_record['gemini_file_name']}")
+                    logger.info(f"   Storage Document: {file_record['storage_document_name']}")
                     logger.info(f"   S3 Key: {file_record['s3_key']}")
                     logger.info(f"   S3 Processed: {file_record['processed_content_s3_key']}")
 
@@ -76,16 +75,7 @@ class AtomicDeletionService:
                         await self._cancel_celery_task(celery_task_id, "file")
                         span.set_attribute("celery_task_cancelled", "true")
 
-                    # Step 3: Delete from Gemini FileStore
-                    gemini_deleted = False
-                    if file_record['gemini_file_uri']:
-                        gemini_deleted = await self._delete_from_gemini_filestore(
-                            file_record['gemini_file_name'],
-                            file_record['gemini_file_uri']
-                        )
-                        span.set_attribute("gemini_deleted", str(gemini_deleted))
-
-                    # Step 4: Delete from S3 (both raw and processed files)
+                    # Step 3: Delete from S3 (both raw and processed files)
                     s3_deleted = False
                     s3_processed_deleted = False
                     
@@ -101,13 +91,13 @@ class AtomicDeletionService:
                         span.set_attribute("s3_processed_deleted", str(s3_processed_deleted))
                         logger.info(f"🧹 [S3_CLEANUP] Deleted retained processed markdown: {file_record['processed_content_s3_key']}")
 
-                    # Step 5: Mark as deleted in database
+                    # Step 4: Mark as deleted in database
                     await session.execute(text("""
                         UPDATE file_uploads
                         SET processing_status = 'deleted',
-                            gemini_file_name = NULL,
-                            gemini_file_uri = NULL,
-                            gemini_state = 'deleted',
+                            storage_document_name = NULL,
+                            storage_document_uri = NULL,
+                            storage_backend_state = 'deleted',
                             s3_key = NULL,
                             processed_content_s3_key = NULL,
                             updated_at = CURRENT_TIMESTAMP,
@@ -117,7 +107,6 @@ class AtomicDeletionService:
                     await session.commit()
                         
                     logger.info(f"✅ [ATOMIC_DELETE] File {file_id} deleted successfully")
-                    logger.info(f"   Gemini deleted: {gemini_deleted}")
                     logger.info(f"   S3 raw deleted: {s3_deleted}")
                     logger.info(f"   S3 processed deleted: {s3_processed_deleted}")
                         
@@ -126,7 +115,6 @@ class AtomicDeletionService:
                             "message": "File deleted atomically with complete cleanup",
                             "file_id": str(file_id),
                             "celery_task_cancelled": bool(celery_task_id),
-                            "gemini_deleted": gemini_deleted,
                             "s3_deleted": s3_deleted,
                             "s3_processed_deleted": s3_processed_deleted
                         }
@@ -162,7 +150,7 @@ class AtomicDeletionService:
                         # Step 1: Get website details and lock the row
                         website_record = await conn.fetchrow("""
                             SELECT id, original_url, celery_task_id, processing_status,
-                                   gemini_file_name, gemini_file_uri, processed_content_s3_key
+                                   storage_document_name, storage_document_uri, processed_content_s3_key
                             FROM scraped_websites
                             WHERE id = $1
                             FOR UPDATE
@@ -177,7 +165,7 @@ class AtomicDeletionService:
                         logger.info(f"🌐 [WEBSITE_DETAILS] Found: {website_record['original_url']}")
                         logger.info(f"   Status: {website_record['processing_status']}")
                         logger.info(f"   Celery Task ID: {website_record['celery_task_id']}")
-                        logger.info(f"   Gemini File: {website_record['gemini_file_name']}")
+                        logger.info(f"   Storage Document: {website_record['storage_document_name']}")
                         logger.info(f"   S3 Processed: {website_record['processed_content_s3_key']}")
                         
                         # Step 2: Cancel Celery task if processing
@@ -186,16 +174,7 @@ class AtomicDeletionService:
                             await self._cancel_celery_task(celery_task_id, "website")
                             span.set_attribute("celery_task_cancelled", "true")
                         
-                        # Step 3: Delete from Gemini FileStore
-                        gemini_deleted = False
-                        if website_record['gemini_file_uri']:
-                            gemini_deleted = await self._delete_from_gemini_filestore(
-                                website_record['gemini_file_name'],
-                                website_record['gemini_file_uri']
-                            )
-                            span.set_attribute("gemini_deleted", str(gemini_deleted))
-                        
-                        # Step 4: Delete from S3 (processed markdown file)
+                        # Step 3: Delete from S3 (processed markdown file)
                         # Manual atomic delete should remove retained files even if RETAIN_MD_FILE is true
                         s3_processed_deleted = False
                         if website_record['processed_content_s3_key']:
@@ -203,13 +182,13 @@ class AtomicDeletionService:
                             span.set_attribute("s3_processed_deleted", str(s3_processed_deleted))
                             logger.info(f"🧹 [S3_CLEANUP] Deleted retained processed markdown: {website_record['processed_content_s3_key']}")
                         
-                        # Step 5: Mark as deleted in database
+                        # Step 4: Mark as deleted in database
                         await conn.execute("""
                             UPDATE scraped_websites
                             SET processing_status = 'deleted',
-                                gemini_file_name = NULL,
-                                gemini_file_uri = NULL,
-                                gemini_state = 'deleted',
+                                storage_document_name = NULL,
+                                storage_document_uri = NULL,
+                                storage_backend_state = 'deleted',
                                 processed_content_s3_key = NULL,
                                 updated_at = NOW(),
                                 error_message = 'Atomically deleted at ' || NOW()::text
@@ -217,7 +196,6 @@ class AtomicDeletionService:
                         """, website_id)
                         
                         logger.info(f"✅ [ATOMIC_DELETE] Website {website_id} deleted successfully")
-                        logger.info(f"   Gemini deleted: {gemini_deleted}")
                         logger.info(f"   S3 processed deleted: {s3_processed_deleted}")
 
                         return {
@@ -225,7 +203,6 @@ class AtomicDeletionService:
                             "message": "Website deleted atomically with complete cleanup",
                             "website_id": str(website_id),
                             "celery_task_cancelled": bool(celery_task_id),
-                            "gemini_deleted": gemini_deleted,
                             "s3_processed_deleted": s3_processed_deleted
                         }
                         
@@ -277,31 +254,6 @@ class AtomicDeletionService:
             
         except Exception as e:
             logger.error(f"❌ [CELERY_CANCEL] Error cancelling task {celery_task_id}: {e}")
-            return False
-    
-    async def _delete_from_gemini_filestore(self, gemini_file_name: str, gemini_file_uri: str) -> bool:
-        """Delete from Gemini FileStore"""
-        try:
-            from core.ai import get_genai_client
-            
-            genai_client = get_genai_client().aio
-            if not genai_client:
-                logger.warning("⚠️ [GEMINI_DELETE] Gemini client not available")
-                return False
-            
-            # Extract document name from URI
-            document_name = gemini_file_name
-            if not document_name:
-                logger.warning("⚠️ [GEMINI_DELETE] No document name found")
-                return False
-            
-            # Delete from FileStore
-            genai_client.aio.files.delete(name=document_name)
-            logger.info(f"🗑️ [GEMINI_DELETE] Deleted {document_name} from FileStore")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ [GEMINI_DELETE] Error deleting from FileStore: {e}")
             return False
     
     async def _delete_from_s3(self, s3_key: str) -> bool:

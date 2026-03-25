@@ -5,17 +5,12 @@ Complete cleanup of ALL data points when deleting any knowledge base item.
 Handles:
 1. Celery task termination (file_processing + web_crawling queues)
 2. Redis task state cleanup
-3. Gemini API cleanup (raw files + FileSearch documents)
-4. S3 storage cleanup (raw uploads + processed content)
-5. Database atomic transactions with parent-child handling
-6. Full audit trail and verification
+3. S3 storage cleanup (raw uploads + processed content)
+4. Database atomic transactions with parent-child handling
+5. Full audit trail and verification
 """
 
-import os
-import asyncio
-import json
-import logging
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
 
@@ -41,7 +36,6 @@ class DeletionStep(str, Enum):
     LOOKUP = "lookup"
     CELERY_REVOKE = "celery_revoke"
     REDIS_CLEANUP = "redis_cleanup"
-    GEMINI_DELETE = "gemini_delete"
     S3_DELETE = "s3_delete"
     DB_TRANSACTION = "db_transaction"
     VERIFICATION = "verification"
@@ -86,8 +80,6 @@ class ComprehensiveDeletionService:
             "cleanup_summary": {
                 "celery_tasks_revoked": 0,
                 "redis_keys_deleted": 0,
-                "gemini_files_deleted": 0,
-                "gemini_filesearch_docs_deleted": 0,
                 "s3_raw_files_deleted": 0,
                 "s3_processed_files_deleted": 0,
                 "db_records_affected": 0
@@ -137,7 +129,7 @@ class ComprehensiveDeletionService:
                     logger.info(f"📍 [LOOKUP] Fetching file record...")
                     file_record = await conn.fetchrow(
                         """SELECT
-                            id, original_filename, gemini_file_name, metadata,
+                            id, original_filename, storage_document_name, metadata,
                             celery_task_id, processing_status, s3_key, processed_content_s3_key
                         FROM file_uploads
                         WHERE id = $1
@@ -178,25 +170,16 @@ class ComprehensiveDeletionService:
                     if redis_cleaned:
                         deletion_report["cleanup_summary"]["redis_keys_deleted"] += 1
 
-                    # Step 4: GEMINI CLEANUP
-                    logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini...")
-                    gemini_deleted = await self._delete_from_gemini_complete(
-                        file_record['gemini_file_name'],
-                        file_record['metadata']
-                    )
-                    deletion_report["cleanup_summary"]["gemini_files_deleted"] = gemini_deleted.get("raw_files", 0)
-                    deletion_report["cleanup_summary"]["gemini_filesearch_docs_deleted"] = gemini_deleted.get("filesearch_docs", 0)
-
-                    # Step 5: S3 CLEANUP - BOTH raw and processed
+                    # Step 4: S3 CLEANUP - BOTH raw and processed
                     logger.info(f"☁️  [S3_DELETE] Deleting from S3...")
-                    s3_deleted = await self._delete_from_s3_complete([
+                    await self._delete_from_s3_complete([
                         file_record['s3_key'],
                         file_record['processed_content_s3_key']
                     ])
                     deletion_report["cleanup_summary"]["s3_raw_files_deleted"] = 1 if file_record['s3_key'] else 0
                     deletion_report["cleanup_summary"]["s3_processed_files_deleted"] = 1 if file_record['processed_content_s3_key'] else 0
 
-                    # Step 6: DATABASE TRANSACTION
+                    # Step 5: DATABASE TRANSACTION
                     logger.info(f"💾 [DB_TRANSACTION] Updating database...")
                     if hard_delete:
                         # Hard delete: remove from database
@@ -222,7 +205,9 @@ class ComprehensiveDeletionService:
                         await conn.execute(
                             """UPDATE file_uploads
                             SET processing_status = 'deleted',
-                                gemini_file_name = NULL,
+                                storage_document_name = NULL,
+                                storage_document_uri = NULL,
+                                storage_backend_state = 'deleted',
                                 s3_key = NULL,
                                 processed_content_s3_key = NULL,
                                 updated_at = NOW(),
@@ -339,23 +324,7 @@ class ComprehensiveDeletionService:
                                 redis_deleted += 1
                     deletion_report["cleanup_summary"]["redis_keys_deleted"] = redis_deleted
 
-                    # Step 4: GEMINI CLEANUP (all pages)
-                    logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini ({len(all_pages)} pages)...")
-                    total_gemini_files = 0
-                    total_filesearch_docs = 0
-
-                    for page in all_pages:
-                        gemini_deleted = await self._delete_from_gemini_complete(
-                            page.get('gemini_file_name'),
-                            page.get('metadata')
-                        )
-                        total_gemini_files += gemini_deleted.get("raw_files", 0)
-                        total_filesearch_docs += gemini_deleted.get("filesearch_docs", 0)
-
-                    deletion_report["cleanup_summary"]["gemini_files_deleted"] = total_gemini_files
-                    deletion_report["cleanup_summary"]["gemini_filesearch_docs_deleted"] = total_filesearch_docs
-
-                    # Step 5: DATABASE TRANSACTION (atomic - parent + children together)
+                    # Step 4: DATABASE TRANSACTION (atomic - parent + children together)
                     logger.info(f"💾 [DB_TRANSACTION] Updating database ({len(all_pages)} records)...")
 
                     if hard_delete:
@@ -453,97 +422,6 @@ class ComprehensiveDeletionService:
             return False
 
 
-
-    async def _delete_from_gemini_complete(
-        self,
-        gemini_file_name: Optional[str],
-        metadata: Optional[Dict]
-    ) -> Dict[str, int]:
-        """Delete all Gemini artifacts (raw files + FileSearch docs)"""
-        result = {"raw_files": 0, "filesearch_docs": 0}
-
-        try:
-            from knowledgebase_ingestion.core.ai import get_genai_client
-
-            genai_client = get_genai_client()
-            if not genai_client:
-                logger.warning("   ⚠️  Gemini client not available")
-                return result
-
-            # Delete raw file if it exists
-            if gemini_file_name and not gemini_file_name.startswith("documents/"):
-                try:
-                    logger.info(f"   📍 Deleting raw Gemini file: {gemini_file_name}")
-                    genai_client.files.delete(name=gemini_file_name)
-
-                    # Verify deletion
-                    try:
-                        genai_client.files.get(name=gemini_file_name)
-                        logger.warning(f"   ⚠️  File still exists after delete: {gemini_file_name}")
-                    except:
-                        result["raw_files"] = 1
-                        logger.info(f"   ✅ Verified deleted: {gemini_file_name}")
-                except Exception as e:
-                    logger.warning(f"   ⚠️  Could not delete raw file: {e}")
-
-            # Delete from FileSearch store if metadata indicates FileSearch
-            if metadata:
-                try:
-                    if isinstance(metadata, str):
-                        metadata = json.loads(metadata)
-
-                    logger.info(f"   📋 Metadata keys: {list(metadata.keys()) if metadata else 'None'}")
-                    logger.info(f"   📋 Metadata type: {metadata.get('type')}")
-                    logger.info(f"   📋 Has file_search_store_name: {'file_search_store_name' in metadata if metadata else False}")
-                    logger.info(f"   📋 Full metadata: {metadata}")
-
-                    if metadata.get('type') == 'file_search' or 'file_search_store_name' in metadata:
-                        store_name = metadata.get('file_search_store_name')
-                        document_name = metadata.get('document_name')
-
-                        logger.info(f"   📍 Store name: {store_name}")
-                        logger.info(f"   📍 Document name: {document_name}")
-
-                        if store_name and document_name:
-                            try:
-                                logger.info(f"   📍 Deleting FileSearch document: {document_name}")
-                                genai_client.file_search_stores.documents.delete(
-                                    name=document_name,
-                                    config={"force": True}
-                                )
-
-                                # Verify deletion
-                                try:
-                                    documents = genai_client.file_search_stores.list_documents(
-                                        file_search_store_name=store_name
-                                    )
-                                    doc_exists = any(doc.name == document_name for doc in documents)
-                                    if not doc_exists:
-                                        result["filesearch_docs"] = 1
-                                        logger.info(f"   ✅ Verified deleted: {document_name}")
-                                except:
-                                    result["filesearch_docs"] = 1
-                                    logger.info(f"   ✅ Document deleted: {document_name}")
-                            except Exception as fs_err:
-                                if "404" in str(fs_err) or "not found" in str(fs_err).lower():
-                                    result["filesearch_docs"] = 1
-                                    logger.info(f"   ✅ Document already deleted: {document_name}")
-                                else:
-                                    logger.warning(f"   ⚠️  Could not delete from FileSearch: {fs_err}")
-                        else:
-                            logger.warning(f"   ⚠️  Missing store_name or document_name in metadata")
-                            logger.warning(f"      store_name: {store_name}, document_name: {document_name}")
-                    else:
-                        logger.info(f"   ℹ️  Metadata doesn't indicate FileSearch (type={metadata.get('type')}, has_store={('file_search_store_name' in metadata if metadata else False)})")
-                except Exception as e:
-                    logger.warning(f"   ⚠️  Error processing FileSearch metadata: {e}")
-            else:
-                logger.info(f"   ℹ️  No metadata found for file")
-
-        except Exception as e:
-            logger.warning(f"   ⚠️  Error deleting from Gemini: {e}")
-
-        return result
 
     async def _delete_from_s3_complete(self, s3_keys: Optional[List[str]]) -> int:
         """Delete all S3 files (both raw uploads and processed content)"""

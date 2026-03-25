@@ -1,7 +1,7 @@
 """
 File Processing Service for Celery Worker
 Contains ALL file processing logic moved from knowledgebase_ingestion
-Handles: validation, Gemini uploads, metadata recording, deletion
+Handles: validation, Kreuzberg extraction, pgvector ingestion, metadata recording, deletion
 """
 
 import asyncio
@@ -20,7 +20,6 @@ from shared.kreuzberg_integration import (
     create_markdown_temp_file
 )
 from shared.chunking_service import chunking_service
-from shared.file_search import get_file_search_store_by_display_name
 from shared.sqlalchemy_db import get_db_session
 from shared.file_metrics import calculate_metrics
 
@@ -35,244 +34,6 @@ from utils.files import calculate_sha256
 from service.file_service import FileService
 
 logger = get_otel_logger("processing_service", "celery-file-worker")
-
-
-async def process_with_gemini(
-    tmp_path: str,
-    file_display_name: str,
-    original_filename: str,
-    mime_type: str,
-    user_email: Optional[str] = None,
-    file_search_store_name: Optional[str] = None
-) -> Tuple[Any, str, datetime, Dict[str, Any]]:
-    """
-    Process file with Gemini - uploads file directly to FileSearch store (no fallback).
-
-    Args:
-        tmp_path: Path to the temporary file
-        file_display_name: Display name for the file
-        original_filename: Original filename
-        mime_type: MIME type of the file
-        user_email: User email for metadata
-        file_search_store_name: Optional override for store name
-
-    Returns:
-        Tuple of (uploaded_file, final_state, gemini_processed_at, file_search_metadata)
-    """
-    genai_client = get_genai_client()
-    if not genai_client:
-        logger.error("❌ Gemini client not available")
-        raise Exception("Gemini client not configured")
-
-    # Detect proper MIME type - use magic bytes from file path
-    final_mime_type = detect_mime_type_from_extension(original_filename, mime_type, tmp_path)
-
-    # Create display name
-    if file_display_name != original_filename:
-        gemini_display_name = f"{file_display_name} | {original_filename}"
-    else:
-        gemini_display_name = original_filename
-
-    logger.info(f"🤖 [GEMINI] Uploading to FileSearch - Display: {gemini_display_name}, Original: {original_filename}, MIME: {final_mime_type}...")
-
-    try:
-        # Use provided store name or get from config
-        if not file_search_store_name:
-            store_display_name = settings.gemini_file_search_store_name
-            if not store_display_name:
-                logger.error("❌ GEMINI_FILE_SEARCH_STORE_NAME not configured")
-                raise Exception("GEMINI_FILE_SEARCH_STORE_NAME environment variable is required")
-
-            logger.info(f"📦 Looking up FileSearch store: {store_display_name}")
-
-            # Look up store by display name
-            file_search_store_name = get_file_search_store_by_display_name(
-                genai_client,
-                display_name=store_display_name
-            )
-
-            if not file_search_store_name:
-                logger.error(f"❌ FileSearch store '{store_display_name}' not found")
-                raise Exception(f"FileSearch store '{store_display_name}' not found")
-
-        logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
-        operation = genai_client.file_search_stores.upload_to_file_search_store(
-            file=tmp_path,
-            file_search_store_name=file_search_store_name,
-            config={
-                'display_name': gemini_display_name,
-                'custom_metadata': [
-                    {'key': 'original_filename', 'string_value': original_filename},
-                    {'key': 'user_email', 'string_value': user_email or 'admin'}
-                ]
-            }
-        )
-
-        if not operation:
-            logger.error("❌ [GEMINI] Failed to create upload operation")
-            raise Exception("Gemini operation creation failed")
-
-        # Wait for the upload operation to complete (robust polling)
-        wait_start_time = time.time()
-        max_wait_time = 600  # 10 minutes
-        document_name = None
-        document_uri = None
-        poll_interval = 2.0
-        confirmed_done = False
-
-        while True:
-            elapsed = time.time() - wait_start_time
-            if elapsed > max_wait_time:
-                logger.error(f"❌ [GEMINI_TIMEOUT] Timeout after {elapsed:.0f}s")
-                raise Exception(f"Gemini upload timeout after {elapsed:.0f}s")
-
-            try:
-                # Refresh operation status
-                operation = genai_client.operations.get(operation)
-                
-                if operation.done:
-                    # Check for errors
-                    op_error = getattr(operation, 'error', None)
-                    if op_error:
-                        logger.error(f"❌ [GEMINI_ERROR] Operation failed: {op_error}")
-                        raise Exception(f"Gemini operation failed: {op_error}")
-                        
-                    logger.info(f"✅ [GEMINI_UPLOAD] Operation completed in {elapsed:.0f}s")
-                    confirmed_done = True
-                    break
-            except Exception as poll_err:
-                logger.warning(f"⚠️ [GEMINI_POLL] Error refreshing status: {poll_err}")
-                if elapsed > 60: # Fallback if persistent errors but significant time passed
-                    logger.info(f"ℹ️ [GEMINI_FALLBACK] Assuming completion after {elapsed:.0f}s due to polling errors")
-                    confirmed_done = False
-                    break
-
-            await asyncio.sleep(poll_interval)
-            poll_interval = min(poll_interval * 1.5, 10.0)
-
-        # FileSearch upload returns result in response.document_name
-        if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
-            document_name = operation.response.document_name
-            # Try to get URI if available
-            document_uri = getattr(operation.response, 'uri', None) if hasattr(operation.response, 'uri') else None
-            logger.info(f"✅ [GEMINI] FileSearch document: {document_name}")
-            if document_uri:
-                logger.info(f"📎 [GEMINI] Document URI: {document_uri}")
-
-        # STEP 6.5: CONFIRM ACTIVE STATUS
-        # Default to pending until confirmed ACTIVE
-        final_state = 'pending'
-        
-        if document_name and confirmed_done:
-            try:
-                logger.info(f"🔍 [FILE_STATUS] Verifying status for {document_name}...")
-                file_metadata = genai_client.file_search_stores.get_file(name=document_name)
-                
-                actual_state = getattr(file_metadata, 'state', None)
-                if actual_state:
-                    state_str = str(actual_state).upper()
-                    logger.info(f"📊 [FILE_STATUS] Actual state: {state_str}")
-                    if 'ACTIVE' in state_str:
-                        logger.info(f"✅ [FILE_STATUS] File is ACTIVE!")
-                        final_state = 'completed'
-                    else:
-                        logger.warning(f"⚠️ [FILE_STATUS] File is not yet ACTIVE (State: {state_str}).")
-                        final_state = 'pending'
-                else:
-                    # If no state field, assume completed if the operation was confirmed done
-                    final_state = 'completed' if confirmed_done else 'pending'
-            except Exception as status_err:
-                logger.warning(f"⚠️ [FILE_STATUS_ERR] Could not verify status via FileSearch Store: {status_err}")
-                final_state = 'completed' if confirmed_done else 'pending'
-        else:
-            final_state = 'pending' if document_name else 'failed'
-
-        gemini_processed_at = datetime.utcnow()
-
-        if document_name:
-            # Create a placeholder file object with the document name
-            class FileSearchDocument:
-                def __init__(self, name):
-                    self.name = name
-                    self.uri = None
-
-            uploaded_file = FileSearchDocument(document_name)
-            file_search_metadata = {
-                'type': 'file_search',
-                'file_search_store_name': file_search_store_name,
-                'document_name': document_name,
-                'uploaded_at': gemini_processed_at.isoformat()
-            }
-
-            logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. Document: {document_name}")
-            logger.info(f"📝 [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
-            return uploaded_file, final_state, gemini_processed_at, file_search_metadata
-        else:
-            logger.error(f"❌ [GEMINI] Upload failed - no document_name in response: {operation}")
-            raise Exception("FileSearch upload failed - no document returned")
-
-    except Exception as e:
-        logger.error(f"❌ Error uploading to FileSearch: {e}")
-        raise
-
-
-async def query_gemini_file_existence(
-    gemini_file_name: str,
-    file_search_metadata: Optional[Dict[str, Any]]
-) -> Dict[str, Any]:
-    """
-    Query if file exists in Gemini stores before deletion.
-
-    Returns:
-        {
-            "raw_file_exists": bool,
-            "file_search_exists": bool,
-            "store_name": str or None,
-            "document_name": str or None
-        }
-    """
-    genai_client = get_genai_client()
-    result = {
-        "raw_file_exists": False,
-        "file_search_exists": False,
-        "store_name": None,
-        "document_name": None
-    }
-
-    # Check raw file existence
-    if gemini_file_name and not gemini_file_name.startswith("documents/"):
-        try:
-            genai_client.files.get(name=gemini_file_name)
-            result["raw_file_exists"] = True
-            logger.info(f"🔍 [PRE-DELETE QUERY] Raw file exists: {gemini_file_name}")
-        except Exception:
-            logger.info(f"🔍 [PRE-DELETE QUERY] Raw file not found: {gemini_file_name}")
-
-    # Check FileSearch document existence
-    if file_search_metadata:
-        try:
-            metadata = json.loads(file_search_metadata) if isinstance(file_search_metadata, str) else file_search_metadata
-            if metadata.get('type') == 'file_search':
-                store_name = metadata.get('file_search_store_name')
-                document_name = metadata.get('document_name')
-                result["store_name"] = store_name
-                result["document_name"] = document_name
-
-                if store_name and document_name:
-                    try:
-                        # Attempt to get document info (verifies existence)
-                        genai_client.file_search_stores.get_document(
-                            file_search_store_name=store_name,
-                            document_name=document_name
-                        )
-                        result["file_search_exists"] = True
-                        logger.info(f"🔍 [PRE-DELETE QUERY] FileSearch document exists: {document_name} in {store_name}")
-                    except Exception:
-                        logger.info(f"🔍 [PRE-DELETE QUERY] FileSearch document not found: {document_name}")
-        except Exception as e:
-            logger.warning(f"⚠️ [PRE-DELETE QUERY] Error parsing metadata: {e}")
-
-    return result
 
 
 async def process_file_content(
@@ -488,8 +249,10 @@ async def process_file_content(
                     extractor_processing_time_ms = kreuzberg_metadata.get('processing_time_ms', 0)
                     content_for_upload = markdown_content
 
-                    semantic_chunks = await chunking_service.chunk_text(content_for_upload, original_filename)
-                    total_pages = kreuzberg_metadata.get('kreuzberg_metadata', {}).get('page_count', 0)
+                    semantic_chunks = kreuzberg_metadata.get("chunks") or []
+                    if not semantic_chunks:
+                        raise Exception("Kreuzberg returned no semantic chunks")
+                    total_pages = kreuzberg_metadata.get('page_count', 0)
 
                     # Upload converted markdown to S3 for later download
                     md_filename = original_filename.rsplit('.', 1)[0] + '.md'
@@ -536,9 +299,9 @@ async def process_file_content(
             # otherwise just record the file itself
             from core.config import settings
             if not settings.kreuzberg_enabled:
-                logger.info(f"📝 [ROUTING] File doesn't require kreuzberg processing, sending raw to Gemini API")
+                logger.info(f"📝 [ROUTING] File doesn't require Kreuzberg processing, using raw text/vector pipeline")
             else:
-                logger.info(f"📝 [ROUTING] File type {detected_mime_type} doesn't require kreuzberg processing, sending raw to Gemini API")
+                logger.info(f"📝 [ROUTING] File type {detected_mime_type} doesn't require Kreuzberg processing, using raw text/vector pipeline")
             
             # Read local file content for metrics if it's a text/markdown file
             if tmp_path and os.path.exists(tmp_path):
@@ -558,25 +321,25 @@ async def process_file_content(
         document_name = f"vector_db_file_{file_id}"
         document_uri = f"vector_db_file_{file_id}"
         final_state = "completed"
-        gemini_processed_at = datetime.utcnow()
+        storage_processed_at = datetime.utcnow()
 
-        class FileSearchDocument:
+        class StorageDocument:
             def __init__(self, name, uri):
                 self.name = name
                 self.uri = uri
 
-        uploaded_file = FileSearchDocument(document_name, document_uri)
-        file_search_metadata = {
+        uploaded_file = StorageDocument(document_name, document_uri)
+        storage_metadata = {
             'type': 'vector_db',
             'document_name': document_name,
-            'uploaded_at': gemini_processed_at.isoformat()
+            'uploaded_at': storage_processed_at.isoformat()
         }
 
         if processed_successfully or detected_mime_type == 'text/markdown':
             logger.info(f"🤖 [VECTOR_DB] Uploading chunks to pgvector - Original: {original_filename}...")
             try:
-                # If no chunks were generated (e.g. raw file or Kreuzberg didn't chunk), use Chonkie
-                if not semantic_chunks and content_for_upload:
+                # Only apply local chunking for raw non-Kreuzberg text inputs.
+                if not semantic_chunks and content_for_upload and not processed_by_extractor:
                     logger.info(f"🧩 [CHUNKING] No chunks found, applying Chonkie to content_for_upload...")
                     semantic_chunks = await chunking_service.chunk_text(content_for_upload, original_filename)
                 
@@ -657,19 +420,26 @@ async def process_file_content(
                     logger.warning(f"⚠️ [TOKEN_COUNT] Failed to count tokens: {tc_err}")
 
                 # Update with all processing data
+                extractor_details = kreuzberg_metadata.get("kreuzberg_metadata", {}) if processed_by_extractor else {}
                 success = await dao.update_file_with_processing_data(
                     file_id=file_id,
-                    gemini_file_name=document_name,
-                    gemini_file_uri=document_uri,
-                    gemini_state=final_state,
+                    storage_document_name=document_name,
+                    storage_document_uri=document_uri,
+                    storage_backend_state=final_state,
                     file_size=file_size,
                     char_count=char_count,
                     sha256_hash=sha256_hash,
                     metadata={
-                        'type': 'file_search',
-                        'file_search_store_name': file_search_store_name,
+                        'type': 'vector_db',
+                        'grounding_source': 'pgvector',
+                        'retrieval_pipeline': 'kreuzberg_rust -> pgvector',
                         'document_name': document_name,
-                        'uploaded_at': gemini_processed_at.isoformat() if gemini_processed_at else None
+                        'uploaded_at': storage_processed_at.isoformat() if storage_processed_at else None,
+                        'markdown_s3_key': extractor_details.get('markdown_s3_key'),
+                        'chunks_s3_key': extractor_details.get('chunks_s3_key'),
+                        'tables_s3_key': extractor_details.get('tables_s3_key'),
+                        'page_count': extractor_details.get('page_count', total_pages),
+                        'table_count': extractor_details.get('table_count', 0),
                     },
                     processed_by_extractor=processed_by_extractor,
                     extractor_processing_time_ms=extractor_processing_time_ms,
@@ -816,19 +586,16 @@ async def process_file_content(
 
 
 async def delete_file_logic(file_id: str) -> Dict[str, Any]:
-    """Delete a file from Gemini FileSearch and database with proper metadata handling."""
+    """Delete a file record and clear worker-owned database state."""
     if not file_id:
         return {"success": False, "error": "file_id is required"}
 
-    genai_client = get_genai_client()
     file_service = FileService()
 
     logger.info(f"🗑️ Starting deletion of file with ID: {file_id}")
 
-    gemini_file_name = file_id
-    table_name = "gemini_only"
-    original_filename = "Gemini-only file"
-    file_search_metadata = None
+    table_name = "storage_only"
+    original_filename = "storage-only file"
 
     if not file_id.startswith("files/"):
         # Look up in DB
@@ -838,10 +605,8 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
             record = await dao.get_file_metadata_for_deletion(file_id)
 
             if record:
-                gemini_file_name = record['gemini_file_name']
                 original_filename = record.get('original_filename', 'Unknown')
                 table_name = 'file_uploads'
-                file_search_metadata = record.get('metadata')
             else:
                 logger.error(f"❌ [DELETE] File not found in database: {file_id}")
                 return {"success": False, "error": "File not found"}
@@ -850,59 +615,12 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
             return {"success": False, "error": str(e)}
 
     deletion_results = {
-        "gemini": {"success": False, "error": None},
-        "file_search": {"success": False, "error": None},
+        "storage": {"success": True, "error": None},
         "postgres": {"success": False, "error": None}
     }
 
-    # Delete from FileSearch store
-    if genai_client and file_search_metadata:
-        try:
-            if isinstance(file_search_metadata, str):
-                metadata = json.loads(file_search_metadata)
-            else:
-                metadata = file_search_metadata
-
-            if metadata.get('type') == 'file_search' and metadata.get('file_search_store_name') and metadata.get('document_name'):
-                store_name = metadata['file_search_store_name']
-                document_name = metadata['document_name']
-
-                logger.info(f"📤 Deleting from FileSearch store: {store_name}")
-                try:
-                    # Use force=True to delete document with all its parts/chunks
-                    genai_client.file_search_stores.documents.delete(
-                        name=document_name,
-                        config={"force": True}
-                    )
-                    deletion_results["file_search"]["success"] = True
-                    logger.info(f"✅ [FILESEARCH] Deleted document: {document_name}")
-                except Exception as e:
-                    if "404" in str(e) or "not found" in str(e).lower():
-                        deletion_results["file_search"]["error"] = "Document not found (already deleted)"
-                        logger.warning(f"⚠️ Document already deleted: {document_name}")
-                    else:
-                        deletion_results["file_search"]["error"] = str(e)
-                        logger.error(f"❌ Error deleting document: {e}")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not parse metadata for FileSearch deletion: {e}")
-
-    # Delete raw file from Gemini
-    if genai_client and gemini_file_name and not gemini_file_name.startswith("documents/"):
-        try:
-            logger.info(f"📤 Deleting raw file from Gemini: {gemini_file_name}")
-            genai_client.files.delete(name=gemini_file_name)
-            deletion_results["gemini"]["success"] = True
-            logger.info(f"✅ Deleted raw file: {gemini_file_name}")
-        except Exception as e:
-            if "404" in str(e) or "not found" in str(e).lower():
-                deletion_results["gemini"]["error"] = "File not found (already deleted)"
-                logger.warning(f"⚠️ File already deleted: {gemini_file_name}")
-            else:
-                deletion_results["gemini"]["error"] = str(e)
-                logger.error(f"❌ Error deleting raw file: {e}")
-
     # Delete from database
-    if table_name != "gemini_only":
+    if table_name != "storage_only":
         try:
             async with get_db_session() as session:
                 await file_service.delete_file_record(file_id, table_name)
@@ -915,7 +633,7 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
 
     # Determine success
     db_success = deletion_results["postgres"].get("success", False)
-    all_operations_succeeded = db_success and (deletion_results["file_search"].get("success", False) or deletion_results["gemini"].get("success", False) or table_name == "gemini_only")
+    all_operations_succeeded = db_success and deletion_results["storage"].get("success", False)
 
     # SUCCESS: Log completion (no Redis publish - UI will see DB updates)
     if all_operations_succeeded:

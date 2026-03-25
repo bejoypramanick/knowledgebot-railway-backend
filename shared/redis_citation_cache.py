@@ -1,6 +1,6 @@
 """
 Redis Citation Cache (DB 4)
-Caches display_name/gemini_file_name → original_url mappings for citation lookups.
+Caches display_name/storage_document_name → original_url mappings for citation lookups.
 Uses same DB as agent cache (DB 4) for co-location of lookup state.
 
 Cache strategy:

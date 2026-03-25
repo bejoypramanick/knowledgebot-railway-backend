@@ -60,9 +60,6 @@ async def _fetch_all_data():
             SELECT id, original_filename, display_name, file_extension, processing_status,
                    file_size, char_count,
                    filestore_character_count, filestore_word_count, filestore_token_count,
-                   total_tables_count, total_table_rows_input,
-                   total_table_chars_input, total_table_chars_output,
-                   total_table_input_tokens, total_table_output_tokens,
                    processed_by_extractor, created_at
             FROM file_uploads WHERE created_at >= :since ORDER BY created_at DESC
         """), {"since": since})).fetchall()]
@@ -71,9 +68,6 @@ async def _fetch_all_data():
             SELECT id, original_url, title, processing_status, pages_scraped,
                    file_size, char_count,
                    filestore_character_count, filestore_word_count, filestore_token_count,
-                   total_tables_count, total_table_rows_input,
-                   total_table_chars_input, total_table_chars_output,
-                   total_table_input_tokens, total_table_output_tokens,
                    parent_id, depth, created_at
             FROM scraped_websites WHERE created_at >= :since ORDER BY created_at DESC
         """), {"since": since})).fetchall()]
@@ -541,31 +535,21 @@ function render() {
 
   // === FILES TABLE ===
   document.getElementById('files-table').innerHTML = files.slice(0,100).map(r => {
-    const tCost = calcTableCost(r.total_table_input_tokens||0, r.total_table_output_tokens||0);
     return `<tr>
     <td title="${r.original_filename}">${trunc(r.original_filename,35)}</td><td>${r.file_extension||'-'}</td>
     <td>${fmt(r.file_size)}</td><td>${fmt(r.filestore_character_count)}</td><td>${fmt(r.filestore_word_count)}</td>
     <td class="token-cell">${fmt(r.filestore_token_count)}</td>
-    <td>${r.total_tables_count||0}</td>
-    <td class="token-cell">${fmt(r.total_table_input_tokens)}</td>
-    <td class="token-cell">${fmt(r.total_table_output_tokens)}</td>
-    <td class="cost-cell">${fmtCost(tCost)}</td>
     <td>${badge(r.processing_status)}</td>
     <td>${fmtDate(r.created_at)}</td></tr>`;
   }).join('');
 
   // === WEBSITES TABLE ===
   document.getElementById('websites-table').innerHTML = websites.slice(0,100).map(r => {
-    const tCost = calcTableCost(r.total_table_input_tokens||0, r.total_table_output_tokens||0);
     return `<tr>
     <td title="${r.original_url}">${trunc(r.original_url,40)}${r.parent_id?' (child)':''}</td>
     <td>${trunc(r.title,30)}</td><td>${r.pages_scraped||0}</td>
     <td>${fmt(r.filestore_character_count)}</td><td>${fmt(r.filestore_word_count)}</td>
     <td class="token-cell">${fmt(r.filestore_token_count)}</td>
-    <td>${r.total_tables_count||0}</td>
-    <td class="token-cell">${fmt(r.total_table_input_tokens)}</td>
-    <td class="token-cell">${fmt(r.total_table_output_tokens)}</td>
-    <td class="cost-cell">${fmtCost(tCost)}</td>
     <td>${badge(r.processing_status)}</td>
     <td>${fmtDate(r.created_at)}</td></tr>`;
   }).join('');
@@ -812,7 +796,6 @@ function downloadExcel() {
 
   // Sheet 3: File Uploads
   const fileData = files.map(r => {
-    const tCost = calcTableCost(r.total_table_input_tokens||0, r.total_table_output_tokens||0);
     return {
       'Filename': r.original_filename||'',
       'Extension': r.file_extension||'',
@@ -820,10 +803,6 @@ function downloadExcel() {
       'Markdown Chars': r.filestore_character_count||0,
       'Markdown Words': r.filestore_word_count||0,
       'Markdown Tokens': r.filestore_token_count||0,
-      'Tables Count': r.total_tables_count||0,
-      'Table Input Tokens': r.total_table_input_tokens||0,
-      'Table Output Tokens': r.total_table_output_tokens||0,
-      'Table Format Cost ($)': tCost.toFixed(6),
       'Status': r.processing_status||'',
       'Docling': r.processed_by_docling?'Yes':'No',
       'Created': r.created_at||''
@@ -833,7 +812,6 @@ function downloadExcel() {
 
   // Sheet 4: Scraped Websites
   const webData = websites.map(r => {
-    const tCost = calcTableCost(r.total_table_input_tokens||0, r.total_table_output_tokens||0);
     return {
       'URL': r.original_url||'',
       'Title': r.title||'',
@@ -841,10 +819,6 @@ function downloadExcel() {
       'Markdown Chars': r.filestore_character_count||0,
       'Markdown Words': r.filestore_word_count||0,
       'Markdown Tokens': r.filestore_token_count||0,
-      'Tables Count': r.total_tables_count||0,
-      'Table Input Tokens': r.total_table_input_tokens||0,
-      'Table Output Tokens': r.total_table_output_tokens||0,
-      'Table Format Cost ($)': tCost.toFixed(6),
       'Status': r.processing_status||'',
       'Depth': r.depth||0,
       'Is Child': r.parent_id?'Yes':'No',

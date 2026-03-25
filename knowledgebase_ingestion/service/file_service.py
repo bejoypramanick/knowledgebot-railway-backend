@@ -26,10 +26,10 @@ class FileService:
                 meta = metadata
                 if isinstance(meta, str):
                     meta = json.loads(meta)
-                in_filesearch = bool(meta and meta.get('file_search_metadata'))
+                in_filesearch = bool(meta and meta.get('storage_metadata'))
             except Exception:
                 in_filesearch = False
-            location = "database and FileSearch" if in_filesearch else "database"
+            location = "database and storage backend" if in_filesearch else "database"
             return f"URL already existed in {location} when this task ran (duplicate detected)"
         return error_message
 
@@ -49,7 +49,7 @@ class FileService:
                 logger.info(f"🔍 [FILENAME_CHECK] Searching for filename match: {original_filename}")
                 try:
                     result = await session.execute(
-                        text("SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = :filename AND processing_status != 'deleted'"),
+                        text("SELECT id, original_filename, display_name, sha256_hash, file_size, storage_document_name, version FROM file_uploads WHERE original_filename = :filename AND processing_status != 'deleted'"),
                         {"filename": original_filename}
                     )
                     existing_by_name = result.mappings().first()
@@ -65,7 +65,7 @@ class FileService:
                         "display_name": existing_by_name['display_name'],
                         "sha256_hash": existing_by_name['sha256_hash'],
                         "file_size": existing_by_name['file_size'],
-                        "gemini_file_name": existing_by_name['gemini_file_name'],
+                        "storage_document_name": existing_by_name['storage_document_name'],
                         "version": existing_by_name.get('version', 1),
                         "match_type": "filename"
                     }
@@ -90,7 +90,7 @@ class FileService:
                         # Now check only active files
                         logger.info(f"🔍 [HASH_CHECK] Running query for active files only...")
                         result = await session.execute(
-                            text("SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = :hash AND processing_status != 'deleted'"),
+                            text("SELECT id, original_filename, display_name, sha256_hash, file_size, storage_document_name, version FROM file_uploads WHERE sha256_hash = :hash AND processing_status != 'deleted'"),
                             {"hash": sha256_hash}
                         )
                         existing_by_hash = result.mappings().first()
@@ -107,7 +107,7 @@ class FileService:
                             "display_name": existing_by_hash['display_name'],
                             "sha256_hash": existing_by_hash['sha256_hash'],
                             "file_size": existing_by_hash['file_size'],
-                            "gemini_file_name": existing_by_hash['gemini_file_name'],
+                            "storage_document_name": existing_by_hash['storage_document_name'],
                             "version": existing_by_hash.get('version', 1),
                             "match_type": "hash"  # Same content, different filename
                         }
@@ -123,7 +123,7 @@ class FileService:
             return None
 
     async def delete_existing_file_record(self, db_id: str) -> bool:
-        """Delete an existing file record from both Gemini and database.
+        """Soft-delete an existing file record and clear storage linkage.
 
         Returns:
             bool: True if deletion succeeded, False otherwise
@@ -131,30 +131,22 @@ class FileService:
         try:
             from shared.sqlalchemy_db import get_db_session
             from sqlalchemy import text
-            from knowledgebase_ingestion.core.ai import get_genai_client
-
             async with get_db_session() as session:
-                # First, get the gemini_file_name before deleting
                 result = await session.execute(
-                    text("SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = :id"),
+                    text("SELECT storage_document_name, original_filename FROM file_uploads WHERE id = :id"),
                     {"id": db_id}
                 )
                 record = result.mappings().first()
-
-                if record and record['gemini_file_name']:
-                    # Delete from Gemini first
-                    try:
-                        genai_client = get_genai_client()
-                        if genai_client:
-                            genai_client.files.delete(name=record['gemini_file_name'])
-                            logger.info(f"✅ Deleted from Gemini: {record['gemini_file_name']}")
-                    except Exception as gemini_error:
-                        logger.warning(f"⚠️ Could not delete from Gemini (may already be deleted): {gemini_error}")
-
-                # Then mark as deleted in database (soft delete instead of hard delete)
-                # This preserves audit trail and prevents orphaned references
                 await session.execute(
-                    text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
+                    text("""
+                        UPDATE file_uploads
+                        SET processing_status = 'deleted',
+                            storage_document_name = NULL,
+                            storage_document_uri = NULL,
+                            storage_backend_state = 'deleted',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :id
+                    """),
                     {"id": db_id}
                 )
                 await session.commit()
@@ -253,14 +245,14 @@ class FileService:
             async with get_db_session() as session:
                 # Look up in file_uploads table
                 result = await session.execute(
-                    text("SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = :id"),
+                    text("SELECT storage_document_name, original_filename, metadata FROM file_uploads WHERE id = :id"),
                     {"id": file_id}
                 )
                 record = result.mappings().first()
                 if record:
                     logger.info(f"✅ Found file record in file_uploads: {record}")
                     return {
-                        'gemini_file_name': record['gemini_file_name'],
+                        'storage_document_name': record['storage_document_name'],
                         'original_filename': record['original_filename'],
                         'table_name': 'file_uploads',
                         'metadata': record.get('metadata')
@@ -268,14 +260,14 @@ class FileService:
 
                 # Look up in scraped_websites table
                 result = await session.execute(
-                    text("SELECT gemini_file_name, original_url, metadata FROM scraped_websites WHERE id = :id"),
+                    text("SELECT storage_document_name, original_url, metadata FROM scraped_websites WHERE id = :id"),
                     {"id": file_id}
                 )
                 record = result.mappings().first()
                 if record:
                     logger.info(f"✅ Found file record in scraped_websites: {record}")
                     return {
-                        'gemini_file_name': record['gemini_file_name'],
+                        'storage_document_name': record['storage_document_name'],
                         'original_filename': record.get('original_url', 'Unknown'),
                         'table_name': 'scraped_websites',
                         'metadata': record.get('metadata')
@@ -309,7 +301,7 @@ class FileService:
             async with get_db_session() as session:
                 result = await session.execute(
                     text("""SELECT id, original_filename, display_name, file_extension, mime_type,
-                             file_size, sha256_hash, gemini_state, created_at, version,
+                             file_size, sha256_hash, storage_backend_state, created_at, version,
                              celery_task_id, processing_status, error_message
                              FROM file_uploads
                              ORDER BY id DESC""")
@@ -328,7 +320,7 @@ class FileService:
                         "file_type": (file['file_extension'] or '').upper() or 'Unknown',  # Add file_type for frontend
                         "size_bytes": file['file_size'],  # Map file_size to size_bytes for API consistency
                         "sha256_hash": file['sha256_hash'],
-                        "gemini_state": file['gemini_state'],
+                        "storage_backend_state": file['storage_backend_state'],
                         "processed_at": None,  # Not available in current schema
                         "created_at": file['created_at'].isoformat() if file['created_at'] else None,
                         "version": file.get('version', 1),
@@ -416,7 +408,7 @@ class FileService:
                             "file_type": file_type,
                             "size_bytes": website['file_size'] or 0,  # Markdown file size in bytes
                             "sha256_hash": None,
-                            "gemini_state": "completed",
+                            "storage_backend_state": "completed",
                             "processed_at": website['created_at'].isoformat() if website['created_at'] else None,
                             "created_at": website['created_at'].isoformat() if website['created_at'] else None,
                             "version": 1,
@@ -501,7 +493,7 @@ class FileService:
             async with get_db_session() as session:
                 result = await session.execute(
                     text("""SELECT id, original_filename, display_name, file_extension, mime_type,
-                             file_size, sha256_hash, gemini_state, created_at, version
+                             file_size, sha256_hash, storage_backend_state, created_at, version
                              FROM file_uploads
                              WHERE id = :id"""),
                     {"id": file_id}
@@ -520,7 +512,7 @@ class FileService:
                     "file_type": (file_record['file_extension'] or '').upper() or 'Unknown',  # Add file_type for frontend
                     "size_bytes": file_record['file_size'],  # Map file_size to size_bytes for API consistency
                     "sha256_hash": file_record['sha256_hash'],
-                    "gemini_state": file_record['gemini_state'],
+                    "storage_backend_state": file_record['storage_backend_state'],
                     "processed_at": None,  # Not available in current schema
                     "created_at": file_record['created_at'].isoformat() if file_record['created_at'] else None,
                     "version": file_record.get('version', 1),
@@ -563,8 +555,7 @@ class FileService:
         1. Retrieves file record with all metadata and Celery task ID
         2. Revokes Celery worker tasks (kills running processors)
         3. Sets Redis task cancellation flags
-        4. Deletes from Gemini (raw files and/or FileSearch store) and verifies deletion
-        5. Marks record as deleted in database (soft delete for audit trail)
+        4. Marks record as deleted in database (soft delete for audit trail)
 
         Returns:
             {"success": bool, "message": str, ...details}
@@ -576,16 +567,14 @@ class FileService:
         try:
             from shared.sqlalchemy_db import get_db_session
             from sqlalchemy import text
-            from knowledgebase_ingestion.core.ai import get_genai_client
             from shared.celery_dispatcher import file_celery
             from shared.redis_message_queue import RedisMessageQueue
-            import json
 
             # Step 1: Get file record with celery_task_id
             logger.info(f"🔍 [LOOKUP] Fetching file record...")
             async with get_db_session() as session:
                 result = await session.execute(
-                    text("SELECT id, original_filename, gemini_file_name, metadata, celery_task_id FROM file_uploads WHERE id = :id"),
+                    text("SELECT id, original_filename, storage_document_name, metadata, celery_task_id FROM file_uploads WHERE id = :id"),
                     {"id": file_id}
                 )
                 file_record = result.mappings().first()
@@ -623,96 +612,20 @@ class FileService:
                 except Exception as e:
                     logger.warning(f"   ⚠️  Could not set cancellation flag: {e}")
 
-            # Step 3: Delete from Gemini and verify
-            logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini and verifying...")
-            deleted_from_gemini = False
-            deleted_from_filesearch = False
-            failed_deletes = 0
-
-            try:
-                genai_client = get_genai_client()
-                if not genai_client:
-                    logger.warning("⚠️  Gemini client not available (file will still be marked as deleted in DB)")
-                else:
-                    # Delete raw file if it exists
-                    if file_record['gemini_file_name'] and not file_record['gemini_file_name'].startswith("documents/"):
-                        try:
-                            logger.info(f"   📍 Deleting raw Gemini file: {file_record['gemini_file_name']}")
-                            genai_client.files.delete(name=file_record['gemini_file_name'])
-
-                            # Verify deletion
-                            try:
-                                genai_client.files.get(name=file_record['gemini_file_name'])
-                                logger.warning(f"   ⚠️  Verification FAILED: Raw file still exists: {file_record['gemini_file_name']}")
-                                failed_deletes += 1
-                            except:
-                                # File not found = successfully deleted
-                                deleted_from_gemini = True
-                                logger.info(f"   ✅ Verified deleted from Gemini raw: {file_record['gemini_file_name']}")
-                        except Exception as e:
-                            logger.warning(f"   ⚠️  Could not delete from Gemini raw files: {e}")
-                            failed_deletes += 1
-
-                    # Delete from FileSearch store if metadata contains FileSearch info
-                    metadata = file_record['metadata']
-                    if metadata:
-                        try:
-                            if isinstance(metadata, str):
-                                metadata = json.loads(metadata)
-
-                            if metadata.get('type') == 'file_search':
-                                store_name = metadata.get('file_search_store_name')
-                                document_name = metadata.get('document_name')
-
-                                if store_name and document_name:
-                                    try:
-                                        logger.info(f"   📍 Deleting FileSearch document: {document_name} from store: {store_name}")
-                                        # Use force=True to delete document with all its parts/chunks
-                                        genai_client.file_search_stores.documents.delete(
-                                            name=document_name,
-                                            config={"force": True}
-                                        )
-
-                                        # Verify deletion: check if document still exists
-                                        try:
-                                            documents = genai_client.file_search_stores.list_documents(
-                                                file_search_store_name=store_name
-                                            )
-                                            doc_exists = any(doc.name == document_name for doc in documents)
-                                            if doc_exists:
-                                                logger.warning(f"   ⚠️  Verification FAILED: Document still exists: {document_name}")
-                                                failed_deletes += 1
-                                            else:
-                                                deleted_from_filesearch = True
-                                                logger.info(f"   ✅ Verified deleted from FileSearch: {document_name}")
-                                        except Exception as verify_err:
-                                            # If verification fails with 404, document is deleted
-                                            if "404" in str(verify_err) or "not found" in str(verify_err).lower():
-                                                deleted_from_filesearch = True
-                                                logger.info(f"   ✅ Document deleted (404 on verification): {document_name}")
-                                            else:
-                                                logger.warning(f"   ⚠️  Could not verify FileSearch deletion: {verify_err}")
-                                                # Assume delete was successful if no error on delete itself
-                                                deleted_from_filesearch = True
-                                    except Exception as fs_err:
-                                        # Check if it's a "not found" error (already deleted)
-                                        if "404" in str(fs_err) or "not found" in str(fs_err).lower():
-                                            deleted_from_filesearch = True
-                                            logger.info(f"   ✅ Document already deleted: {document_name}")
-                                        else:
-                                            logger.warning(f"   ❌ Failed to delete from FileSearch store: {fs_err}")
-                                            failed_deletes += 1
-                        except Exception as e:
-                            logger.warning(f"   ⚠️  Error processing metadata: {e}")
-            except Exception as e:
-                logger.warning(f"⚠️  Error during Gemini deletion: {e}")
-
-            # Step 4: Mark as deleted in database (soft delete)
+            # Step 3: Mark as deleted in database (soft delete)
             logger.info(f"💾 [DB_UPDATE] Marking file as deleted in database...")
             try:
                 async with get_db_session() as session:
                     await session.execute(
-                        text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
+                        text("""
+                            UPDATE file_uploads
+                            SET processing_status = 'deleted',
+                                storage_document_name = NULL,
+                                storage_document_uri = NULL,
+                                storage_backend_state = 'deleted',
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = :id
+                        """),
                         {"id": file_id}
                     )
                     await session.commit()
@@ -726,9 +639,6 @@ class FileService:
             logger.info("=" * 80)
             logger.info(f"   File: {file_record['original_filename']}")
             logger.info(f"   Celery task revoked: {celery_task_revoked}")
-            logger.info(f"   Deleted from Gemini raw: {deleted_from_gemini}")
-            logger.info(f"   Deleted from FileSearch: {deleted_from_filesearch}")
-            logger.info(f"   Failed deletes: {failed_deletes}")
             logger.info(f"   Marked as deleted in DB: Yes")
 
             return {
@@ -737,9 +647,7 @@ class FileService:
                 "file_id": file_id,
                 "filename": file_record['original_filename'],
                 "celery_task_revoked": celery_task_revoked,
-                "deleted_from_gemini": deleted_from_gemini,
-                "deleted_from_filesearch": deleted_from_filesearch,
-                "failed_deletes": failed_deletes
+                "storage_reference_cleared": True
             }
 
         except Exception as e:
@@ -762,11 +670,7 @@ class FileService:
         1. Retrieves website record and all child pages
         2. Force kills parent's Celery task (if parent row and task exists)
         3. (Optional) Revokes child Celery tasks - only for "delete all" operations
-        4. Deletes all documents from Gemini FileSearch store
-        5. Verifies deletion from Gemini FileSearch
-        6. ONLY THEN marks website and all children as deleted in database (atomic transaction)
-        
-        If Gemini deletion fails, the database is NOT updated (rollback).
+        4. Marks website and child rows as deleted in database
 
         Args:
             website_id: ID of website/page to delete
@@ -783,9 +687,6 @@ class FileService:
         try:
             from shared.sqlalchemy_db import get_db_session
             from sqlalchemy import text
-            from knowledgebase_ingestion.core.ai import get_genai_client
-            import json
-
             # Step 1: Get website record and all child pages
             logger.info(f"🔍 [LOOKUP] Fetching website and child pages...")
             async with get_db_session() as session:
@@ -878,108 +779,7 @@ class FileService:
             elif not revoke_celery_tasks:
                 logger.info(f"ℹ️  [CHILD_TASKS_SKIP] Skipping child task revocation (individual delete)")
 
-            # Step 4: Delete from Gemini FileSearch and verify (BEFORE DB update)
-            logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini FileSearch and verifying...")
-            deleted_documents = 0
-            failed_deletes = []
-            gemini_deletion_successful = True
-
-            try:
-                genai_client = get_genai_client()
-                if not genai_client:
-                    logger.warning("⚠️  Gemini client not available - skipping FileSearch deletion")
-                    gemini_deletion_successful = False
-                else:
-                    all_pages = [website_record] + child_pages
-
-                    for page in all_pages:
-                        metadata = page['metadata']
-                        if metadata:
-                            try:
-                                if isinstance(metadata, str):
-                                    metadata = json.loads(metadata)
-
-                                # Delete FileSearch document if metadata contains FileSearch info
-                                if metadata.get('type') == 'file_search' or 'file_search_store_name' in metadata:
-                                    store_name = metadata.get('file_search_store_name')
-                                    document_name = metadata.get('document_name')
-
-                                    if store_name and document_name:
-                                        try:
-                                            logger.info(f"   📍 Deleting: {document_name} from store: {store_name}")
-                                            # Use force=True to delete document with all its parts/chunks
-                                            genai_client.file_search_stores.documents.delete(
-                                                name=document_name,
-                                                config={"force": True}
-                                            )
-
-                                            # Verify deletion: check if document still exists
-                                            try:
-                                                documents = genai_client.file_search_stores.list_documents(
-                                                    file_search_store_name=store_name
-                                                )
-                                                doc_exists = any(doc.name == document_name for doc in documents)
-                                                if doc_exists:
-                                                    error_msg = f"Document still exists after deletion: {document_name}"
-                                                    logger.error(f"   ❌ VERIFICATION FAILED: {error_msg}")
-                                                    failed_deletes.append({
-                                                        "url": page['original_url'],
-                                                        "document": document_name,
-                                                        "error": error_msg
-                                                    })
-                                                    gemini_deletion_successful = False
-                                                else:
-                                                    deleted_documents += 1
-                                                    logger.info(f"   ✅ Verified deleted from FileSearch: {page['original_url']}")
-                                            except Exception as verify_err:
-                                                # If verification fails but delete succeeded, consider it successful
-                                                if "404" in str(verify_err) or "not found" in str(verify_err).lower():
-                                                    deleted_documents += 1
-                                                    logger.info(f"   ✅ Document deleted (404 on verification): {page['original_url']}")
-                                                else:
-                                                    error_msg = f"Could not verify deletion: {verify_err}"
-                                                    logger.warning(f"   ⚠️  {error_msg}")
-                                                    # Assume successful if delete didn't error
-                                                    deleted_documents += 1
-                                        except Exception as fs_err:
-                                            # Check if it's a "not found" error (already deleted)
-                                            if "404" in str(fs_err) or "not found" in str(fs_err).lower():
-                                                deleted_documents += 1
-                                                logger.info(f"   ✅ Document already deleted: {page['original_url']}")
-                                            else:
-                                                error_msg = f"Failed to delete from FileSearch: {fs_err}"
-                                                logger.error(f"   ❌ {error_msg}")
-                                                failed_deletes.append({
-                                                    "url": page['original_url'],
-                                                    "document": document_name,
-                                                    "error": error_msg
-                                                })
-                                                gemini_deletion_successful = False
-                            except Exception as e:
-                                logger.warning(f"   ⚠️  Error processing metadata: {e}")
-            except Exception as e:
-                logger.error(f"❌ Error during Gemini deletion: {e}")
-                gemini_deletion_successful = False
-
-            # Step 4: ONLY mark as deleted in DB if Gemini deletion was successful
-            if not gemini_deletion_successful:
-                logger.error("=" * 80)
-                logger.error(f"❌ [ATOMIC_ROLLBACK] Gemini deletion failed - NOT updating database")
-                logger.error("=" * 80)
-                logger.error(f"   Failed deletes: {len(failed_deletes)}")
-                for fail in failed_deletes:
-                    logger.error(f"   - {fail['url']}: {fail['error']}")
-                
-                return {
-                    "success": False,
-                    "message": "Gemini FileSearch deletion failed - database not updated (atomic rollback)",
-                    "website_id": website_id,
-                    "url": website_record['original_url'],
-                    "failed_deletes": failed_deletes,
-                    "documents_deleted_from_filesearch": deleted_documents
-                }
-
-            logger.info(f"💾 [DB_UPDATE] All Gemini deletions verified - marking as deleted in database...")
+            logger.info(f"💾 [DB_UPDATE] Marking website records as deleted in database...")
             try:
                 async with get_db_connection() as conn:
                     async with conn.transaction():
@@ -1009,7 +809,6 @@ class FileService:
             logger.info(f"   Type: {'Child Page' if is_child else 'Parent Website'}")
             logger.info(f"   Child pages deleted: {len(child_pages)}")
             logger.info(f"   Celery tasks revoked: {revoked_tasks}")
-            logger.info(f"   Documents deleted from FileSearch: {deleted_documents}")
             logger.info(f"   Marked as deleted in DB: Yes")
 
             return {
@@ -1020,8 +819,7 @@ class FileService:
                 "is_child": is_child,
                 "child_pages_deleted": len(child_pages),
                 "celery_tasks_revoked": revoked_tasks,
-                "documents_deleted_from_filesearch": deleted_documents,
-                "failed_filesearch_deletes": 0
+                "storage_reference_cleared": True
             }
 
         except Exception as e:

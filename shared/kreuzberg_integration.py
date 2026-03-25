@@ -1,28 +1,34 @@
 """
 Kreuzberg Document Intelligence Integration
-Provides a fast, synchronous REST API call to the Kreuzberg container.
+Routes extraction through the dedicated Redis-driven Rust Kreuzberg worker.
 """
+import asyncio
+import json
 import time
-import httpx
 import os
 from typing import Tuple, Dict, Any, Optional
+from shared.extraction_worker_client import ExtractionWorkerClient
 from shared.otel_logger import get_otel_logger
+from shared.s3_file_storage import s3_file_storage
 
 logger = get_otel_logger("kreuzberg_integration", "shared")
 
-KREUZBERG_API_URL = os.environ.get("KREUZBERG_API_URL", "http://kreuzberg:8000")
-KREUZBERG_API_TIMEOUT = float(os.environ.get("KREUZBERG_API_TIMEOUT", "300.0"))
+KREUZBERG_REDIS_TIMEOUT = float(os.environ.get("KREUZBERG_REDIS_TIMEOUT", "300.0"))
+KREUZBERG_POLL_INTERVAL = float(os.environ.get("KREUZBERG_POLL_INTERVAL", "1.0"))
 
-async def download_file_from_s3(presigned_url: str) -> bytes:
-    """Download file from S3 using presigned URL to memory."""
-    logger.info(f"[KREUZBERG] Downloading file from S3 to memory...")
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.get(presigned_url)
-        response.raise_for_status()
-        logger.info(f"[KREUZBERG] Downloaded {len(response.content)} bytes from S3.")
-        if response.status_code == 200:
-            return response.content
-        return b""
+
+async def _download_s3_text(s3_key: str) -> Optional[str]:
+    success, payload = await s3_file_storage.download_file(s3_key)
+    if not success:
+        return None
+    return payload.decode("utf-8", errors="replace")
+
+
+async def _download_s3_json(s3_key: str) -> Any:
+    success, payload = await s3_file_storage.download_file(s3_key)
+    if not success:
+        return None
+    return json.loads(payload.decode("utf-8"))
 
 
 async def process_with_kreuzberg(
@@ -34,34 +40,80 @@ async def process_with_kreuzberg(
     source_name: Optional[str] = None
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """
-    Send a document to Kreuzberg for extraction.
+    Send a document to the dedicated Kreuzberg extraction worker.
     Returns (markdown_content, metadata_dict).
     """
     start_time = time.time()
-    base_url = str(KREUZBERG_API_URL).strip("/")
-    endpoint = f"{base_url}/extract"
+    reply_channel = f"kreuzberg_extraction_results:{source_id or original_filename}:{int(start_time * 1000)}"
+    client = ExtractionWorkerClient()
+    source_type = "website" if worker_type == "web" else "file"
 
-    logger.info(f"[KREUZBERG] Extracting {original_filename} from {endpoint}")
+    logger.info(f"[KREUZBERG] Queueing extraction for {original_filename} via Redis worker")
 
     try:
-        file_bytes = await download_file_from_s3(presigned_url)
+        job = client.create_job(
+            source_type=source_type,
+            document_id=source_id or original_filename,
+            source_name=source_name or original_filename,
+            mime_type=mime_type,
+            presigned_url=presigned_url,
+            worker_type=worker_type,
+            source_url=source_name if worker_type == "web" else None,
+            reply_channel=reply_channel,
+            metadata={
+                "original_filename": original_filename,
+                "source_id": source_id,
+                "source_name": source_name,
+            },
+        )
 
-        async with httpx.AsyncClient(timeout=KREUZBERG_API_TIMEOUT) as client:
-            response = await client.post(
-                endpoint,
-                files=[('files', (original_filename, file_bytes, mime_type))],
-                data={"output_format": "markdown"}
-            )
+        published = await asyncio.to_thread(client.publish_job, job)
+        if not published:
+            return None, {"error": "Failed to publish Kreuzberg extraction job"}
 
-        if response.status_code != 200:
-            logger.error(f"[KREUZBERG] API error {response.status_code}: {response.text}")
-            return None, {"error": f"API Error {response.status_code}: {response.text}"}
+        timeout_at = time.time() + KREUZBERG_REDIS_TIMEOUT
+        result = None
+        while time.time() < timeout_at:
+            result = await asyncio.to_thread(client.get_result, 1, reply_channel)
+            if result:
+                break
+            await asyncio.sleep(KREUZBERG_POLL_INTERVAL)
+
+        if not result:
+            return None, {"error": f"Kreuzberg extraction timed out after {int(KREUZBERG_REDIS_TIMEOUT)}s"}
+        if result.get("status") != "completed":
+            return None, {"error": result.get("error") or "Kreuzberg extraction failed"}
+
+        markdown_s3_key = result.get("markdown_s3_key")
+        markdown_content = await _download_s3_text(markdown_s3_key) if markdown_s3_key else None
+        if not markdown_content:
+            return None, {"error": f"Failed to download markdown artifact from S3: {markdown_s3_key}"}
+
+        chunks = []
+        chunks_s3_key = result.get("chunks_s3_key")
+        if chunks_s3_key:
+            chunks = await _download_s3_json(chunks_s3_key) or []
+
+        tables = []
+        tables_s3_key = result.get("tables_s3_key")
+        if tables_s3_key:
+            tables = await _download_s3_json(tables_s3_key) or []
 
         processing_time_ms = int((time.time() - start_time) * 1000)
-        markdown_content = response.text
         logger.info(f"✅ [KREUZBERG] Done in {processing_time_ms}ms — {len(markdown_content)} characters")
 
-        return markdown_content, {"processing_time_ms": processing_time_ms, "content_format": "markdown"}
+        return markdown_content, {
+            "processing_time_ms": processing_time_ms,
+            "content_format": "markdown",
+            "chunks": chunks,
+            "tables": tables,
+            "markdown_s3_key": markdown_s3_key,
+            "chunks_s3_key": chunks_s3_key,
+            "tables_s3_key": tables_s3_key,
+            "kreuzberg_metadata": result.get("metadata", {}),
+            "page_count": result.get("metadata", {}).get("page_count", 0),
+            "table_count": result.get("metadata", {}).get("table_count", len(tables)),
+        }
 
     except Exception as e:
         logger.error(f"❌ [KREUZBERG] Extraction failed: {e}")

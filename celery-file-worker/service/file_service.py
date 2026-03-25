@@ -141,9 +141,9 @@ class FileService:
         file_size: int,
         sha256_hash: str,
         final_state: str,
-        gemini_processed_at: Any,
+        storage_processed_at: Any,
         mime_type: str,
-        file_search_metadata: Optional[Dict[str, Any]] = None,
+        storage_metadata: Optional[Dict[str, Any]] = None,
         char_count: int = 0,
         user_role_id: str = None
     ) -> Optional[str]:
@@ -155,13 +155,13 @@ class FileService:
             original_filename=original_filename,
             file_display_name=file_display_name,
             file_ext=file_ext,
-            gemini_file_name=uploaded_file.name,
+            storage_document_name=uploaded_file.name,
             file_size=file_size,
             sha256_hash=sha256_hash,
             final_state=final_state,
-            gemini_processed_at=gemini_processed_at,
+            storage_processed_at=storage_processed_at,
             mime_type=mime_type,
-            file_search_metadata=file_search_metadata,
+            storage_metadata=storage_metadata,
             char_count=char_count,
             user_role_id=user_role_id
         )

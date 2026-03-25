@@ -194,9 +194,8 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
     1. Terminates parent Celery task (web_crawling queue)
     2. Terminates child Celery tasks if parent is deleted
     3. Cleans Redis task states and cancellation flags
-    4. Deletes from Gemini FileSearch (all pages)
-    5. Deletes from S3 (raw + processed markdown for all pages)
-    6. Updates database atomically (parent + children together)
+    4. Deletes from S3 (raw + processed markdown for all pages)
+    5. Updates database atomically (parent + children together)
 
     For parent websites: deletes entire tree (parent + all child pages)
     For child pages: deletes only that page

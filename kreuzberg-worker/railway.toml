@@ -1,0 +1,7 @@
+[build]
+dockerfilePath = "kreuzberg-worker/Dockerfile"
+
+[deploy]
+startCommand = "kreuzberg-worker"
+restartPolicyType = "always"
+restartPolicyMaxRetries = 10

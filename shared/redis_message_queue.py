@@ -48,6 +48,8 @@ class RedisMessageQueue:
     FILE_RESULT_QUEUE = "file_processing_results"  # file-worker → knowledgebase
     WEB_TASK_QUEUE = "web_crawling_tasks"          # knowledgebase → web-worker
     WEB_RESULT_QUEUE = "web_crawling_results"      # web-worker → knowledgebase
+    EXTRACT_TASK_QUEUE = "kreuzberg_extraction_tasks"      # workers → kreuzberg-worker
+    EXTRACT_RESULT_QUEUE = "kreuzberg_extraction_results"  # kreuzberg-worker → workers
 
     def __init__(self):
         """Initialize Redis connections for both databases"""
@@ -63,8 +65,15 @@ class RedisMessageQueue:
         if not self.web_redis_url:
             logger.warning("⚠️  WEB_REDIS_URL not set - web Redis connection will fail")
 
+        # Extraction worker: default to FILE_REDIS_URL so we can reuse the existing
+        # operational Redis footprint unless a separate EXTRACT_REDIS_URL is provided.
+        self.extract_redis_url = os.getenv('EXTRACT_REDIS_URL') or self.file_redis_url
+        if not self.extract_redis_url:
+            logger.warning("⚠️  EXTRACT_REDIS_URL/FILE_REDIS_URL not set - extract Redis connection will fail")
+
         self._file_connection = None
         self._web_connection = None
+        self._extract_connection = None
         self._init_connections()
 
     def _init_connections(self):
@@ -85,9 +94,21 @@ class RedisMessageQueue:
             logger.error(f"❌ Failed to initialize web Redis connection: {e}")
             self._web_connection = None
 
+        try:
+            self._extract_connection = redis.from_url(self.extract_redis_url)
+            self._extract_connection.ping()
+            logger.info(f"✅ Extract Redis connection initialized: {_redact_redis_url(self.extract_redis_url)}")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize extract Redis connection: {e}")
+            self._extract_connection = None
+
     def is_available(self) -> bool:
         """Check if at least one Redis connection is available"""
-        return self._file_connection is not None or self._web_connection is not None
+        return (
+            self._file_connection is not None
+            or self._web_connection is not None
+            or self._extract_connection is not None
+        )
 
     def _is_file_available(self) -> bool:
         """Check if file Redis connection is available"""
@@ -96,6 +117,10 @@ class RedisMessageQueue:
     def _is_web_available(self) -> bool:
         """Check if web Redis connection is available"""
         return self._web_connection is not None
+
+    def _is_extract_available(self) -> bool:
+        """Check if extraction Redis connection is available"""
+        return self._extract_connection is not None
 
     # ========== FILE PROCESSING MESSAGES ==========
 
@@ -200,6 +225,91 @@ class RedisMessageQueue:
 
         except Exception as e:
             logger.error(f"❌ Error getting file result: {e}")
+            return None
+
+    # ========== KREUZBERG EXTRACTION MESSAGES ==========
+
+    def publish_extract_task(self, message: Dict[str, Any]) -> bool:
+        """Publish an extraction job for the dedicated Kreuzberg worker."""
+        if not self._is_extract_available():
+            logger.error("❌ Extract Redis not available, cannot publish extraction task")
+            return False
+
+        try:
+            message_json = json.dumps(message)
+            self._extract_connection.rpush(self.EXTRACT_TASK_QUEUE, message_json)
+            logger.info(
+                "📤 [EXTRACT] Published task: job_id=%s document_id=%s source_type=%s",
+                message.get("job_id"),
+                message.get("document_id"),
+                message.get("source_type"),
+            )
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to publish extraction task: {e}")
+            return False
+
+    def get_extract_task(self, timeout: int = 1) -> Optional[Dict[str, Any]]:
+        """Get an extraction task from the dedicated Kreuzberg worker queue."""
+        if not self._is_extract_available():
+            return None
+
+        try:
+            result = self._extract_connection.blpop(self.EXTRACT_TASK_QUEUE, timeout=timeout)
+            if result:
+                _, message_json = result
+                message = json.loads(message_json)
+                logger.info(
+                    "📥 [EXTRACT] Received task: job_id=%s document_id=%s",
+                    message.get("job_id"),
+                    message.get("document_id"),
+                )
+                return message
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error getting extraction task: {e}")
+            return None
+
+    def publish_extract_result(self, message: Dict[str, Any]) -> bool:
+        """Publish the extraction result for downstream workers."""
+        if not self._is_extract_available():
+            logger.error("❌ Extract Redis not available, cannot publish extraction result")
+            return False
+
+        try:
+            queue_name = message.get("reply_channel") or self.EXTRACT_RESULT_QUEUE
+            message_json = json.dumps(message)
+            self._extract_connection.rpush(queue_name, message_json)
+            logger.info(
+                "📤 [EXTRACT_RESULT] Published: job_id=%s status=%s",
+                message.get("job_id"),
+                message.get("status"),
+            )
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to publish extraction result: {e}")
+            return False
+
+    def get_extract_result(self, timeout: int = 0, queue_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get an extraction result message."""
+        if not self._is_extract_available():
+            return None
+
+        try:
+            result_queue = queue_name or self.EXTRACT_RESULT_QUEUE
+            result = self._extract_connection.blpop(result_queue, timeout=timeout)
+            if result:
+                _, message_json = result
+                message = json.loads(message_json)
+                logger.info(
+                    "📥 [EXTRACT_RESULT] Received: job_id=%s status=%s",
+                    message.get("job_id"),
+                    message.get("status"),
+                )
+                return message
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error getting extraction result: {e}")
             return None
 
     # ========== WEBSITE PROCESSING MESSAGES ==========

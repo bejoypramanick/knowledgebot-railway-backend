@@ -347,18 +347,18 @@ class OpenTelemetryLogger:
             rows = len(result) if result is not None and hasattr(result, '__len__') and not isinstance(result, (str, bytes)) else 'N/A'
             self.debug(f"✅ DB Query Success: {query} | Rows/Result: {rows}")
 
-    def log_file_search_operation(self, operation: str, **kwargs):
-        """Log FileSearch store operations"""
+    def log_storage_operation(self, operation: str, **kwargs):
+        """Log storage backend operations"""
         span = trace.get_current_span()
         if span and span.is_recording():
-            span.set_attribute("file_search.operation", operation)
+            span.set_attribute("storage.operation", operation)
             for key, value in kwargs.items():
-                span.set_attribute(f"file_search.{key}", str(value))
+                span.set_attribute(f"storage.{key}", str(value))
 
         # Also log to console
         details = " | ".join(f"{k}={v}" for k, v in kwargs.items())
         details_str = f" | {details}" if details else ""
-        self.info(f"📂 FileSearch Operation: {operation}{details_str}")
+        self.info(f"📂 Storage Operation: {operation}{details_str}")
 
 def get_otel_logger(name: str, service_name: str) -> OpenTelemetryLogger:
     return OpenTelemetryLogger(name, service_name)

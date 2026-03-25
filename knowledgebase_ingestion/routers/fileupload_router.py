@@ -328,9 +328,8 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
     This operation performs comprehensive deletion:
     1. Terminates Celery task (file_processing queue)
     2. Cleans Redis task state and cancellation flags
-    3. Deletes from Gemini (raw file + FileSearch document)
-    4. Deletes from S3 (raw upload + processed markdown)
-    5. Updates database (soft delete by default, hard delete optional)
+    3. Deletes from S3 (raw upload + processed markdown)
+    4. Updates database (soft delete by default, hard delete optional)
 
     Query Parameters:
         hard_delete: If true, hard delete from database (default: false, soft delete)
@@ -382,8 +381,8 @@ async def delete_all_knowledge_endpoint(request: Request = None):
     """
     Delete all files and websites from knowledge base.
     This operation performs a SOFT DELETE (marks as deleted, doesn't remove records):
-    1. Removes all files from Gemini FileSearch store
-    2. Clears all Redis task queues (file_processing, web_crawling)
+    1. Clears all Redis task queues (file_processing, web_crawling)
+    2. Deletes stored knowledge-base files from S3
     3. Marks all file records with status='deleted' (soft delete for audit trail)
     4. Marks all website records with status='deleted' (soft delete for audit trail)
 
@@ -413,10 +412,8 @@ async def delete_all_knowledge_endpoint(request: Request = None):
 
         if result.get("success"):
             logger.info("=" * 80)
-            logger.info(f"✅ [DELETE_ALL_SUCCESS] Knowledge base cleared and FileSearch store recreated")
+            logger.info(f"✅ [DELETE_ALL_SUCCESS] Knowledge base cleared")
             logger.info("=" * 80)
-            logger.info(f"   FileSearch stores deleted: {result.get('filesearch_stores_deleted')}")
-            logger.info(f"   New FileSearch store: {result.get('new_store_name')}")
             logger.info(f"   S3 files deleted: {result.get('s3_files_deleted')}")
             logger.info(f"   Websites marked as deleted: {result.get('websites_marked_deleted')}")
             logger.info(f"   Redis queues cleared: {result.get('redis_queues_cleared')}")
@@ -427,12 +424,10 @@ async def delete_all_knowledge_endpoint(request: Request = None):
             return {
                 "success": True,
                 "message": result.get("message"),
-                "filesearch_stores_deleted": result.get("filesearch_stores_deleted"),
-                "new_store_name": result.get("new_store_name"),
                 "s3_files_deleted": result.get("s3_files_deleted"),
                 "websites_marked_deleted": result.get("websites_marked_deleted"),
                 "redis_queues_cleared": result.get("redis_queues_cleared"),
-                "note": "Database records retained with status='deleted' for audit trail and recovery. FileSearch store is now empty and ready for new content."
+                "note": "Database records retained with status='deleted' for audit trail and recovery. The pgvector-backed knowledge base is now cleared and ready for new content."
             }
         else:
             logger.error("=" * 80)

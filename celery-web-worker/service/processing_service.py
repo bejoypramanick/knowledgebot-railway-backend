@@ -1,19 +1,16 @@
 """
 Website Processing Service for Celery Web Worker
-Handles all website scraping, content extraction, and Gemini FileSearch upload
-with extreme single-responsibility, minimal method size, and value objects
+Handles website scraping, extraction, and pgvector ingestion.
 """
 import asyncio
 import time
 import os
-import tempfile
 from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
 import logging
 import hashlib
 from shared.otel_logger import get_otel_logger
 from urllib.parse import urljoin, urlparse
-from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
 from shared.kreuzberg_integration import process_with_kreuzberg
 from shared.html_cleaner import clean_html_with_trafilatura
@@ -52,7 +49,7 @@ class ProcessingService:
         Main orchestration: Resolve dependencies → Stream pages → Return result
 
         This is the entry point for website scraping. It coordinates the entire pipeline:
-        1. RESOLVE: Look up Gemini FileSearch store and user role (fail-fast approach)
+        1. RESOLVE: Validate request dependencies and user context
         2. STREAM: Process each page (crawl → extract content → upload → record in DB)
         3. RETURN: Build success/error result
 
@@ -91,17 +88,11 @@ class ProcessingService:
         start_time = time.time()
         try:
             # ========== PHASE 1: RESOLVE DEPENDENCIES ==========
-            # Look up critical dependencies BEFORE starting crawl (fail-fast approach).
-            # If FileSearch store doesn't exist, we want to know immediately rather than
-            # after crawling 100 pages.
+            # Resolve access-control context before starting the crawl.
 
             logger.info(f"🚀 [SCRAPING] Starting website processing: {request.website_id}")
             logger.info(f"   URL: {request.url}")
             logger.info(f"   Depth: {request.crawl_config.max_depth}, Max Pages: {request.crawl_config.max_pages}")
-
-            # Resolve Gemini FileSearch store name (used for all page uploads)
-            # Raises exception if store doesn't exist - prevents wasted crawling
-            store_name = await self._resolveFileSearchStore()
 
             # Resolve user role ID for access control
             # Returns None if not found (NULL is allowed in schema)
@@ -114,7 +105,7 @@ class ProcessingService:
                 website_id=request.website_id,
                 root_url=request.url,
                 celery_task_id=request.celery_task_id,
-                store_name=store_name,
+                store_name="pgvector",
                 user_role_id=resolved_user_role_id
             )
 
@@ -282,12 +273,18 @@ class ProcessingService:
                 # Create a mock upload result for backwards compatibility with _recordPageToDB
                 upload_result = UploadResult(
                     document_name=f"vector_db_{job_context.website_id}",
-                    document_uri=f"vector_db_{job_context.website_id}",
-                    mime_type="text/markdown",
-                    confirmed=True
+                    storage_backend_name="pgvector",
+                    uploaded_at=datetime.utcnow(),
+                    storage_document_uri=f"vector_db_{job_context.website_id}",
+                    confirmed=True,
+                    metadata_type="vector_db",
+                    extra_metadata={
+                        "grounding_source": "pgvector",
+                        "retrieval_pipeline": "kreuzberg_rust -> pgvector",
+                    },
                 )
 
-                # Delete processed markdown from S3 (now safely in Gemini FileSearch)
+                # Delete processed markdown from S3 (now safely represented in vector storage)
                 # Check RETAIN_MD_FILE environment variable to decide whether to delete
                 # Note: Manual atomic delete operations will still delete retained files
                 retain_md_file = os.getenv("RETAIN_MD_FILE", "false").lower() == "true"
@@ -662,8 +659,9 @@ class ProcessingService:
                 raise Exception(f"Kreuzberg processing failed for {page_url}: {error_detail}")
 
             markdown_content = kreuzberg_markdown
-            from shared.chunking_service import chunking_service
-            chunks = await chunking_service.chunk_text(markdown_content, html_filename)
+            chunks = kreuzberg_metadata.get("chunks") or []
+            if not chunks:
+                raise Exception(f"Kreuzberg returned no chunks for {page_url}")
 
             for chunk in chunks:
                 if "metadata" not in chunk:
@@ -840,27 +838,7 @@ class ProcessingService:
 
         return page_markdown
 
-    # ==================== UPLOAD LAYER ====================
-
-    async def _resolveFileSearchStore(self) -> str:
-        """Resolve FileSearch store name (fail fast)"""
-        from core.config import settings
-        from core.ai import get_genai_client
-
-        store_display_name = settings.gemini_file_search_store_name
-        if not store_display_name:
-            raise Exception("GEMINI_FILE_SEARCH_STORE_NAME not configured")
-
-        genai_client = get_genai_client()
-        if not genai_client:
-            raise Exception("Gemini client not configured")
-
-        store = get_file_search_store_by_display_name(genai_client, display_name=store_display_name)
-        if not store:
-            raise Exception("FileSearch store not found")
-
-        logger.info(f"✅ Resolved FileSearch store: {store}")
-        return store
+    # ==================== ACCESS LAYER ====================
 
     async def _resolveUserRoleID(self, user_email: str, user_role_id: Optional[str] = None) -> Optional[str]:
         """Resolve user_role_id (allow NULL if not found)"""
@@ -873,183 +851,6 @@ class ProcessingService:
             logger.warning(f"⚠️ No user role found, will use NULL")
 
         return user_role_id
-
-    async def _uploadPageToGemini(
-        self,
-        page_data: PageData,
-        job_context: JobContext
-    ) -> Optional[UploadResult]:
-        """Upload single page to Gemini FileSearch"""
-        from core.ai import get_genai_client
-        import json
-        
-        # Use async client for consistency with polling method
-        genai_client = get_genai_client().aio
-        if not genai_client:
-            raise Exception("Gemini client not configured")
-        
-        # Use markdown content for Gemini FileStore
-        # Prepend source URL so it's embedded in the document text for citation extraction
-        source_header = f"Source URL: {page_data.page_url}\n\n" if page_data.page_url else ""
-        content = source_header + page_data.markdown
-        mime_type = 'text/markdown'
-        temp_suffix = '.md'
-        logger.info(f"📋 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content)} chars (source URL: {page_data.page_url})")
-        
-        # Create temporary file with appropriate suffix
-        fd, temp_file = tempfile.mkstemp(suffix=temp_suffix)
-        try:
-            os.write(fd, content.encode('utf-8'))
-            os.close(fd)
-            
-            metrics = calculate_metrics(content)
-            doc_name = f"page_{job_context.website_id}_{int(time.time())}"
-            logger.info(f"   📤 Uploading: {doc_name} ({metrics.get('file_size_bytes', 0):,} bytes)")
-            
-            operation = await genai_client.file_search_stores.upload_to_file_search_store(
-                file=temp_file,
-                file_search_store_name=job_context.store_name,
-                config=await self._buildGeminiUploadConfig(doc_name, job_context.website_id, page_data.page_url)
-            )
-            
-            if not operation:
-                logger.error(f"   ❌ Failed to create upload operation")
-                return None
-            
-            return await self._waitForGeminiUploadCompletion(operation, job_context, display_name=doc_name)
-        finally:
-            try:
-                os.unlink(temp_file)
-            except:
-                pass
-            await self._deleteTemporaryFile(temp_file)
-
-    async def _buildGeminiUploadConfig(self, doc_name: str, website_id: str, page_url: str) -> Dict:
-        """Build Gemini upload configuration for markdown content"""
-        return {
-            'display_name': doc_name,
-            'mime_type': 'text/markdown',
-            'custom_metadata': [
-                {'key': 'source_type', 'string_value': 'website'},
-                {'key': 'website_id', 'string_value': str(website_id)},
-                {'key': 'page_url', 'string_value': page_url},
-                {'key': 'content_format', 'string_value': 'markdown'}
-            ]
-        }
-
-    async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext, display_name: Optional[str] = None) -> Optional[UploadResult]:
-        """Poll Gemini upload operation until done using async client"""
-        from core.ai import get_genai_client
-
-        # 1. Initialize the ASYNC client
-        genai_client = get_genai_client().aio
-        
-        start_time = time.time()
-        # Increased from 120s to 600s for robust indexing of complex documents
-        max_wait = 600
-        
-        logger.info(f"   ⏳ [GEMINI_UPLOAD] Waiting for indexing... (timeout: {max_wait}s)")
-        
-        # Use explicit tracking for confirmation
-        confirmed_done = False
-        current_op = operation
-        poll_interval = 2.0
-        
-        while True:
-            elapsed = time.time() - start_time
-            if elapsed > max_wait:
-                status = getattr(current_op, 'status', 'unknown') if not isinstance(current_op, str) else 'unknown'
-                logger.error(f"   ❌ [GEMINI_TIMEOUT] Timeout indexing after {elapsed:.0f}s (Status: {status})")
-                return None
-            
-            # Refresh operation status
-            try:
-                # Refresh operation status using the client
-                current_op = await genai_client.operations.get(current_op)
-                logger.info(f"   ⏳ [GEMINI_INDEX...] {elapsed:.0f}s elapsed (Interval: {poll_interval:.1f}s)")
-                
-                # Success check
-                if getattr(current_op, 'done', False):
-                    # Check for errors if operation IS done
-                    op_error = getattr(current_op, 'error', None)
-                    if op_error:
-                        logger.error(f"   ❌ [GEMINI_UPLOAD] Operation failed: {op_error}")
-                        return None
-                        
-                    logger.info(f"   ✅ [GEMINI_UPLOAD] Indexing completed after {elapsed:.0f}s")
-                    confirmed_done = True
-                    break
-                    
-            except Exception as e:
-                logger.warning(f"   ⚠️ [GEMINI_REFRESH_ERR] Error refreshing status: {e}")
-                
-                # Legacy Fallback: If we can't refresh, but significant time has passed (30s),
-                # assume the operation completed and move to extraction. 
-                if elapsed > 30:
-                    logger.info(f"   ℹ️ [GEMINI_FALLBACK] Assuming completion after {elapsed:.0f}s due to persistent refresh errors.")
-                    confirmed_done = False # Not confirmed by API, just assumed
-                    break
-            
-            # Adaptive polling interval (Exponential backoff up to 10s)
-            await asyncio.sleep(poll_interval)
-            poll_interval = min(poll_interval * 1.5, 10.0)
-        
-        # After operation is done/assumed done, we should confirm the file is actually ACTIVE in the store
-        # This addresses the user's request: "after uploading file can we just query the filesearch to confirm that the file status is active"
-        upload_result = await self._extractDocumentNameFromOperation(current_op, job_context.store_name, display_name=display_name, confirmed=confirmed_done)
-        
-        if upload_result and confirmed_done:
-            try:
-                # Query the store to check actual file state
-                logger.info(f"   🔍 [FILE_STATUS] Verifying file status for {upload_result.document_name}...")
-                file_metadata = await genai_client.file_search_stores.get_file(name=upload_result.document_name)
-                
-                # Safer check for state field
-                actual_state = getattr(file_metadata, 'state', None)
-                if actual_state:
-                    state_str = str(actual_state).upper()
-                    logger.info(f"   📊 [FILE_STATUS] Actual state in Gemini: {state_str}")
-                    if 'ACTIVE' not in state_str:
-                        logger.warning(f"   ⚠️ [FILE_STATUS] File is not yet ACTIVE (State: {state_str}). Setting confirmed=False.")
-                        upload_result.confirmed = False
-                    else:
-                        logger.info(f"   ✅ [FILE_STATUS] File is ACTIVE!")
-                        upload_result.confirmed = True
-            except Exception as e:
-                logger.warning(f"   ⚠️ [FILE_STATUS_ERR] Could not verify file status via FileSearch Store: {e}")
-                # We don't fail here, but we mark as unconfirmed to be safe
-                upload_result.confirmed = False
-                
-        return upload_result
-
-    async def _extractDocumentNameFromOperation(self, operation, store_name: str, display_name: Optional[str] = None, confirmed: bool = True) -> Optional[UploadResult]:
-        """Extract document name and URI from operation"""
-        # Handle case where operation is still a string (ID)
-        if isinstance(operation, str):
-            logger.error(f"   ❌ Cannot extract document name from string operation: {operation}")
-            return None
-        
-        # FileSearch upload returns result in response.document_name
-        if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
-            doc_name = operation.response.document_name
-            # Try to get URI if available
-            doc_uri = getattr(operation.response, 'uri', None) if hasattr(operation.response, 'uri') else None
-            
-            logger.info(f"   ✅ FileSearch document: {doc_name}")
-            if doc_uri:
-                logger.info(f"   📎 Document URI: {doc_uri}")
-            
-            return UploadResult(
-                document_name=doc_name,
-                file_search_store_name=store_name,
-                uploaded_at=datetime.utcnow(),
-                gemini_file_uri=doc_uri,
-                display_name=display_name,
-                confirmed=confirmed
-            )
-        
-        logger.error(f"   ❌ Upload failed or invalid response - no document_name in operation.response")
-        return None
 
     async def _deleteTemporaryFile(self, temp_file: str):
         """Clean up temporary file"""
@@ -1094,7 +895,7 @@ class ProcessingService:
             except Exception as tc_err:
                 logger.warning(f"⚠️ [TOKEN_COUNT] Failed to count tokens for {page_data.page_url}: {tc_err}")
 
-            gemini_state = 'completed' if upload_result.confirmed else 'pending'
+                storage_backend_state = 'completed' if upload_result.confirmed else 'pending'
             
             if await self._isSinglePageMode(page_data.page_url, job_context.root_url, crawl_config):
                 logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
@@ -1113,7 +914,7 @@ class ProcessingService:
                     filestore_word_count=filestore_word_count,
                     filestore_token_count=filestore_token_count,
                     md_file_size=len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0,
-                    gemini_state=gemini_state
+                    storage_backend_state=storage_backend_state
                 )
 
                 # Save tables metadata (non-blocking)
@@ -1156,7 +957,7 @@ class ProcessingService:
                     filestore_word_count=filestore_word_count,
                     filestore_token_count=filestore_token_count,
                     md_file_size=len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0,
-                    gemini_state=gemini_state
+                    storage_backend_state=storage_backend_state
                 )
 
                 # Save tables metadata (non-blocking)
@@ -1183,9 +984,9 @@ class ProcessingService:
             child_page_id = await self.scraping_dao.record_child_page(
                 parent_id=job_context.website_id,
                 page_url=page_data.page_url,
-                gemini_file_name=upload_result.document_name,
-                gemini_file_uri=upload_result.gemini_file_uri,
-                file_search_metadata=upload_result.file_search_metadata,
+                storage_document_name=upload_result.document_name,
+                storage_document_uri=upload_result.storage_document_uri,
+                storage_metadata=upload_result.storage_metadata,
                 user_role_id=job_context.user_role_id,
                 file_size=metrics.get('file_size_bytes', 0),
                 char_count=metrics.get('char_count', 0),
@@ -1197,7 +998,7 @@ class ProcessingService:
                 filestore_word_count=filestore_word_count,
                 filestore_token_count=filestore_token_count,
                 md_file_size=len(page_data.markdown.encode('utf-8')) if page_data.markdown else 0,
-                gemini_state=gemini_state
+                storage_backend_state=storage_backend_state
             )
 
             # Save tables metadata for child page (non-blocking)
@@ -1260,28 +1061,28 @@ class ProcessingService:
         filestore_word_count: int = 0,
         filestore_token_count: int = 0,
         md_file_size: int = 0,
-        gemini_state: str = 'completed'
+        storage_backend_state: str = 'completed'
     ) -> bool:
         """Update parent website record with single page data"""
         logger.info(f"💾 [UPDATE_WEBSITE] Updating website {website_id} with page data")
 
         return await self.scraping_dao.update_website_with_page_data(
             website_id=website_id,
-            gemini_file_name=upload_result.document_name,
-            gemini_file_uri=upload_result.gemini_file_uri,
+            storage_document_name=upload_result.document_name,
+            storage_document_uri=upload_result.storage_document_uri,
             file_size=file_size,
             char_count=char_count,
             title=page_data.title,
             description=page_data.description,
             crawl_session_id=page_data.session_id,
-            file_search_metadata=upload_result.file_search_metadata,
+            storage_metadata=upload_result.storage_metadata,
             mark_completed=mark_completed,
             processed_content_s3_key=processed_content_s3_key,
             filestore_char_count=filestore_char_count,
             filestore_word_count=filestore_word_count,
             filestore_token_count=filestore_token_count,
             md_file_size=md_file_size,
-            gemini_state=gemini_state
+            storage_backend_state=storage_backend_state
         )
 
     # ==================== UTILITIES ====================

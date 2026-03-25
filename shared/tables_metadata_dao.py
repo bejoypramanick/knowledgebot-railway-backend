@@ -1,6 +1,6 @@
 """
 Tables Metadata DAO - shared by file worker and web worker.
-Inserts per-table metrics and updates aggregate columns on parent records.
+Inserts per-table metadata rows.
 """
 import json
 from typing import List, Dict, Any, Optional
@@ -17,7 +17,7 @@ async def save_tables_metadata(
     scraped_website_id: Optional[str] = None
 ) -> bool:
     """
-    Insert per-table metadata rows and update aggregate columns on the parent record.
+    Insert per-table metadata rows.
 
     Args:
         tables_metadata: List of dicts from process_extractor_content(), each with:
@@ -76,65 +76,8 @@ async def save_tables_metadata(
                     }
                 )
 
-            # Compute aggregates
-            total_tables = len(tables_metadata)
-            total_rows = sum(m.get("table_row_count_input", 0) for m in tables_metadata)
-            total_chars_in = sum(m.get("table_character_count_input", 0) for m in tables_metadata)
-            total_chars_out = sum(m.get("table_character_count_output", 0) for m in tables_metadata)
-            total_input_tokens = sum(m.get("table_input_token_count", 0) for m in tables_metadata)
-            total_output_tokens = sum(m.get("table_output_token_count", 0) for m in tables_metadata)
-
-            # Update aggregate columns on parent record
-            if file_upload_id:
-                await session.execute(
-                    text("""
-                        UPDATE file_uploads
-                        SET total_tables_count = :total_tables,
-                            total_table_rows_input = :total_rows,
-                            total_table_chars_input = :total_chars_in,
-                            total_table_chars_output = :total_chars_out,
-                            total_table_input_tokens = :total_input_tokens,
-                            total_table_output_tokens = :total_output_tokens,
-                            updated_at = NOW()
-                        WHERE id = :parent_id
-                    """),
-                    {
-                        "parent_id": file_upload_id,
-                        "total_tables": total_tables,
-                        "total_rows": total_rows,
-                        "total_chars_in": total_chars_in,
-                        "total_chars_out": total_chars_out,
-                        "total_input_tokens": total_input_tokens,
-                        "total_output_tokens": total_output_tokens,
-                    }
-                )
-            else:
-                await session.execute(
-                    text("""
-                        UPDATE scraped_websites
-                        SET total_tables_count = :total_tables,
-                            total_table_rows_input = :total_rows,
-                            total_table_chars_input = :total_chars_in,
-                            total_table_chars_output = :total_chars_out,
-                            total_table_input_tokens = :total_input_tokens,
-                            total_table_output_tokens = :total_output_tokens,
-                            updated_at = NOW()
-                        WHERE id = :parent_id
-                    """),
-                    {
-                        "parent_id": scraped_website_id,
-                        "total_tables": total_tables,
-                        "total_rows": total_rows,
-                        "total_chars_in": total_chars_in,
-                        "total_chars_out": total_chars_out,
-                        "total_input_tokens": total_input_tokens,
-                        "total_output_tokens": total_output_tokens,
-                    }
-                )
-
             await session.commit()
-            logger.info(f"✅ [TABLES_META] Saved {total_tables} table records + aggregates for {parent_type}={parent_id}")
-            logger.info(f"   Aggregates: rows={total_rows}, chars_in={total_chars_in}, chars_out={total_chars_out}, tokens_in={total_input_tokens}, tokens_out={total_output_tokens}")
+            logger.info(f"✅ [TABLES_META] Saved {len(tables_metadata)} table records for {parent_type}={parent_id}")
             return True
 
     except Exception as e:

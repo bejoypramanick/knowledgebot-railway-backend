@@ -54,24 +54,28 @@ class PageData:
 class UploadResult:
     """Result of uploading a page to Gemini"""
     document_name: str
-    file_search_store_name: str
+    storage_backend_name: str
     uploaded_at: datetime
-    gemini_file_uri: Optional[str] = None
+    storage_document_uri: Optional[str] = None
     display_name: Optional[str] = None
     confirmed: bool = True
+    metadata_type: str = "vector_db"
+    extra_metadata: Optional[Dict[str, Any]] = None
 
     @property
-    def file_search_metadata(self) -> Dict[str, Any]:
-        """Build FileSearch metadata dict from upload result"""
+    def storage_metadata(self) -> Dict[str, Any]:
+        """Build storage metadata dict from upload result"""
         metadata = {
-            "type": "file_search",
-            "file_search_store_name": self.file_search_store_name,
+            "type": self.metadata_type,
+            "storage_backend_name": self.storage_backend_name,
             "document_name": self.document_name,
-            "gemini_file_uri": self.gemini_file_uri,
+            "storage_document_uri": self.storage_document_uri,
             "uploaded_at": self.uploaded_at.isoformat()
         }
         if self.display_name:
             metadata["display_name"] = self.display_name
+        if self.extra_metadata:
+            metadata.update(self.extra_metadata)
         return metadata
 
     def __repr__(self) -> str:
@@ -156,7 +160,7 @@ class FinalizeRequest:
     page_count: int
     total_size_bytes: int
     total_char_count: int
-    file_search_store_name: str
+    storage_backend_name: str
 
     def __repr__(self) -> str:
         return f"FinalizeRequest(website_id={self.website_id}, pages={self.page_count}, size={self.total_size_bytes}B)"

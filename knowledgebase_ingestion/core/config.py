@@ -22,9 +22,6 @@ class Settings(BaseSettings):
     # Chatbot Configuration
     chatbot_model: str = "gemini-2.5-flash-lite"
 
-    # Gemini FileSearch Store Configuration (required from Railway env)
-    gemini_file_search_store_name: Optional[str] = None  # FileSearch store display name - MUST be set in Railway env
-
     # Railway Storage Configuration (S3-compatible)
     railway_bucket_name: Optional[str] = None  # RAILWAY_BUCKET_NAME (shared bucket for uploads)
     railway_region: Optional[str] = "us-east-1"

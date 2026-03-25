@@ -263,9 +263,9 @@ class ScrapingDAO:
         self,
         parent_id: str,
         page_url: str,
-        gemini_file_name: str = None,
-        gemini_file_uri: str = None,
-        file_search_metadata: Dict[str, Any] = None,
+        storage_document_name: str = None,
+        storage_document_uri: str = None,
+        storage_metadata: Dict[str, Any] = None,
         user_role_id: str = None,
         file_size: int = 0,
         char_count: int = 0,
@@ -277,7 +277,7 @@ class ScrapingDAO:
         filestore_word_count: int = 0,
         filestore_token_count: int = 0,
         md_file_size: int = 0,
-        gemini_state: str = 'pending'
+        storage_backend_state: str = 'pending'
     ) -> Optional[str]:
         """
         Record a child page immediately after it's uploaded to Gemini.
@@ -289,7 +289,7 @@ class ScrapingDAO:
 
         logger.info(f"📄 [CHILD_PAGE_INSERT] Recording child page for parent {parent_id}")
         logger.info(f"   URL: {page_url}")
-        logger.info(f"   Gemini File: {gemini_file_name}")
+        logger.info(f"   Storage Document: {storage_document_name}")
         logger.info(f"   Title: {title}")
 
         # Determine child page type based on URL
@@ -307,7 +307,7 @@ class ScrapingDAO:
         logger.info(f"   Child Type: {child_source_type}")
         
         # Prepare metadata with scraping_config for proper UI classification
-        child_metadata = file_search_metadata or {}
+        child_metadata = storage_metadata or {}
         if 'scraping_config' not in child_metadata:
             child_metadata['scraping_config'] = {}
         child_metadata['scraping_config']['source'] = child_source_type
@@ -315,27 +315,27 @@ class ScrapingDAO:
         query = """
             INSERT INTO scraped_websites (
                 parent_id, original_url, processing_status,
-                gemini_file_name, gemini_file_uri, metadata, depth, user_role_id,
+                storage_document_name, storage_document_uri, metadata, depth, user_role_id,
                 file_size, char_count, title, description, crawl_session_id,
                 pages_scraped, processed_content_s3_key,
                 filestore_char_count, filestore_word_count, filestore_token_count,
-                md_file_size, gemini_state, created_at, updated_at
+                md_file_size, storage_backend_state, created_at, updated_at
             ) VALUES (
                 :parent_id, :page_url, :processing_status,
-                :gemini_file_name, :gemini_file_uri, CAST(:metadata AS jsonb), :depth, :user_role_id,
+                :storage_document_name, :storage_document_uri, CAST(:metadata AS jsonb), :depth, :user_role_id,
                 :file_size, :char_count, :title, :description, :crawl_session_id,
                 :pages_scraped, :processed_content_s3_key,
                 :filestore_char_count, :filestore_word_count, :filestore_token_count,
-                :md_file_size, :gemini_state, NOW(), NOW()
+                :md_file_size, :storage_backend_state, NOW(), NOW()
             ) RETURNING id
         """
 
         params = {
             "parent_id": parent_id,
             "page_url": page_url,
-            "processing_status": 'completed' if gemini_file_name else 'processing',
-            "gemini_file_name": gemini_file_name,
-            "gemini_file_uri": gemini_file_uri,
+            "processing_status": 'completed' if storage_document_name else 'processing',
+            "storage_document_name": storage_document_name,
+            "storage_document_uri": storage_document_uri,
             "metadata": json.dumps(child_metadata),
             "depth": 1,
             "user_role_id": user_role_id,
@@ -350,7 +350,7 @@ class ScrapingDAO:
             "filestore_word_count": filestore_word_count,
             "filestore_token_count": filestore_token_count,
             "md_file_size": md_file_size,
-            "gemini_state": gemini_state
+            "storage_backend_state": storage_backend_state
         }
 
         try:
@@ -393,12 +393,12 @@ class ScrapingDAO:
         page_count: int,
         total_size_bytes: int,
         total_char_count: int,
-        file_search_metadata: Dict[str, Any],
+        storage_metadata: Dict[str, Any],
         filestore_char_count: int = 0,
         filestore_word_count: int = 0,
         filestore_token_count: int = 0,
         md_file_size: int = 0,
-        gemini_state: str = 'completed'
+        storage_backend_state: str = 'completed'
     ) -> bool:
         """
         Update parent website record with aggregate stats after scraping completes.
@@ -423,7 +423,7 @@ class ScrapingDAO:
                 filestore_word_count = :filestore_word_count,
                 filestore_token_count = :filestore_token_count,
                 md_file_size = :md_file_size,
-                gemini_state = :gemini_state,
+                storage_backend_state = :storage_backend_state,
                 processing_status = 'completed',
                 updated_at = NOW()
             WHERE id = :website_id
@@ -431,14 +431,14 @@ class ScrapingDAO:
 
         params = {
             "page_count": page_count,
-            "metadata": json.dumps(file_search_metadata),
+            "metadata": json.dumps(storage_metadata),
             "file_size": total_size_bytes,
             "char_count": total_char_count,
             "filestore_char_count": filestore_char_count,
             "filestore_word_count": filestore_word_count,
             "filestore_token_count": filestore_token_count,
             "md_file_size": md_file_size,
-            "gemini_state": gemini_state,
+            "storage_backend_state": storage_backend_state,
             "website_id": website_id
         }
 
@@ -459,21 +459,21 @@ class ScrapingDAO:
     async def update_website_with_page_data(
         self,
         website_id: str,
-        gemini_file_name: str,
-        gemini_file_uri: str,
+        storage_document_name: str,
+        storage_document_uri: str,
         file_size: int,
         char_count: int,
         title: str,
         description: str,
         crawl_session_id: str,
-        file_search_metadata: Dict[str, Any],
+        storage_metadata: Dict[str, Any],
         mark_completed: bool = True,
         processed_content_s3_key: str = None,
         filestore_char_count: int = 0,
         filestore_word_count: int = 0,
         filestore_token_count: int = 0,
         md_file_size: int = 0,
-        gemini_state: str = 'completed'
+        storage_backend_state: str = 'completed'
     ) -> bool:
         """
         Update parent website record with single page data.
@@ -501,9 +501,9 @@ class ScrapingDAO:
         if mark_completed:
             query = """
                 UPDATE scraped_websites
-                SET gemini_file_name = :gemini_file_name,
-                    gemini_file_uri = :gemini_file_uri,
-                    gemini_state = :gemini_state,
+                SET storage_document_name = :storage_document_name,
+                    storage_document_uri = :storage_document_uri,
+                    storage_backend_state = :storage_backend_state,
                     file_size = :file_size,
                     char_count = :char_count,
                     title = :title,
@@ -522,12 +522,12 @@ class ScrapingDAO:
             """
         else:
             # Don't update processing_status - keep it as 'processing' for multi-page crawls
-            # But DO update gemini_state for each page that successfully uploaded
+            # But DO update storage backend state for each page that successfully uploaded
             query = """
                 UPDATE scraped_websites
-                SET gemini_file_name = :gemini_file_name,
-                    gemini_file_uri = :gemini_file_uri,
-                    gemini_state = :gemini_state,
+                SET storage_document_name = :storage_document_name,
+                    storage_document_uri = :storage_document_uri,
+                    storage_backend_state = :storage_backend_state,
                     file_size = :file_size,
                     char_count = :char_count,
                     title = :title,
@@ -546,21 +546,21 @@ class ScrapingDAO:
             """
 
         params = {
-            "gemini_file_name": gemini_file_name,
-            "gemini_file_uri": gemini_file_uri,
+            "storage_document_name": storage_document_name,
+            "storage_document_uri": storage_document_uri,
             "file_size": file_size,
             "char_count": char_count,
             "title": title,
             "description": description,
             "crawl_session_id": crawl_session_id,
             "pages_scraped": 1,
-            "metadata": json.dumps(file_search_metadata),
+            "metadata": json.dumps(storage_metadata),
             "processed_content_s3_key": processed_content_s3_key,
             "filestore_char_count": filestore_char_count,
             "filestore_word_count": filestore_word_count,
             "filestore_token_count": filestore_token_count,
             "md_file_size": md_file_size,
-            "gemini_state": gemini_state,
+            "storage_backend_state": storage_backend_state,
             "website_id": website_id
         }
 

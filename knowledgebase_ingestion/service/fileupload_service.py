@@ -320,16 +320,14 @@ async def validate_file_upload(file: UploadFile, file_size: int, replace_existin
 
 async def delete_all_knowledge() -> Dict[str, Any]:
     """
-    Completely clear the knowledge base by deleting and recreating the FileSearch store.
+    Completely clear the knowledge base while preserving audit rows.
 
     Operations performed:
-    1. Delete the entire Gemini FileSearch store (removes all documents)
-    2. Create a new FileSearch store (ready for new uploads)
-    3. Delete all raw Gemini files
-    4. Delete all files from S3 storage
-    5. Clears Redis task queues (file_processing, web_crawling)
-    6. Marks all file records with status='deleted' (soft delete)
-    7. Marks all website records with status='deleted' (soft delete)
+    1. Stop running ingestion tasks
+    2. Delete all knowledge-base files from S3 storage
+    3. Clear Redis/Celery queues
+    4. Mark all file records with status='deleted' (soft delete)
+    5. Mark all website records with status='deleted' (soft delete)
 
     Database records are retained with status='deleted' for:
     - Audit trail and compliance
@@ -342,15 +340,11 @@ async def delete_all_knowledge() -> Dict[str, Any]:
 
     deleted_websites = 0
     s3_files_deleted = 0
-    new_store_name = None
     errors = []
 
     try:
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text
-        from knowledgebase_ingestion.core.ai import get_genai_client
-        from shared.file_search_store_manager import FileSearchStoreManager
-
         # Step 1: Stop all running tasks FIRST
         logger.info("🔴 [TASK_CONTROL] Stopping all Celery tasks...")
         try:
@@ -365,68 +359,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
 
         # Step 1b: Removed docling RQ jobs cancellation as Kreuzberg doesn't use RQ
 
-        # Step 2: Delete ALL FileSearch stores matching our display name
-        logger.info("🤖 [FILESEARCH_DELETE_ALL] Deleting ALL FileSearch stores with our display name...")
-        filesearch_stores_deleted = 0
-        deleted_store_names = []
-
-        try:
-            genai_client = get_genai_client()
-            if not genai_client:
-                logger.error("   ❌ Gemini client not available")
-                errors.append("Gemini client not available")
-            else:
-                try:
-                    # Delete ALL stores matching our display name pattern
-                    from knowledgebase_ingestion.core.config import settings
-                    base_display_name = settings.gemini_file_search_store_name or "knowledgebot-search-store"
-                    
-                    deletion_result = FileSearchStoreManager.delete_all_stores_with_display_name(
-                        genai_client, 
-                        base_display_name=base_display_name
-                    )
-                    
-                    if deletion_result["success"]:
-                        filesearch_stores_deleted = deletion_result["stores_deleted"]
-                        deleted_store_names = deletion_result["deleted_store_names"]
-                        logger.info(f"   ✅ Successfully deleted {filesearch_stores_deleted} FileSearch stores")
-                        for store_name in deleted_store_names:
-                            logger.info(f"      - Deleted: {store_name}")
-                        
-                        # Create a new FileSearch store with the display name
-                        logger.info(f"🔨 [FILESEARCH_CREATE] Creating new FileSearch store: {base_display_name}")
-                        try:
-                            new_store = genai_client.file_search_stores.create(
-                                config={'display_name': base_display_name}
-                            )
-                            new_store_name = new_store.name
-                            logger.info(f"   ✅ Created new FileSearch store: {new_store_name}")
-                        except Exception as create_err:
-                            logger.error(f"   ❌ Error creating new FileSearch store: {create_err}")
-                            import traceback
-                            logger.error(f"   Traceback: {traceback.format_exc()}")
-                            errors.append(f"FileSearch store creation failed: {create_err}")
-                    else:
-                        logger.error(f"   ❌ Failed to delete some stores: {deletion_result['errors']}")
-                        errors.extend(deletion_result['errors'])
-                        
-                except Exception as delete_err:
-                    logger.error(f"   ❌ Error in FileSearch stores deletion: {delete_err}")
-                    import traceback
-                    logger.error(f"   Traceback: {traceback.format_exc()}")
-                    errors.append(f"FileSearch stores deletion failed: {delete_err}")
-        except Exception as e:
-            logger.error(f"❌ [FILESEARCH_DELETE_ALL_ERROR] Unexpected error: {e}")
-            import traceback
-            logger.error(f"   Traceback: {traceback.format_exc()}")
-            errors.append(f"FileSearch stores deletion failed: {e}")
-
-        # Step 1b: Skip raw Gemini file deletion - already deleted with FileSearch store
-        # When we delete the FileSearch store above, all documents inside are automatically deleted
-        # No need to delete individual raw files
-        logger.info("ℹ️  [GEMINI_RAW_DELETE] Skipping raw file deletion - already deleted with FileSearch store")
-
-        # Step 3: Delete all files from S3 (EXCEPT widget configuration images)
+        # Step 2: Delete all files from S3 (EXCEPT widget configuration images)
         logger.info("🪣 [S3_DELETE] Deleting all knowledge base files from S3 (excluding widget images)...")
         s3_files_deleted = 0
         try:
@@ -470,7 +403,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [S3_DELETE_ERROR] Error deleting files from S3: {e}")
             errors.append(f"S3 deletion failed: {e}")
 
-        # Step 4: Mark all files as deleted in database (soft delete - don't remove records)
+        # Step 3: Mark all files as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
         try:
             async with get_db_session() as session:
@@ -498,7 +431,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [DB_UPDATE_FILES_ERROR] Error marking files as deleted: {e}")
             errors.append(f"File status update failed: {e}")
 
-        # Step 5: Mark all websites as deleted in database (soft delete - don't remove records)
+        # Step 4: Mark all websites as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_WEBSITES] Marking all websites as deleted in database...")
         try:
             async with get_db_session() as session:
@@ -519,14 +452,9 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info("=" * 80)
         logger.info("✅ [DELETE_ALL_COMPLETE] Knowledge base clear completed")
         logger.info("=" * 80)
-        logger.info(f"📊 [RESULT] FileSearch stores deleted: {filesearch_stores_deleted}")
-        logger.info(f"📊 [RESULT] New FileSearch store created: {new_store_name}")
         logger.info(f"📊 [RESULT] Files deleted from S3: {s3_files_deleted}")
         logger.info(f"📊 [RESULT] Websites marked as deleted: {deleted_websites}")
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
-        logger.info(f"📊 [RESULT] FileSearch stores deleted: {filesearch_stores_deleted}")
-        logger.info(f"📊 [RESULT] Deleted store names: {deleted_store_names}")
-        logger.info(f"📊 [RESULT] New FileSearch store created: {new_store_name}")
 
         if errors:
             logger.warning(f"⚠️  [ERRORS] {len(errors)} error(s) occurred:")
@@ -534,14 +462,11 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                 logger.warning(f"   - {error}")
 
         return {
-            "success": len(errors) == 0 and filesearch_stores_deleted > 0 and new_store_name is not None,
-            "message": f"Successfully deleted {filesearch_stores_deleted} FileSearch stores and created new store" if (len(errors) == 0 and filesearch_stores_deleted > 0 and new_store_name) else "Knowledge base cleared with errors",
-            "filesearch_stores_deleted": filesearch_stores_deleted,
+            "success": len(errors) == 0,
+            "message": "Knowledge base cleared successfully" if len(errors) == 0 else "Knowledge base cleared with errors",
             "s3_files_deleted": s3_files_deleted,
             "websites_marked_deleted": deleted_websites,
             "redis_queues_cleared": 2,
-            "deleted_store_names": deleted_store_names,
-            "new_store_name": new_store_name,
             "errors": errors if errors else None
         }
 
@@ -553,10 +478,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         return {
             "success": False,
             "message": f"Error clearing knowledge base: {str(e)}",
-            "filesearch_stores_deleted": 0,
             "s3_files_deleted": 0,
             "websites_marked_deleted": 0,
-            "new_store_name": None,
             "errors": [str(e)]
         }
-

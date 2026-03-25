@@ -23,9 +23,6 @@ class Settings(BaseSettings):
     # Chatbot Configuration
     chatbot_model: str = "gemini-2.5-flash-lite"
 
-    # Gemini FileSearch Store Configuration (required from Railway env)
-    gemini_file_search_store_name: Optional[str] = None  # FileSearch store display name - MUST be set in Railway env
-
     # Redis Configuration (used by celery_app.py to connect to Celery broker)
     file_redis_url: Optional[str] = None  # FILE_REDIS_URL from Railway (required)
 

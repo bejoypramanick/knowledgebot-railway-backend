@@ -48,9 +48,9 @@ class FileUploadDAO:
     async def update_file_with_processing_data(
         self,
         file_id: str,
-        gemini_file_name: str,
-        gemini_file_uri: str,
-        gemini_state: str,
+        storage_document_name: str,
+        storage_document_uri: str,
+        storage_backend_state: str,
         file_size: int,
         char_count: int,
         sha256_hash: str,
@@ -75,16 +75,16 @@ class FileUploadDAO:
         Returns: True on success, False on failure
         """
         logger.info(f"💾 [UPDATE_FILE_DATA] Updating file {file_id} with processing data")
-        logger.info(f"   Gemini File: {gemini_file_name}")
+        logger.info(f"   Storage Document: {storage_document_name}")
         logger.info(f"   File Size: {file_size:,} bytes")
         logger.info(f"   Char Count: {char_count:,}")
         logger.info(f"   Processed by Extractor: {processed_by_extractor}")
 
         query = """
             UPDATE file_uploads
-            SET gemini_file_name = :gemini_file_name,
-                gemini_file_uri = :gemini_file_uri,
-                gemini_state = :gemini_state,
+            SET storage_document_name = :storage_document_name,
+                storage_document_uri = :storage_document_uri,
+                storage_backend_state = :storage_backend_state,
                 file_size = :file_size,
                 char_count = :char_count,
                 sha256_hash = :sha256_hash,
@@ -107,9 +107,9 @@ class FileUploadDAO:
         """
 
         params = {
-            "gemini_file_name": gemini_file_name,
-            "gemini_file_uri": gemini_file_uri,
-            "gemini_state": gemini_state,
+            "storage_document_name": storage_document_name,
+            "storage_document_uri": storage_document_uri,
+            "storage_backend_state": storage_backend_state,
             "file_size": file_size,
             "char_count": char_count,
             "sha256_hash": sha256_hash,
@@ -259,13 +259,13 @@ class FileUploadDAO:
         original_filename: str,
         file_display_name: str,
         file_ext: str,
-        gemini_file_name: str,
+        storage_document_name: str,
         file_size: int,
         sha256_hash: str,
         final_state: str,
-        gemini_processed_at: Any,
+        storage_processed_at: Any,
         mime_type: str,
-        file_search_metadata: Optional[Dict[str, Any]] = None,
+        storage_metadata: Optional[Dict[str, Any]] = None,
         char_count: int = 0,
         user_role_id: Optional[str] = None
     ) -> Optional[str]:
@@ -277,11 +277,11 @@ class FileUploadDAO:
 
             query = """INSERT INTO file_uploads
                        (user_role_id, original_filename, display_name, file_extension,
-                        mime_type, file_size, sha256_hash, gemini_file_name, processing_status,
+                        mime_type, file_size, sha256_hash, storage_document_name, processing_status,
                         gemini_processed_at, metadata, char_count, created_at)
                        VALUES (:user_role_id, :original_filename, :display_name, :file_extension,
-                        :mime_type, :file_size, :sha256_hash, :gemini_file_name, :processing_status,
-                        :gemini_processed_at, :metadata, :char_count, NOW())
+                        :mime_type, :file_size, :sha256_hash, :storage_document_name, :processing_status,
+                        :storage_processed_at, :metadata, :char_count, NOW())
                        RETURNING id"""
 
             params = {
@@ -292,10 +292,10 @@ class FileUploadDAO:
                 "mime_type": mime_type,
                 "file_size": file_size,
                 "sha256_hash": sha256_hash,
-                "gemini_file_name": gemini_file_name,
+                "storage_document_name": storage_document_name,
                 "processing_status": final_state,
-                "gemini_processed_at": gemini_processed_at,
-                "metadata": json.dumps(file_search_metadata) if file_search_metadata else None,
+                "storage_processed_at": storage_processed_at,
+                "metadata": json.dumps(storage_metadata) if storage_metadata else None,
                 "char_count": char_count
             }
 
@@ -310,7 +310,7 @@ class FileUploadDAO:
 
     async def get_file_metadata_for_deletion(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file metadata for deletion operations (from file_uploads table)."""
-        query = "SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = :file_id"
+        query = "SELECT storage_document_name, original_filename, metadata FROM file_uploads WHERE id = :file_id"
         try:
             async with get_db_session() as session:
                 record = (await session.execute(text(query), {"file_id": file_id})).fetchone()

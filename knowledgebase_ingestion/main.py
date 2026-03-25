@@ -31,14 +31,8 @@ from knowledgebase_ingestion.core.utils import (log_endpoint_request,
                           register_fastapi_exception_handlers,
                           setup_global_exception_logging)
 from shared.middleware import CorrelationIDMiddleware
-from shared.file_search import get_file_search_store_by_display_name
 
 setup_global_exception_logging("knowledgebase_ingestion")
-
-# Global variable to cache resolved FileSearch store ID
-# Only initialize if not already set (to prevent re-initialization on module reload)
-if '_resolved_store_id' not in globals():
-    _resolved_store_id = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -91,29 +85,7 @@ async def lifespan(app: FastAPI):
         else:
              logger.warning("⚠️ Gemini client failed to initialize")
 
-        # Note: FileSearch store is created by API Gateway during startup
-        # Read display_name from environment variable and look it up
-        store_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
-        logger.info(f"📂 Looking for FileSearch store by display_name: {store_display_name}")
-
-        # Lookup store by display name using shared utility
-        global _resolved_store_id
-        try:
-            genai_client = get_genai_client()
-            if genai_client:
-                _resolved_store_id = get_file_search_store_by_display_name(
-                    genai_client,
-                    display_name=store_display_name
-                )
-                if _resolved_store_id:
-                    logger.info(f"✅ Resolved FileSearch store ID: {_resolved_store_id}")
-                else:
-                    logger.error(f"❌ FileSearch store not found with display_name: {store_display_name}")
-                    logger.error("   Please ensure API Gateway has initialized FileSearch stores")
-            else:
-                logger.error("❌ Gemini client not available for FileSearch lookup")
-        except Exception as lookup_error:
-            logger.error(f"❌ Error looking up FileSearch store: {lookup_error}")
+        logger.info("📚 Knowledge base uses pgvector storage; no legacy search-store lookup required")
 
         # Warm Redis UI cache (DB7) for KB screen
         try:

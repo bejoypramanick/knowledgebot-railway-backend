@@ -67,13 +67,13 @@ class FileDAO:
         query = """
             INSERT INTO file_uploads (
                 user_role_id, original_filename, display_name, file_size,
-                mime_type, processing_status, gemini_file_name, gemini_file_uri,
-                gemini_state, sha256_hash,
+                mime_type, processing_status, storage_document_name, storage_document_uri,
+                storage_backend_state, sha256_hash,
                 metadata, created_at
             ) VALUES (
                 :user_role_id, :original_filename, :display_name, :file_size,
-                :mime_type, :processing_status, :gemini_file_name, :gemini_file_uri,
-                :gemini_state, :sha256_hash,
+                :mime_type, :processing_status, :storage_document_name, :storage_document_uri,
+                :storage_backend_state, :sha256_hash,
                 CAST(:metadata AS jsonb), NOW()
             ) RETURNING id
         """
@@ -84,11 +84,11 @@ class FileDAO:
             "file_size": record_data.get('size_bytes') or record_data.get('file_size'),
             "mime_type": record_data.get('mime_type'),
             "processing_status": record_data.get('processing_status'),
-            "gemini_file_name": record_data.get('gemini_file_name'),
-            "gemini_file_uri": record_data.get('gemini_file_uri'),
-            "gemini_state": record_data.get('gemini_state'),
+            "storage_document_name": record_data.get('storage_document_name'),
+            "storage_document_uri": record_data.get('storage_document_uri'),
+            "storage_backend_state": record_data.get('storage_backend_state'),
             "sha256_hash": record_data.get('sha256_hash'),
-            "metadata": record_data.get('file_search_metadata') or record_data.get('metadata', '{}'),
+            "metadata": record_data.get('storage_metadata') or record_data.get('metadata', '{}'),
         }
         try:
             logger.log_db_operation(query, params)

@@ -12,6 +12,7 @@ sqlalchemy==2.0.23
 pydantic>=2.7.0
 pydantic-settings>=2.3.0
 google-genai>=1.60.0
+kreuzberg[all]
 python-multipart==0.0.6
 httpx==0.28.1
 aiofiles>=24.0.0

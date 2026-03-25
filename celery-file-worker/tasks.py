@@ -34,7 +34,7 @@ def process_file_upload_task(
     - Download file from S3
     - File validation (extension, MIME type, size)
     - Format conversion (HTML→Markdown, PDF→Markdown)
-    - Gemini FileSearch upload
+    - pgvector ingestion
     - Database metadata recording
     - Delete from S3
     """
