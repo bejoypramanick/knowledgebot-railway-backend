@@ -634,7 +634,7 @@ class ProcessingService:
         if not html_upload_success:
             raise Exception(f"Failed to upload HTML to S3 for {page_url}")
 
-        logger.info(f"🔗 [KREUZBERG] Preparing verified presigned URL for temp HTML: {html_s3_key}")
+        logger.info(f"🔍 [KREUZBERG] Verifying temp HTML exists before queueing extraction: {html_s3_key}")
         success, result = s3_file_storage.generate_presigned_url(
             html_s3_key,
             expiration=3600,
@@ -645,13 +645,11 @@ class ProcessingService:
                 await s3_file_storage.delete_file(html_s3_key)
             except Exception:
                 pass
-            raise Exception(f"Failed to generate verified presigned URL for temp HTML {html_s3_key}: {result}")
-
-        presigned_url = result
+            raise Exception(f"Failed to verify temp HTML {html_s3_key} before extraction: {result}")
 
         try:
             kreuzberg_markdown, kreuzberg_metadata = await process_with_kreuzberg(
-                presigned_url=presigned_url,
+                s3_key=html_s3_key,
                 original_filename=html_filename,
                 mime_type="text/html",
                 worker_type="web",
@@ -801,16 +799,16 @@ class ProcessingService:
                 logger.error(f"❌ [KREUZBERG_EMBEDDED] Failed to upload {filename} to S3")
                 return None
 
-            # 2. Generate presigned URL
-            url_success, presigned_url = s3_file_storage.generate_presigned_url(s3_key)
-            if not url_success:
-                logger.error(f"❌ [KREUZBERG_EMBEDDED] Failed to generate presigned URL for {filename}")
+            # 2. Verify object exists before queueing extraction
+            verify_success, verify_result = s3_file_storage.generate_presigned_url(s3_key, verify_exists=True)
+            if not verify_success:
+                logger.error(f"❌ [KREUZBERG_EMBEDDED] Failed to verify temp S3 object for {filename}: {verify_result}")
                 await s3_file_storage.delete_file(s3_key)
                 return None
 
             # 3. Process with Kreuzberg
             markdown_content, _ = await process_with_kreuzberg(
-                presigned_url=presigned_url,
+                s3_key=s3_key,
                 original_filename=filename,
                 mime_type=mime_type,
                 worker_type="web"

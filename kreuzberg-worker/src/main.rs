@@ -25,7 +25,7 @@ struct ExtractionJob {
     job_id: String,
     document_id: String,
     worker_type: String,
-    presigned_url: String,
+    s3_key: String,
     artifact_prefix: String,
     #[serde(default = "default_result_queue")]
     reply_channel: String,
@@ -197,7 +197,7 @@ async fn handle_job(state: &AppState, job: ExtractionJob) -> Result<()> {
 }
 
 async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<ExtractionResult> {
-    let file_bytes = download_from_presigned_url(state, &job.presigned_url).await?;
+    let file_bytes = download_from_s3(state, &job.s3_key).await?;
     let extraction = extract_and_chunk(&file_bytes).await?;
 
     let markdown_key = upload_bytes(
@@ -258,18 +258,22 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
     })
 }
 
-async fn download_from_presigned_url(state: &AppState, presigned_url: &str) -> Result<Vec<u8>> {
+async fn download_from_s3(state: &AppState, s3_key: &str) -> Result<Vec<u8>> {
     let response = state
-        .http_client
-        .get(presigned_url)
+        .s3_client
+        .get_object()
+        .bucket(&state.bucket_name)
+        .key(s3_key)
         .send()
         .await
-        .context("failed to download presigned url")?
-        .error_for_status()
-        .context("presigned url returned error status")?;
+        .with_context(|| format!("failed to download object from S3: {s3_key}"))?;
 
-    let body = response.bytes().await.context("failed to read response body")?;
-    Ok(body.to_vec())
+    let body = response
+        .body
+        .collect()
+        .await
+        .context("failed to read S3 response body")?;
+    Ok(body.into_bytes().to_vec())
 }
 
 struct ExtractionArtifacts {

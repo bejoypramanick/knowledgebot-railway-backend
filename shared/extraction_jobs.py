@@ -24,7 +24,7 @@ class ExtractionJob:
     job_id: str
     document_id: str
     worker_type: str
-    presigned_url: str
+    s3_key: str
     artifact_prefix: str
     reply_channel: str = "kreuzberg_extraction_results"
     created_at: str = field(default_factory=_utc_now)
@@ -38,7 +38,7 @@ class ExtractionJob:
         *,
         document_id: str,
         worker_type: str,
-        presigned_url: str,
+        s3_key: str,
         artifact_prefix: str,
         reply_channel: str = "kreuzberg_extraction_results",
     ) -> "ExtractionJob":
@@ -46,7 +46,7 @@ class ExtractionJob:
             job_id=str(uuid.uuid4()),
             document_id=document_id,
             worker_type=worker_type,
-            presigned_url=presigned_url,
+            s3_key=s3_key,
             artifact_prefix=artifact_prefix,
             reply_channel=reply_channel,
         )

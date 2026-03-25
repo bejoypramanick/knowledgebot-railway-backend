@@ -42,7 +42,7 @@ def _json_safe_value(value: Any) -> Any:
 
 
 async def process_with_kreuzberg(
-    presigned_url: str,
+    s3_key: str,
     original_filename: str,
     mime_type: str,
     worker_type: str = "file",
@@ -65,7 +65,7 @@ async def process_with_kreuzberg(
         job = client.create_job(
             document_id=document_id,
             worker_type=worker_type,
-            presigned_url=presigned_url,
+            s3_key=s3_key,
             artifact_prefix=artifact_prefix,
             reply_channel=reply_channel,
         )

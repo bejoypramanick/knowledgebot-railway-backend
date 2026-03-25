@@ -21,14 +21,14 @@ class ExtractionWorkerClient:
         *,
         document_id: str,
         worker_type: str,
-        presigned_url: str,
+        s3_key: str,
         artifact_prefix: str,
         reply_channel: str = "kreuzberg_extraction_results",
     ) -> Dict[str, Any]:
         job = ExtractionJob.new(
             document_id=document_id,
             worker_type=worker_type,
-            presigned_url=presigned_url,
+            s3_key=s3_key,
             artifact_prefix=artifact_prefix,
             reply_channel=reply_channel,
         )
