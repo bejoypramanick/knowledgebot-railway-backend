@@ -830,18 +830,37 @@ class StreamingService:
                         msg_type = type(msg).__name__
                         logger.info(f"📌 Message {i}: {msg_type}")
 
-                        # Log tool calls
+                        # Log tool calls and grounding results
                         if hasattr(msg, 'parts'):
                             for j, part in enumerate(msg.parts):
                                 part_type = type(part).__name__
 
-                                # Detect tool calls
-                                if hasattr(part, 'tool_name'):
+                                # Detect & log tool CALLS (the query sent to FileSearch)
+                                if isinstance(part, BuiltinToolCallPart):
                                     tool_name = getattr(part, 'tool_name', 'unknown')
                                     tool_calls_made.append(tool_name)
+                                    tool_args = getattr(part, 'args', {})
                                     logger.info(f"   ✅ Tool called: {tool_name}")
+                                    logger.info(f"   🔍 [FILESEARCH_QUERY] Args: {tool_args}")
 
-                                # Log text content
+                                # Detect & log tool RETURNS (the actual FileSearch grounding content)
+                                elif isinstance(part, BuiltinToolReturnPart):
+                                    tool_name = getattr(part, 'tool_name', 'unknown')
+                                    content = getattr(part, 'content', '')
+                                    logger.info("=" * 100)
+                                    logger.info(f"📚 [RAG_GROUNDING] FileSearch return from tool: {tool_name}")
+                                    logger.info(f"📚 [RAG_GROUNDING] Content length: {len(str(content))} chars")
+                                    logger.info("=" * 100)
+                                    # Log full grounding content in chunks to avoid OTEL truncation
+                                    content_str = str(content)
+                                    chunk_size = 2000
+                                    total_chunks = (len(content_str) + chunk_size - 1) // chunk_size
+                                    for chunk_idx in range(total_chunks):
+                                        chunk = content_str[chunk_idx * chunk_size:(chunk_idx + 1) * chunk_size]
+                                        logger.info(f"📚 [RAG_GROUNDING] [{chunk_idx + 1}/{total_chunks}]: {chunk}")
+                                    logger.info("=" * 100)
+
+                                # Log text content (model's final answer)
                                 elif part_type == 'TextPart' and hasattr(part, 'content'):
                                     content = getattr(part, 'content', '')
                                     preview = content[:200] if len(content) > 200 else content
@@ -853,6 +872,7 @@ class StreamingService:
                         logger.warning("⚠️  WARNING: This is a follow-up (history exists) but NO tools were called!")
                         logger.warning("⚠️  Expected: FileSearch should have been used")
                     logger.info("=" * 100)
+
 
                     # Extract assistant response from all_messages
                     if True:
