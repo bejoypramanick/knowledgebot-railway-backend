@@ -120,13 +120,13 @@ async fn build_state() -> Result<AppState> {
 
     let creds = Credentials::new(access_key, secret_key, None, None, "railway-storage");
     let shared_config = aws_config::defaults(BehaviorVersion::latest())
-        .region(Region::new(region))
+        .region(Region::new(region.clone()))
         .credentials_provider(creds)
         .load()
         .await;
 
     let s3_config = aws_sdk_s3::config::Builder::from(&shared_config)
-        .endpoint_url(endpoint_url)
+        .endpoint_url(endpoint_url.clone())
         .force_path_style(true)
         .build();
 
