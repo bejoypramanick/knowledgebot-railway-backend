@@ -215,5 +215,12 @@ class SessionStateManager:
         state['last_activity'] = time.time()
         return state
 
+    def set_tool_used(self, session_id: str, tool_name: str):
+        """Record that a tool was used in this session."""
+        state = self.get_session_state(session_id)
+        if 'tools_used' not in state:
+            state['tools_used'] = set()
+        state['tools_used'].add(tool_name)
+
 # Global session manager instance
 session_state_manager = SessionStateManager()
