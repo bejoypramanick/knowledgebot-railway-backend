@@ -196,6 +196,12 @@ async def process_with_kreuzberg(
             
         result = response.json()
             
+        # 3. Parse and normalize response
+        # Kreuzberg returns an object with 'content' (markdown) and 'tables' (structured data)
+        # If it returns a list, take the first element (the only file we sent)
+        if isinstance(result, list) and len(result) > 0:
+            result = result[0]
+            
         # Debug logging for empty chunks
         if not result.get("chunks"):
             logger.warning(f"⚠️ [KREUZBERG_DEBUG] No chunks returned. Keys in result: {list(result.keys())}")
@@ -204,12 +210,6 @@ async def process_with_kreuzberg(
             logger.info(f"   Full Result Structure: {json.dumps({k: str(v)[:100] for k, v in result.items()}, indent=2)}")
             
         processing_time_ms = int((time.time() - start_time) * 1000)
-        
-        # 3. Parse and normalize response
-        # Kreuzberg returns an object with 'content' (markdown) and 'tables' (structured data)
-        # It may also now return 'chunks' with text and embeddings
-        if isinstance(result, list) and len(result) > 0:
-            result = result[0]
             
         markdown_content = result.get("content", "")
         if not markdown_content and "text" in result:
