@@ -154,27 +154,29 @@ async def process_with_kreuzberg(
                 ('files', (original_filename, file_bytes, mime_type))
             ]
             
-            # 2026 Robust Extraction Config
+            # 1. Robust Extraction Config (OCR and Layout logic)
             config_payload = {
-                "layout_detection": "accurate", # Use ONNX-based deep learning for tables/headers
-                "pdf_hierarchy": True,         # Detect semantic levels (title, section, etc.)
-                "language_detection": {"enabled": True}, # Better multilingual support
-                "enable_quality_processing": True,      # Normalization and whitespace cleanup
-                "extract_tables": True,        # Explicitly ensure table recovery
-                "chunking": {                  # Also include chunking in config for library consistency
-                    "strategy": "semantic",
-                    "max_characters": 1000,
-                    "overlap": 200,
-                    "threshold": 0.85,
-                    "embedding_model": "accurate",
-                    "enabled": True
-                }
+                "layout_detection": "accurate",
+                "pdf_hierarchy": True,
+                "language_detection": {"enabled": True},
+                "enable_quality_processing": True,
+                "extract_tables": True
+            }
+            
+            # 2. Semantic Strategy (Direct field prioritized by Rust /extract)
+            semantic_chunking = {
+                "strategy": "semantic",
+                "max_characters": 1000,
+                "overlap": 200,
+                "threshold": 0.85,
+                "embedding_model": "accurate", # 'accurate' uses a slightly larger model than 'fast'
+                "enabled": True
             }
             
             data = {
                 'output_format': 'markdown',
-                'chunking': json.dumps(config_payload["chunking"]), # Direct field as per user's curl example
-                'config': json.dumps(config_payload)                 # Comprehensive ExtractionConfig override
+                'chunking': json.dumps(semantic_chunking), 
+                'config': json.dumps(config_payload)
             }
             
             response = await client.post(endpoint, files=files_payload, data=data)
