@@ -155,7 +155,7 @@ async def process_with_kreuzberg(
             files_payload = [('files', (original_filename, file_bytes, mime_type))]
             
             config_payload = {
-                "layout_detection": "accurate",
+                "layout_detection": "fast",
                 "pdf_hierarchy": True,
                 "language_detection": {"enabled": True},
                 "enable_quality_processing": True,
@@ -163,10 +163,12 @@ async def process_with_kreuzberg(
             }
             
             semantic_chunking = {
-                "strategy": "recursive",
-                "chunk_size": 800,
-                "chunk_overlap": 160,
-                "enabled": True,
+                "strategy": "semantic",
+                "max_characters": 1000,
+                "overlap": 200,
+                "threshold": 0.85,
+                "embedding_model": "fast",
+                "enabled": True
             }
             
             data = {
