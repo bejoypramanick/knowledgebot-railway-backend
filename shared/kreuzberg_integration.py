@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 import os
+import os.path
 from typing import Tuple, Dict, Any, Optional
 from shared.extraction_worker_client import ExtractionWorkerClient
 from shared.otel_logger import get_otel_logger
@@ -56,7 +57,12 @@ async def process_with_kreuzberg(
     start_time = time.time()
     reply_channel = f"kreuzberg_extraction_results:{source_id or original_filename}:{int(start_time * 1000)}"
     client = ExtractionWorkerClient()
-    artifact_prefix = f"processing/processed/{source_id or original_filename}"
+    # IMPORTANT: artifact_prefix must be unique per extraction job. For web crawling we often run
+    # multiple page extractions under the same website_id; using only source_id would cause S3
+    # key collisions and missing/overwritten artifacts.
+    base_name = os.path.basename(original_filename or "document")
+    base_stem = os.path.splitext(base_name)[0] or "document"
+    artifact_prefix = f"processing/processed/{source_id or base_stem}/{base_stem}_{int(start_time * 1000)}"
     document_id = _json_safe_value(source_id or original_filename)
 
     logger.info(f"[KREUZBERG] Queueing extraction for {original_filename} via Redis worker")
