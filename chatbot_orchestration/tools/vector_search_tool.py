@@ -324,6 +324,15 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                 + final_context
             )
 
+            # DEV-ONLY (user requested): log grounding context returned to the model.
+            # WARNING: This can leak knowledge base content into logs. Remove before prod.
+            try:
+                preview_limit = 12000
+                preview = response[:preview_limit]
+                logger.info(f"📦 [RAG_GROUNDING_FULL] tool_return_chars={len(response)} preview_chars={len(preview)}\n{preview}")
+            except Exception:
+                pass
+
             # Always-on: safe grounding summary (no chunk content).
             # This makes it possible to debug recall/citation issues in production without leaking KB text.
             try:
