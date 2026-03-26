@@ -560,7 +560,7 @@ class StreamingService:
             pipeline_timer.mark("pre_agent_checks")
 
             # Start streaming response
-            logger.info("🌊 Starting agent stream...")
+            logger.info("🌊 Starting agent stream")
             full_response = ""
             chunk_count = 0
             tool_call_count = 0
@@ -572,21 +572,10 @@ class StreamingService:
 
             try:
                 # Use agent.iter() for proper streaming + tool execution
-                logger.info("🚀 Intelligent RAG Mode: Letting agent control knowledge base search")
-                logger.info(f"📝 Agent will analyze: '{message[:100]}...'")
-                logger.info(f"📚 Agent has access to {len(pydantic_messages)} messages of conversation history")
-                logger.info(f"🔧 Agent tools: search_knowledge_base (pgvector)")
-
-                # Log what the agent is receiving
-                logger.info("=" * 100)
-                logger.info("🤖 AGENT INPUT SUMMARY")
-                logger.info(f"   Current User Message: {message[:150]}...")
-                logger.info(f"   Message History Length: {len(pydantic_messages)} messages")
-                logger.info(f"   Context Window: Full conversation context provided")
-                logger.info(f"   Available Tools: search_knowledge_base (pgvector)")
-                logger.info(f"   Session Dependencies: Initialized")
-                logger.info("=" * 100)
-                sys.stdout.flush()
+                logger.info(
+                    f"🚀 Agent stream starting: session={session_id[:16]} "
+                    f"history_msgs={len(pydantic_messages)} user_msg_chars={len(message)}"
+                )
 
                 # Pass ORIGINAL message (NOT enriched) to agent
                 # Agent decides whether to:
@@ -754,8 +743,7 @@ class StreamingService:
                     # 📁 UPLOAD AGENT RESPONSE TO S3 FOR DOWNLOAD (if enabled)
                     enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "true").lower() == "true"
                     
-                    logger.info(f"🔍 DEBUG: Agent S3 upload - ENABLE_RAG_S3_UPLOAD = '{os.getenv('ENABLE_RAG_S3_UPLOAD', 'NOT_SET')}'")
-                    logger.info(f"🔍 DEBUG: Agent S3 upload - enable_s3_upload = {enable_s3_upload}")
+                    logger.debug(f"Agent S3 upload enabled={enable_s3_upload}")
                     
                     if enable_s3_upload:
                         logger.info("📁 Agent S3 upload is ENABLED - attempting upload...")
@@ -772,35 +760,10 @@ class StreamingService:
                     else:
                         logger.info("📁 Agent S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
 
-                    # DEBUG: Log all messages structure
                     if not all_messages:
-                        logger.error("🚨 CRITICAL: all_messages is EMPTY!")
+                        logger.error("🚨 all_messages is EMPTY (no model output)")
                     else:
-                        logger.info("=" * 100)
-                        logger.info("🔍 DEBUG: all_messages structure")
-                        logger.info("=" * 100)
-                        for i, msg in enumerate(all_messages):
-                            logger.info(f"Message {i}: {type(msg).__name__}")
-                            if hasattr(msg, 'parts'):
-                                logger.info(f"  Parts: {len(msg.parts)}")
-                                for j, part in enumerate(msg.parts):
-                                    part_type = type(part).__name__
-                                    logger.info(f"    Part {j}: {part_type}")
-                                    if hasattr(part, 'content'):
-                                        content = getattr(part, 'content', '')
-                                        content_len = len(str(content))
-                                        logger.info(f"      Content length: {content_len}")
-                                        # Never log content previews.
-                        logger.info("=" * 100)
-
-                    # Log model decision process
-                    logger.info("=" * 100)
-                    logger.info("🔍 MODEL DECISION PROCESS & TOOL USAGE")
-                    logger.info("=" * 100)
-                    logger.info(f"📝 Input message length: {len(message)} chars")
-                    logger.info(f"📚 Conversation history length: {len(pydantic_messages)} messages")
-                    logger.info(f"🔧 Tools available: search_knowledge_base (pgvector)")
-                    sys.stdout.flush()
+                        logger.debug(f"all_messages received: count={len(all_messages)}")
 
                     tool_calls_made = []
                     for i, msg in enumerate(all_messages):
@@ -836,66 +799,54 @@ class StreamingService:
                                     content = getattr(part, 'content', '')
                                     logger.debug(f"   📝 {part_type}: chars={len(str(content))}")
 
-                    logger.info("=" * 100)
-                    logger.info(f"📊 SUMMARY: {len(tool_calls_made)} tools called: {tool_calls_made if tool_calls_made else 'NONE'}")
+                    logger.debug(f"tools_called={len(tool_calls_made)} unique={len(set(tool_calls_made))}")
                     if len(tool_calls_made) == 0 and len(pydantic_messages) > 0:
-                        logger.warning("⚠️  WARNING: This is a follow-up (history exists) but NO tools were called!")
-                        logger.warning("⚠️  Expected: search_knowledge_base should have been used")
-                    logger.info("=" * 100)
+                        logger.warning("⚠️ Follow-up message but no tools were called (expected KB search)")
 
 
                     # Extract assistant response from all_messages
                     if True:
-                        logger.info(f"✅ EXTRACTION LOOP STARTING - tool_response_found is FALSE, proceeding with TextPart extraction")
+                        logger.debug("Extracting TextPart content from model messages")
                         for i, msg in enumerate(all_messages):
                             msg_type = type(msg).__name__
-                            logger.info(f"📌 Message {i}: {msg_type}")
+                            logger.debug(f"Message {i}: {msg_type}")
 
                             if hasattr(msg, 'parts'):
                                 text_parts = [p for p in msg.parts if isinstance(p, TextPart)]
                                 total_parts = len(msg.parts)
-                                logger.info(f"   Has {total_parts} total parts ({len(text_parts)} TextParts)")
+                                logger.debug(f"Has {total_parts} parts ({len(text_parts)} TextParts)")
 
                                 for j, part in enumerate(msg.parts):
                                     part_type = type(part).__name__
-                                    logger.info(f"     Part {j}/{total_parts - 1}: {part_type}")
-                                    
-                                    # DEBUG: Log ALL part types and their full class info
-                                    logger.info(f"     🔍 PART DEBUG: {part_type}")
-                                    logger.info(f"     🔍 Full class: {type(part)}")
-                                    logger.info(f"     🔍 Module: {type(part).__module__}")
+                                    logger.debug(f"     Part {j}/{total_parts - 1}: {part_type}")
                                     
                                     # Check for any thinking-related attributes
                                     part_attrs = dir(part)
                                     thinking_attrs = [attr for attr in part_attrs if 'think' in attr.lower()]
                                     if thinking_attrs:
-                                        logger.info(f"     🧠 Thinking-related attributes: {thinking_attrs}")
+                                        logger.debug("     Thinking-related attributes present")
                                     
                                     # Check for content attribute and log its type/length
                                     if hasattr(part, 'content'):
                                         content = getattr(part, 'content', '')
-                                        logger.info(f"     📝 Content type: {type(content)}, length: {len(str(content))}")
-                                        if len(str(content)) > 1000:  # Large content might be thinking
-                                            logger.info("     🧠 LARGE CONTENT DETECTED - might be thinking (content suppressed)")
+                                        logger.debug(f"     Content type={type(content).__name__} len={len(str(content))}")
 
                                     # 🧠 LOG EXTENDED THINKING (if present)
                                     if part_type == 'ThinkingPart':
                                         thinking_content = getattr(part, 'content', '')
-                                        logger.info("=" * 100)
-                                        logger.info("🧠 MODEL EXTENDED THINKING (Reasoning Process)")
-                                        logger.info("=" * 100)
+                                        logger.debug("ThinkingPart present (content suppressed)")
 
                                         # Never log thinking text; lengths only.
                                         if thinking_content:
-                                            logger.info(f"🧠 THINKING CONTENT: chars={len(thinking_content)} lines={len(thinking_content.splitlines())}")
+                                            logger.debug(
+                                                f"ThinkingPart metrics: chars={len(thinking_content)} lines={len(thinking_content.splitlines())}"
+                                            )
                                         else:
-                                            logger.warning("🧠 ThinkingPart found but content is empty")
-                                        
-                                        logger.info("=" * 100)
+                                            logger.debug("ThinkingPart content empty")
                                     
                                     # 🧠 ALTERNATIVE: Check for thinking in other part types
                                     elif hasattr(part, 'thinking') or hasattr(part, 'thoughts'):
-                                        logger.info("🧠 ALTERNATIVE THINKING ATTRIBUTE FOUND!")
+                                        logger.debug("Alternative thinking attribute found (suppressed)")
                                         thinking_attr = getattr(part, 'thinking', None) or getattr(part, 'thoughts', None)
                                         if thinking_attr:
                                             logger.info("🧠 ALTERNATIVE THINKING CONTENT present (suppressed)")
@@ -906,39 +857,25 @@ class StreamingService:
                                         text_part_index = [p for p in msg.parts[:j+1] if isinstance(p, TextPart)].__len__()
                                         is_last_text_part = text_part_index == len(text_parts)
 
-                                        logger.info(f"     🔍 TextPart {text_part_index}/{len(text_parts)}: {len(text_content)} chars")
-                                        logger.debug("        Preview suppressed")
+                                        logger.debug(f"     TextPart {text_part_index}/{len(text_parts)}: chars={len(text_content)}")
 
                                         if text_content:
                                             if full_response == "":
-                                                logger.info(f"     ✅ [TextPart #{text_part_index}] Setting as full_response (FIRST TextPart)")
+                                                logger.debug("     Setting first TextPart as full_response")
                                                 chunk_count = 1
                                                 full_response = text_content
                                             else:
                                                 # CRITICAL FIX: Use LAST TextPart, not first
                                                 # If agent generates multiple responses (e.g., cached then correct),
                                                 # the last one is most likely the correct/intended response
-                                                logger.warning(f"     ⚠️ MULTIPLE TextParts detected!")
-                                                logger.warning(f"     ⚠️ [TextPart #{text_part_index}/{len(text_parts)}] New response: {len(text_content)} chars")
-                                                logger.warning(f"     ⚠️ Previous response was: {len(full_response)} chars")
-                                                logger.warning(f"     ⚠️ Using LAST TextPart (replacing previous)")
-                                                logger.warning(f"     ⚠️ Is this the LAST TextPart? {is_last_text_part}")
+                                                logger.debug(
+                                                    f"     Multiple TextParts: replacing with latest (idx={text_part_index} last={is_last_text_part})"
+                                                )
                                                 full_response = text_content  # ← KEY FIX: Use the latest response
                                                 chunk_count += 1
 
-                                    # Log pgvector search tool call
-                                    if isinstance(part, (BuiltinToolCallPart, ToolCallPart)) and getattr(part, 'tool_name', '') == 'search_knowledge_base':
-                                        tool_call_count += 1
-                                        logger.info("=" * 80)
-                                        logger.info("🔍 PGVECTOR TOOL CALL")
-                                        logger.info(f"   Tool Name: {part.tool_name}")
-                                        logger.info(f"   Tool Call ID: {getattr(part, 'tool_call_id', 'N/A')}")
-                                        logger.info(f"   Args: {getattr(part, 'args', {})}")
-                                        logger.info(f"   Tool Call #{tool_call_count} in this response")
-                                        logger.info("=" * 80)
-
                                     # Track tool calls without logging args/content (may contain user text/PII).
-                                    elif hasattr(part, 'tool_name'):
+                                    if hasattr(part, 'tool_name'):
                                         tool_name = getattr(part, 'tool_name', 'unknown')
                                         tool_call_count += 1
 
@@ -1009,7 +946,7 @@ class StreamingService:
             # Now that enforcement has been applied (if needed), stream the response in chunks
             if full_response:
                 logger.info("📤 Streaming final response in chunks (after enforcement check)...")
-                logger.info(f"🔍 DEBUG: full_response length = {len(full_response)} chars")
+                logger.debug(f"full_response length={len(full_response)} chars")
                 logger.debug("🔍 DEBUG: full_response preview suppressed")
 
                 # 🚨 CRITICAL: Remove metadata that model may have added
@@ -1104,11 +1041,11 @@ class StreamingService:
                 # Break response into chunks for streaming to customer (500 chars per chunk for smooth experience)
                 chunk_size = 500
                 chunks = [full_response[i:i+chunk_size] for i in range(0, len(full_response), chunk_size)]
-                logger.info(f"🔍 DEBUG: Created {len(chunks)} chunks for customer streaming")
+                logger.debug(f"Created {len(chunks)} chunks for customer streaming")
 
                 for idx, chunk in enumerate(chunks, 1):
                     if chunk.strip():  # Only stream non-empty chunks
-                        logger.info(f"🔍 DEBUG: Streaming chunk {idx}/{len(chunks)}: {len(chunk)} chars")
+                        logger.debug(f"Streaming chunk {idx}/{len(chunks)} chars={len(chunk)}")
                         response_data = {
                             "type": "chunk",
                             "content": chunk,
@@ -1151,12 +1088,9 @@ class StreamingService:
                     logger.error(f"❌ Failed to save assistant response: {db_error}")
 
             # Post response to Redis channels instead of direct SSE streaming
-            logger.info("=" * 80)
-            logger.info("📤 POSTING RESPONSE TO REDIS CHANNELS")
-            logger.info(f"   Session ID: {session_id}")
-            logger.info(f"   Response Length: {len(full_response)} characters")
-            logger.info(f"   Tool Calls: {tool_call_count}")
-            logger.info("=" * 80)
+            logger.info(
+                f"📤 [REDIS_POST] session={session_id[:16]} resp_chars={len(full_response)} tool_calls={tool_call_count}"
+            )
             
             # Create response event for customer channel
             customer_response_event = {

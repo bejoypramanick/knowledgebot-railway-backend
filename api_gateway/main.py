@@ -149,6 +149,9 @@ app.add_middleware(
         "http://localhost:5173",  # Local development
         "http://localhost:3000",  # Local development
     ],
+    # Accept any other Globistaan subdomain without needing a redeploy.
+    # This helps when frontends are served from multiple hosts/environments.
+    allow_origin_regex=r"^https://.*\.globistaan\.com$",
     allow_credentials=True,  # Allow credentials for authenticated requests
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],

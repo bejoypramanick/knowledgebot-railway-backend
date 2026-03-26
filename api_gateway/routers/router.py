@@ -995,7 +995,8 @@ async def generic_proxy_handler(request: Request, path: str):
     correlation_id = request.headers.get("X-Correlation-ID") or get_correlation_id()
     set_correlation_id(correlation_id)
     set_request_id(correlation_id)
-    logger.info(f"🔍 [{correlation_id}] API Gateway received {request.method} {request.url.path}")
+    # Request/response are already logged by middleware; keep proxy handler logs minimal.
+    logger.debug(f"[proxy] {request.method} {request.url.path}")
     
     try:
         import httpx
@@ -1008,7 +1009,7 @@ async def generic_proxy_handler(request: Request, path: str):
         # Determine service based on URL path
         service_url = None
 
-        logger.info(f"🔍 Processing path: '{path}'")
+        logger.debug(f"[proxy] path='{path}'")
 
         # Remove /api/v1/ or api/v1/ prefix for routing logic (handle both with/without leading slash)
         if path.startswith("/api/v1/"):
@@ -1028,24 +1029,24 @@ async def generic_proxy_handler(request: Request, path: str):
         if backend_path.startswith("configuration/"):
             service_url = get_settings().configuration_service_url
             # Keep the service prefix - configuration service expects /api/v1/configuration/...
-            logger.info(f"✅ Routing to configuration service: {service_url}")
+            logger.debug("Routing to configuration service")
         elif backend_path.startswith("chatbot/"):
             service_url = get_settings().chatbot_orchestration_url
             # Keep the service prefix - chatbot service expects /api/v1/chatbot/...
-            logger.info(f"✅ Routing to chatbot service: {service_url}")
+            logger.debug("Routing to chatbot service")
         elif backend_path.startswith("knowledgebase/"):
             service_url = get_settings().knowledgebase_ingestion_url
             # Keep the service prefix - knowledgebase service expects /api/v1/knowledgebase/...
-            logger.info(f"✅ Routing to knowledgebase service: {service_url}")
+            logger.debug("Routing to knowledgebase service")
         elif backend_path.startswith("webcrawl"):
             service_url = get_settings().knowledgebase_ingestion_url
-            logger.info(f"✅ Routing webcrawl to knowledgebase_ingestion service: {service_url}")
+            logger.debug("Routing webcrawl to knowledgebase_ingestion service")
         elif backend_path.startswith("admin/") or backend_path.startswith("users/") or backend_path.startswith("widget/") or backend_path.startswith("feedback") or backend_path.startswith("messages/"):
             # These are all configuration service endpoints but without the service prefix
             # Need to add "configuration/" prefix for proper routing
             service_url = get_settings().configuration_service_url
             service_path = f"configuration/{backend_path}"
-            logger.info(f"✅ Routing to configuration service (non-prefixed endpoint): {service_url}")
+            logger.debug("Routing to configuration service (non-prefixed endpoint)")
         else:
             logger.error(f"❌ Unknown path: {backend_path}")
             return JSONResponse(
@@ -1057,11 +1058,7 @@ async def generic_proxy_handler(request: Request, path: str):
         # Internal services expect /api/v1/{service_name}/{endpoint}
         # The service_path already includes the service prefix (e.g., "configuration/users/profile")
         full_url = f"{service_url}/api/v1/{service_path}"
-        logger.info(f"🌐 Making {request.method} request to: {full_url}")
-        logger.info(f"🔍 Service URL: {service_url}")
-        logger.info(f"🔍 Original path: {path}")
-        logger.info(f"🔍 Clean path: {clean_path}")
-        logger.info(f"🔍 Backend path: {backend_path}")
+        logger.debug(f"[proxy] upstream={service_url} url={full_url}")
 
         # Prepare headers
         headers = dict(request.headers)
