@@ -53,9 +53,9 @@ def _minimal_dom_prune(html_content: str) -> str:
                 parent.remove(node)
 
     # Remove obvious ad/cookie/subscribe blocks by class/id, avoiding table/img.
+    # Keep these fairly specific. Avoid "ad"/"ads" substring matching because it can
+    # accidentally match legitimate content (e.g. place names like "Vadodara").
     junk_keywords = (
-        "ad",
-        "ads",
         "advert",
         "advertisement",
         "banner",
@@ -74,7 +74,20 @@ def _minimal_dom_prune(html_content: str) -> str:
         if not value:
             return False
         v = value.lower()
-        return any(k in v for k in junk_keywords)
+        # Tokenize on non-alphanumeric boundaries so we don't do naive substring matches.
+        # Example: "Vadodara" should not match "ad".
+        tokens = []
+        current = []
+        for ch in v:
+            if ch.isalnum():
+                current.append(ch)
+            else:
+                if current:
+                    tokens.append("".join(current))
+                    current = []
+        if current:
+            tokens.append("".join(current))
+        return any(t in junk_keywords for t in tokens)
 
     for node in doc.iter():
         if node.tag in ("table", "img"):
