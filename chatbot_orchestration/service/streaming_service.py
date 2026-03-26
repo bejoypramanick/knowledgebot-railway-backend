@@ -70,9 +70,34 @@ class StreamingService:
             return False
         if re.search(r"\[\d+\]", response_text):
             return True
+        # Also accept combined markers like [1, 2] or [1,2,3]. We'll normalize these later.
+        if re.search(r"\[\s*\d+(?:\s*,\s*\d+)+\s*\]", response_text):
+            return True
         if re.search(r"<a[^>]+>\\s*\\[\\d+\\]\\s*</a>", response_text, flags=re.IGNORECASE):
             return True
         return False
+
+    def _normalize_citation_markers(self, response_text: str) -> str:
+        """
+        Normalize combined citation markers the model sometimes emits, e.g.:
+          [1, 2] -> [1] [2]
+        This keeps the "plain [N]" contract and enables the link-rendering step.
+        """
+        if not response_text:
+            return response_text
+
+        def repl(match: re.Match) -> str:
+            inner = match.group(1) or ""
+            nums = []
+            for part in inner.split(","):
+                part = part.strip()
+                if part.isdigit():
+                    nums.append(part)
+            if not nums:
+                return match.group(0)
+            return " ".join(f"[{n}]" for n in nums)
+
+        return re.sub(r"\[\s*(\d+(?:\s*,\s*\d+)+)\s*\]", repl, response_text)
 
     def _enforce_grounded_citation_policy(self, message: str, response_text: str) -> str:
         """
@@ -1031,6 +1056,8 @@ class StreamingService:
                 # This must run before adding any debug sections or broadcasting.
                 try:
                     before_enforcement = full_response
+                    # Normalize combined citations like [1, 2] so enforcement/linking work.
+                    full_response = self._normalize_citation_markers(full_response)
                     full_response = self._enforce_grounded_citation_policy(message, full_response)
                     if full_response != before_enforcement:
                         # Dev-friendly diagnostic: show why we blanked the answer.
