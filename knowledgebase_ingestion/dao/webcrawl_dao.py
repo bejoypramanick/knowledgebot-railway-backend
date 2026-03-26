@@ -272,11 +272,11 @@ class WebCrawlDAO:
             params["user_role_id"] = user_role_id
 
         if not include_inactive:
-            # Active: pending, processing, queued, and completed
-            where_clause += " AND processing_status IN ('pending', 'processing', 'queued', 'completed')"
+            # Active KB list: includes failed so users can see errors.
+            where_clause += " AND processing_status IN ('pending', 'processing', 'queued', 'completed', 'failed')"
         else:
-            # Not Active: everything except pending, processing, queued, and completed
-            where_clause += " AND processing_status NOT IN ('pending', 'processing', 'queued', 'completed')"
+            # Not Active: only cancelled/deleted items.
+            where_clause += " AND processing_status IN ('cancelled', 'deleted')"
 
         query = f"""
             SELECT

@@ -148,12 +148,12 @@ class FileUploadDAO:
             return []
 
     async def get_inactive_files(self) -> List[Dict[str, Any]]:
-        """Get all files that are not pending, processing, queued, and not completed (cancelled, deleted, failed)."""
+        """Get all files that are not visible in the Active KB list (cancelled, deleted)."""
         query = """
             SELECT id, original_filename, processing_status, error_message,
                    file_size, char_count, mime_type, file_extension, storage_document_uri, processed_content_s3_key, created_at, updated_at
             FROM file_uploads
-            WHERE processing_status NOT IN ('pending', 'processing', 'queued', 'completed')
+            WHERE processing_status IN ('cancelled', 'deleted')
             ORDER BY updated_at DESC
         """
         try:
@@ -168,12 +168,12 @@ class FileUploadDAO:
             return []
 
     async def get_active_files(self) -> List[Dict[str, Any]]:
-        """Get all files that are pending, processing, queued, or completed."""
+        """Get all files that should appear in the Active KB list (includes failed)."""
         query = """
             SELECT id, original_filename, processing_status, error_message,
                    file_size, char_count, mime_type, file_extension, storage_document_uri, processed_content_s3_key, created_at, updated_at
             FROM file_uploads
-            WHERE processing_status IN ('pending', 'processing', 'queued', 'completed')
+            WHERE processing_status IN ('pending', 'processing', 'queued', 'completed', 'failed')
             ORDER BY updated_at DESC
         """
         try:
