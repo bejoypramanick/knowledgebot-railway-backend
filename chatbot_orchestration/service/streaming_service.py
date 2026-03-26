@@ -995,7 +995,8 @@ class StreamingService:
                 logger.error(f"❌ Error during agent streaming: {stream_error}")
                 error_response = {
                     "type": "error",
-                    "content": f"I apologize, but I encountered an error while processing your request: {str(stream_error)}",
+                    # Keep error content minimal and non-PII.
+                    "content": f"Internal error: {str(stream_error)}",
                     "session_id": session_id
                 }
                 json_response = json.dumps(error_response, ensure_ascii=False)
@@ -1004,6 +1005,11 @@ class StreamingService:
 
 
             pipeline_timer.mark("response_extraction")
+
+            # Hard requirement: non-greeting queries must use retrieval tools.
+            # If this is violated, fail fast (do not return an ungrounded model response).
+            if tool_call_count == 0 and message.strip() and not self._is_greeting_only(message):
+                raise RuntimeError("retrieval tool not called for non-greeting request")
 
             # ================================================================
             # ================================================================
