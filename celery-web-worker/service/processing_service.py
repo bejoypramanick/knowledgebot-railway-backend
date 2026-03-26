@@ -888,9 +888,8 @@ class ProcessingService:
             tables_metadata_list: list = None
         ) -> Optional[str]:
             """Record single page in database"""
+            storage_backend_state = 'completed' if getattr(upload_result, "confirmed", False) else 'pending'
             metrics = calculate_metrics(page_data.markdown)
-
-            storage_backend_state = 'completed' if upload_result.confirmed else 'pending'
             
             if await self._isSinglePageMode(page_data.page_url, job_context.root_url, crawl_config):
                 logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")

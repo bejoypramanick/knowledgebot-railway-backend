@@ -350,7 +350,7 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         .await
         .context("kreuzberg markdown chunking failed")?;
 
-    let chunks = chunked_markdown
+    let mut chunks = chunked_markdown
         .chunks
         .map(|result_chunks| {
             result_chunks
@@ -383,6 +383,28 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
             }]
         });
 
+    // Add dedicated table row chunks with explicit row ranges + headers replicated.
+    // These chunks improve table Q&A because retrieval can land directly on a row-group.
+    let base_chunk_index = chunks.len();
+    let mut next_chunk_index = base_chunk_index;
+    for table in &enriched_tables {
+        for row_chunk in &table.row_chunks {
+            chunks.push(ExtractedChunk {
+                text: row_chunk.text.clone(),
+                metadata: json!({
+                    "chunk_index": next_chunk_index,
+                    "strategy": "kreuzberg_table_rows",
+                    "table_index": table.table_index,
+                    "table_page_number": table.page_number,
+                    "row_start": row_chunk.start_row,
+                    "row_end": row_chunk.end_row,
+                    "headers": table.headers,
+                }),
+            });
+            next_chunk_index += 1;
+        }
+    }
+
     let tables = serde_json::Value::Array(
         enriched_tables
             .iter()
@@ -392,7 +414,15 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
                     "page_number": table.page_number,
                     "markdown": table.original_markdown,
                     "kv_markdown": table.kv_markdown,
-                    "row_chunks": table.row_chunks,
+                    "row_chunks": table
+                        .row_chunks
+                        .iter()
+                        .map(|chunk| json!({
+                            "row_start": chunk.start_row,
+                            "row_end": chunk.end_row,
+                            "text": chunk.text,
+                        }))
+                        .collect::<Vec<_>>(),
                     "headers": table.headers,
                     "cells": table.cells,
                     "row_count": table.row_count,
@@ -567,9 +597,16 @@ struct TableArtifact {
     cells: Vec<Vec<String>>,
     original_markdown: String,
     kv_markdown: String,
-    row_chunks: Vec<String>,
+    row_chunks: Vec<TableRowChunk>,
     row_count: usize,
     column_count: usize,
+}
+
+#[derive(Clone)]
+struct TableRowChunk {
+    start_row: usize,
+    end_row: usize,
+    text: String,
 }
 
 fn build_table_artifacts(tables: &[Table], max_characters: usize) -> Vec<TableArtifact> {
@@ -642,7 +679,7 @@ fn derive_headers(table: &Table) -> Vec<String> {
 fn build_table_kv_markdown(
     table: &Table,
     headers: &[String],
-    row_chunks: &[String],
+    row_chunks: &[TableRowChunk],
     table_index: usize,
 ) -> String {
     let mut out = String::new();
@@ -664,7 +701,7 @@ fn build_table_kv_markdown(
         out.push_str("### Rows\n\nNo data rows extracted.\n");
     } else {
         for chunk in row_chunks {
-            out.push_str(chunk);
+            out.push_str(&chunk.text);
             out.push_str("\n\n");
         }
     }
@@ -672,7 +709,7 @@ fn build_table_kv_markdown(
     out.trim().to_string()
 }
 
-fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usize) -> Vec<String> {
+fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usize) -> Vec<TableRowChunk> {
     let rows = if table.cells.len() > 1 {
         &table.cells[1..]
     } else {
@@ -696,7 +733,7 @@ fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usi
             };
 
             if !buffer.is_empty() && candidate.chars().count() > max_characters {
-                sections.push(wrap_table_row_section(chunk_start_row, chunk_end_row, &buffer));
+                sections.push(wrap_table_row_section(headers, chunk_start_row, chunk_end_row, &buffer));
                 buffer = row_block;
                 chunk_start_row = row_number;
                 chunk_end_row = row_number;
@@ -708,17 +745,39 @@ fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usi
     }
 
     if !buffer.is_empty() {
-        sections.push(wrap_table_row_section(chunk_start_row, chunk_end_row, &buffer));
+        sections.push(wrap_table_row_section(headers, chunk_start_row, chunk_end_row, &buffer));
     }
 
     sections
 }
 
-fn wrap_table_row_section(start_row: usize, end_row: usize, body: &str) -> String {
-    if start_row == end_row {
-        format!("### Row {}\n\n{}", start_row, body)
+fn wrap_table_row_section(headers: &[String], start_row: usize, end_row: usize, body: &str) -> TableRowChunk {
+    let heading = if start_row == end_row {
+        format!("### Row {}", start_row)
     } else {
-        format!("### Rows {}-{}\n\n{}", start_row, end_row, body)
+        format!("### Rows {}-{}", start_row, end_row)
+    };
+
+    // Replicate headers into every row-chunk so retrieval has column names.
+    let columns_line = if headers.is_empty() {
+        String::new()
+    } else {
+        format!("Columns: {}", headers.join(" | "))
+    };
+
+    let mut text = String::new();
+    text.push_str(&heading);
+    text.push_str("\n\n");
+    if !columns_line.is_empty() {
+        text.push_str(&columns_line);
+        text.push_str("\n\n");
+    }
+    text.push_str(body);
+
+    TableRowChunk {
+        start_row,
+        end_row,
+        text,
     }
 }
 
