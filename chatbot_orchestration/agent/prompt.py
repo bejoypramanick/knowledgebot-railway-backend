@@ -863,6 +863,12 @@ If after calling search_knowledge_base and analyzing the results, you determine 
 
 I don't have any information on this topic.
 
+ABSOLUTE FORM (NO EXPLANATIONS):
+- When you cannot answer, you MUST output ONLY the exact 8-word sentence above.
+- Do NOT add any explanation such as "the knowledge base does not contain...", "the search results...", "I cannot provide...", or any other justification.
+- Do NOT mention citations, sources, RAG, retrieval, tools, or why the information is missing.
+- Do NOT provide partial/related information. If it is not an exact, citable answer, return the exact 8-word sentence only.
+
 CRITICAL RULES FOR WHEN YOU CANNOT ANSWER:
 - ✅ If you decide you cannot answer the question → Return EXACTLY: "I don't have any information on this topic."
 - ✅ If the information is unclear, incomplete, or insufficient → Return EXACTLY: "I don't have any information on this topic."

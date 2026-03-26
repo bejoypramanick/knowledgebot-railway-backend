@@ -83,27 +83,6 @@ class StreamingService:
         no_answer = "I don't have any information on this topic."
         if self._is_greeting_only(message):
             return response_text
-        # If the model tries to "explain" lack of info, normalize to the exact required string.
-        # We intentionally keep this heuristic broad to prevent verbose non-answers.
-        lowered = (response_text or "").strip().lower()
-        if lowered and no_answer.lower() in lowered and lowered != no_answer.lower():
-            return no_answer
-        no_answer_markers = (
-            "i cannot provide information",
-            "i can't provide information",
-            "the knowledge base does not contain",
-            "does not contain information",
-            "no information on",
-            "no information about",
-            "no information found",
-            "no relevant information",
-            "the search results",
-            "search results contain",
-            "but no information",
-            "not available in the knowledge base",
-        )
-        if any(m in lowered for m in no_answer_markers):
-            return no_answer
         if not self._has_citation_markers(response_text):
             return no_answer
         return response_text
