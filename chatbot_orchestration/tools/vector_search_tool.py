@@ -323,6 +323,39 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                 "When you use a fact from Source N, add an inline citation marker like [N] after that fact.\n\n"
                 + final_context
             )
+
+            # Always-on: safe grounding summary (no chunk content).
+            # This makes it possible to debug recall/citation issues in production without leaking KB text.
+            try:
+                sources_summary = []
+                for i, chunk in enumerate(top_chunks):
+                    meta = chunk.get("metadata") or {}
+                    url = meta.get("url") if isinstance(meta, dict) else None
+                    if not url:
+                        url = f"kb://{chunk.get('document_type')}/{chunk.get('document_id')}"
+                    sources_summary.append(
+                        {
+                            "n": i + 1,
+                            "type": chunk.get("document_type"),
+                            "id": str(chunk.get("document_id")),
+                            "score": float(chunk.get("hybrid_score") or 0.0),
+                            "url": url,
+                            "is_table": _is_table_chunk(chunk),
+                            "content_chars": len(chunk.get("content") or ""),
+                        }
+                    )
+                logger.info(
+                    "📦 [RAG_GROUNDING_SUMMARY]",
+                    extra={
+                        "query_chars": len(query or ""),
+                        "sources": sources_summary,
+                        "final_context_chars": len(final_context or ""),
+                        "tables_kept": len(table_chunks),
+                        "narrative_kept": len(narrative_chunks),
+                    },
+                )
+            except Exception:
+                pass
             
             # --- STEP 4: Update Cache & Session State ---
             if cache and settings.enable_semantic_caching:
