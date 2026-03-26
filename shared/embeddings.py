@@ -21,6 +21,8 @@ _GOOGLE_BATCH_EMBED_LIMIT = 100
 
 USE_LITELLM_EMBEDDINGS = os.getenv("USE_LITELLM_EMBEDDINGS", "true").lower() == "true"
 
+_logged_embedding_configs = set()
+
 def get_genai_client():
     from google import genai
     global _genai_client
@@ -51,11 +53,39 @@ def _litellm_embedding_model(provider: str, model: str) -> str:
         return f"gemini/{model}"
     return model
 
+def _log_embedding_config_once(*, action: str, provider: str, model: str, dimensionality: int, batch_size: Optional[int] = None) -> None:
+    """
+    Logs the active embedding configuration (no PII, no text content).
+    De-dupes logs by (action, provider, model, dimensionality, batch_size).
+    """
+    try:
+        litellm_model = _litellm_embedding_model(provider, model) if USE_LITELLM_EMBEDDINGS else None
+        key = (action, provider, model, dimensionality, batch_size, bool(USE_LITELLM_EMBEDDINGS), litellm_model)
+        if key in _logged_embedding_configs:
+            return
+        _logged_embedding_configs.add(key)
+        logger.info(
+            "embedding config",
+            extra={
+                "action": action,
+                "provider": provider,
+                "model": model,
+                "dimensions": dimensionality,
+                "use_litellm": bool(USE_LITELLM_EMBEDDINGS),
+                "litellm_model": litellm_model,
+                "batch_size": batch_size,
+            },
+        )
+    except Exception:
+        # Never fail an embedding call because of logging.
+        return
+
 async def _litellm_embed(texts: List[str], provider: str, model: str) -> List[List[float]]:
     import asyncio as _asyncio
     from litellm import embedding
 
     dimensionality = int(os.getenv("EMBEDDING_OUTPUT_DIMENSIONALITY", str(EMBEDDING_OUTPUT_DIMENSIONALITY)))
+    _log_embedding_config_once(action="embed_batch", provider=provider, model=model, dimensionality=dimensionality, batch_size=len(texts))
     litellm_model = _litellm_embedding_model(provider, model)
 
     def _call():
@@ -91,6 +121,8 @@ async def generate_embedding(query: str) -> List[float]:
     """Generate an embedding vector using the configured provider."""
     provider = os.getenv("EMBEDDING_PROVIDER", EMBEDDING_PROVIDER).lower()
     model = os.getenv("EMBEDDING_MODEL", EMBEDDING_MODEL)
+    dimensionality = int(os.getenv("EMBEDDING_OUTPUT_DIMENSIONALITY", str(EMBEDDING_OUTPUT_DIMENSIONALITY)))
+    _log_embedding_config_once(action="embed_query", provider=provider, model=model, dimensionality=dimensionality)
     
     try:
         if USE_LITELLM_EMBEDDINGS:
@@ -140,11 +172,13 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
     """Helper for batch processing embeddings if supported by provider."""
     provider = os.getenv("EMBEDDING_PROVIDER", EMBEDDING_PROVIDER).lower()
     model = os.getenv("EMBEDDING_MODEL", EMBEDDING_MODEL)
+    dimensionality = int(os.getenv("EMBEDDING_OUTPUT_DIMENSIONALITY", str(EMBEDDING_OUTPUT_DIMENSIONALITY)))
     
     if not texts:
         return []
 
     try:
+        _log_embedding_config_once(action="embed_batch", provider=provider, model=model, dimensionality=dimensionality, batch_size=len(texts))
         if USE_LITELLM_EMBEDDINGS:
             # Keep batch limit behavior consistent for Google/Gemini.
             if provider == "google":
