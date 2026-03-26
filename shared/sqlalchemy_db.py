@@ -400,6 +400,25 @@ async def close_database() -> None:
         raise
 
 
+async def execute_autocommit(sql: str) -> None:
+    """
+    Execute a statement outside a transaction (AUTOCOMMIT).
+
+    Required for commands like VACUUM that are not allowed inside a transaction block.
+    """
+    global _engine
+
+    if not sql or not sql.strip():
+        return
+
+    if _engine is None:
+        await init_database()
+
+    async with _engine.connect() as conn:
+        conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+        await conn.execute(text(sql))
+
+
 async def validate_database() -> bool:
     """
     Validate database schema exists.
@@ -438,5 +457,6 @@ __all__ = [
     "get_db_connection",
     "health_check",
     "close_database",
+    "execute_autocommit",
     "validate_database",
 ]

@@ -1,7 +1,7 @@
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Sequence
 from shared.otel_logger import get_otel_logger
-from shared.sqlalchemy_db import get_db_session
+from shared.sqlalchemy_db import get_db_session, execute_autocommit
 from sqlalchemy import text
 
 logger = get_otel_logger("vector_dao", "shared")
@@ -84,5 +84,44 @@ class VectorDAO:
         except Exception as e:
             logger.error(f"❌ Failed to batch insert chunks: {e}", exc_info=True)
             return False
+
+    @staticmethod
+    async def delete_chunks_for_documents(document_ids: Sequence[str], document_type: str) -> int:
+        """Hard delete chunks for one or more documents. Returns deleted row count."""
+        ids = [str(i) for i in document_ids if i]
+        if not ids:
+            return 0
+        if document_type not in ("file", "website"):
+            raise ValueError("document_type must be 'file' or 'website'")
+
+        async with get_db_session() as db:
+            result = await db.execute(
+                text(
+                    """
+                    DELETE FROM document_chunks
+                    WHERE document_type = :document_type
+                      AND document_id = ANY(:document_ids)
+                    """
+                ),
+                {"document_type": document_type, "document_ids": ids},
+            )
+            await db.commit()
+            deleted = int(result.rowcount or 0)
+            logger.info(f"🗑️ Deleted {deleted} chunks for {document_type} documents: {len(ids)} ids")
+            return deleted
+
+    @staticmethod
+    async def delete_chunks_for_document(document_id: str, document_type: str) -> int:
+        return await VectorDAO.delete_chunks_for_documents([document_id], document_type)
+
+    @staticmethod
+    async def vacuum_document_chunks() -> None:
+        """Run VACUUM (ANALYZE) for document_chunks in autocommit mode."""
+        try:
+            await execute_autocommit("VACUUM (ANALYZE) public.document_chunks")
+            logger.info("🧹 VACUUM (ANALYZE) completed for public.document_chunks")
+        except Exception as e:
+            # We don't want deletions to fail if VACUUM fails.
+            logger.warning(f"⚠️ VACUUM (ANALYZE) failed for public.document_chunks: {e}")
 
 vector_dao = VectorDAO()

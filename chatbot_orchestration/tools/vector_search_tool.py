@@ -133,6 +133,18 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                     SELECT id, content, metadata, document_id, document_type,
                            (1 - (embedding <=> cast(:vector as halfvec))) as sim_score
                     FROM document_chunks
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM file_uploads f
+                        WHERE f.id = document_chunks.document_id
+                          AND document_chunks.document_type = 'file'
+                          AND f.processing_status = 'deleted'
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM scraped_websites w
+                        WHERE w.id = document_chunks.document_id
+                          AND document_chunks.document_type = 'website'
+                          AND w.processing_status = 'deleted'
+                    )
                     ORDER BY embedding <=> cast(:vector as halfvec)
                     LIMIT 50
                 ),
@@ -140,6 +152,18 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                     SELECT id, ts_rank_cd(to_tsvector('english', content), websearch_to_tsquery('english', :query)) as fts_score
                     FROM document_chunks
                     WHERE to_tsvector('english', content) @@ websearch_to_tsquery('english', :query)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM file_uploads f
+                          WHERE f.id = document_chunks.document_id
+                            AND document_chunks.document_type = 'file'
+                            AND f.processing_status = 'deleted'
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM scraped_websites w
+                          WHERE w.id = document_chunks.document_id
+                            AND document_chunks.document_type = 'website'
+                            AND w.processing_status = 'deleted'
+                      )
                     LIMIT 50
                 )
                 SELECT v.content, v.metadata, v.document_id, v.document_type,

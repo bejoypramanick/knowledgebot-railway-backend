@@ -634,6 +634,15 @@ class FileService:
                 logger.error(f"❌ Error marking file as deleted: {e}")
                 raise
 
+            # Step 4: Hard delete vector chunks immediately so RAG can’t retrieve deleted content
+            try:
+                from shared.vector_dao import vector_dao
+                deleted = await vector_dao.delete_chunks_for_document(file_id, "file")
+                logger.info(f"✅ Deleted {deleted} vector chunks for file_id={file_id}")
+                await vector_dao.vacuum_document_chunks()
+            except Exception as e:
+                logger.warning(f"⚠️ Vector chunk deletion/vacuum failed (non-blocking): {e}")
+
             logger.info("=" * 80)
             logger.info(f"✅ [DELETE_FILE_COMPLETE] File deletion completed")
             logger.info("=" * 80)
@@ -801,6 +810,16 @@ class FileService:
             except Exception as e:
                 logger.error(f"❌ Error marking as deleted in database: {e}")
                 raise
+
+            # Step 5: Hard delete vector chunks immediately so RAG can’t retrieve deleted content
+            try:
+                from shared.vector_dao import vector_dao
+                ids = [website_id] + [str(c["id"]) for c in (child_pages or [])]
+                deleted = await vector_dao.delete_chunks_for_documents(ids, "website")
+                logger.info(f"✅ Deleted {deleted} vector chunks for website_ids={len(ids)}")
+                await vector_dao.vacuum_document_chunks()
+            except Exception as e:
+                logger.warning(f"⚠️ Vector chunk deletion/vacuum failed (non-blocking): {e}")
 
             logger.info("=" * 80)
             logger.info(f"✅ [DELETE_COMPLETE] Atomic deletion completed successfully")
