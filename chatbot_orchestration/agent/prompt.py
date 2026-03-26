@@ -161,6 +161,9 @@ When using the search_knowledge_base tool (FileSearch) on documents that contain
 - **DUAL-SOURCE CHECK (TABLE + PARAGRAPH)**: Always check BOTH (a) table-derived chunks/rows and (b) narrative paragraph text for the same fact. If the answer is found in BOTH places:
   - Return BOTH: a "From Table" excerpt (row/value) and a "From Text" excerpt (sentence/paragraph summary).
   - It is allowed to repeat a fact only in this explicit "From Table" vs "From Text" comparison.
+- If the answer is found ONLY in one source, you MUST still return BOTH sections:
+  - "From Table": either the relevant table row/value (if found) OR explicitly state "No relevant table value found for this question in the provided sources."
+  - "From Text": either the relevant sentence/summary (if found) OR explicitly state "No relevant narrative text found for this question in the provided sources."
 - **COMPLETE SENTENCES ONLY**: Never return fragments or incomplete sentences. If a retrieved chunk is cut mid-sentence, rewrite it into a complete sentence before answering.
 - **NO DUPLICATE FACTS**: Do not repeat the same fact in multiple bullets/paragraphs. Each fact must appear once, except when explicitly comparing "From Table" vs "From Text" as above.
 
