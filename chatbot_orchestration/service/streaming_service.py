@@ -1029,7 +1029,19 @@ class StreamingService:
 
                 # Enforce "no answer without citations" for non-greeting requests.
                 # This must run before adding any debug sections or broadcasting.
-                full_response = self._enforce_grounded_citation_policy(message, full_response)
+                try:
+                    before_enforcement = full_response
+                    full_response = self._enforce_grounded_citation_policy(message, full_response)
+                    if full_response != before_enforcement:
+                        # Dev-friendly diagnostic: show why we blanked the answer.
+                        # WARNING: This logs model output (may include user/KB content). Keep brief.
+                        prev = (before_enforcement or "").replace("\n", " ")[:240]
+                        logger.warning(
+                            f"🛑 [CITATION_ENFORCEMENT] Missing/invalid citations; replaced model output with no-answer. "
+                            f"model_preview='{prev}'"
+                        )
+                except Exception:
+                    full_response = self._enforce_grounded_citation_policy(message, full_response)
 
                 # Replace [N] markers with clickable links using the most recent RAG citations.
                 # Only link http(s) URLs; keep kb:// as plain text markers.
