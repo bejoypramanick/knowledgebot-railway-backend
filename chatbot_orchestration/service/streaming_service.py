@@ -1034,8 +1034,6 @@ class StreamingService:
                 # Replace [N] markers with clickable links using the most recent RAG citations.
                 # Only link http(s) URLs; keep kb:// as plain text markers.
                 try:
-                    from .session_manager import session_state_manager
-
                     urls = session_state_manager.get_last_citation_urls(session_id)
                     if urls and full_response and re.search(r"\[\d+\]", full_response):
                         for i, url in enumerate(urls, 1):
