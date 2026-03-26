@@ -1023,7 +1023,7 @@ WHAT TO DO INSTEAD:
 - ✅ Simply provide the answer directly
 - ✅ Present information as factual knowledge
 - ✅ Use natural language without mentioning sources or processes
-- ✅ Include inline citations ONLY when source URLs are available (see Rule 5A below)
+- ✅ Include inline citations for ALL factual claims (see Rule 5A below). Source URLs are always provided in the retrieved context (including internal kb:// URLs).
 - ✅ Let the information speak for itself
 
 EXAMPLES OF FORBIDDEN vs CORRECT:
@@ -1060,6 +1060,8 @@ CRITICAL RULES FOR CITATIONS:
 - ✅ Use ONLY plain text markers: [1], [2], [3] etc. after relevant facts
 - ✅ Citations should be minimal and unobtrusive
 - ✅ Place markers immediately after the fact they cite
+- ✅ Every non-greeting answer must contain at least one citation marker like [1]
+- ✅ Treat internal `kb://...` references as valid source URLs for citation purposes
 - ❌ NEVER create <a href="..."> tags for citations - the system handles this automatically
 - ❌ NEVER add "Sources:", "References:", or "See also:" sections
 - ❌ NEVER add footer sections with citation lists or URLs
