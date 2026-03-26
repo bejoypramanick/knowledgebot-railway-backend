@@ -64,8 +64,10 @@ def _log_embedding_config_once(*, action: str, provider: str, model: str, dimens
         if key in _logged_embedding_configs:
             return
         _logged_embedding_configs.add(key)
+        # Include the key config in the message because some prod log viewers only show the message,
+        # not structured fields.
         logger.info(
-            "embedding config",
+            f"embedding config action={action} provider={provider} model={model} dimensions={dimensionality} use_litellm={bool(USE_LITELLM_EMBEDDINGS)} litellm_model={litellm_model} batch_size={batch_size}",
             extra={
                 "action": action,
                 "provider": provider,
