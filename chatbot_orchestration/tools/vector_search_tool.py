@@ -259,11 +259,16 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
             )
                 
             # --- STEP 3: Format & Compression ---
-            formatted_chunks: List[str] = []
+            # Build a single, citation-friendly source header format and reuse it for both
+            # table + narrative contexts. Some models will ignore citations unless the
+            # "cite as [N]" mapping is extremely explicit.
             citation_urls: List[str] = []
+            table_chunks: List[str] = []
+            narrative_chunks: List[str] = []
+
             for i, chunk in enumerate(top_chunks):
-                doc_id, doc_type = str(chunk['document_id']), chunk['document_type']
-                content = chunk['content']
+                doc_id, doc_type = str(chunk["document_id"]), chunk["document_type"]
+                content = chunk["content"]
                 score = f"{float(chunk['hybrid_score']):.3f}"
 
                 # Prefer canonical URL for websites; otherwise fall back to a stable KB reference.
@@ -278,21 +283,12 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                     url = f"kb://{doc_type}/{doc_id}"
                 citation_urls.append(url)
 
-                # Inline citation mapping: the brain should cite facts from this chunk using [N].
                 chunk_str = (
-                    f"Source {i+1} ({doc_type} {doc_id}, Score: {score}, URL: {url}) [cite {i+1}]:\n"
+                    f"Source {i+1} (type={doc_type} id={doc_id} score={score} url={url})\n"
+                    f"Cite this source as: [{i+1}]\n"
                     f"{content}\n"
                 )
-                formatted_chunks.append(chunk_str)
-                
-            # Preserve table chunks verbatim; compress only narrative chunks.
-            table_chunks: List[str] = []
-            narrative_chunks: List[str] = []
-            for i, chunk in enumerate(top_chunks):
-                doc_id, doc_type = str(chunk['document_id']), chunk['document_type']
-                content = chunk['content']
-                score = f"{float(chunk['hybrid_score']):.3f}"
-                chunk_str = f"Source {i+1} ({doc_type} {doc_id}, Score: {score}):\n{content}\n"
+
                 if _is_table_chunk(chunk):
                     table_chunks.append(chunk_str)
                 else:
