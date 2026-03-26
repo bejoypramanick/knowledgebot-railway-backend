@@ -32,6 +32,9 @@ msgpack>=1.0.5
 chonkie[all]
 # Google Generative AI (NEW SDK)
 google-genai>=1.60.0
+
+# LiteLLM (provider-agnostic embeddings + token counting helpers)
+litellm>=1.50.0
 # OpenTelemetry
 opentelemetry-api>=1.20.0
 opentelemetry-sdk>=1.20.0

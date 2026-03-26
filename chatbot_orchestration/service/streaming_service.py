@@ -1570,57 +1570,36 @@ class StreamingService:
         td_tokens = 0
         try:
             import os
-            from concurrent.futures import ThreadPoolExecutor
-            loop = asyncio.get_event_loop()
             token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"))
 
-            from ..core.ai import get_genai_client
-            genai_client = get_genai_client()
-            if genai_client:
-                executor = ThreadPoolExecutor(max_workers=4)
+            from litellm import token_counter
 
-                def count_user():
-                    return genai_client.models.count_tokens(model=token_model, contents=user_message)
+            def count_text(text_val: str) -> int:
+                if not text_val or not str(text_val).strip():
+                    return 0
+                # LiteLLM token_counter is local estimation (no external API call).
+                return int(token_counter(model=token_model, text=str(text_val)) or 0)
 
-                def count_bot():
-                    return genai_client.models.count_tokens(model=token_model, contents=response_text)
+            user_message_tokens = count_text(user_message)
+            bot_message_tokens = count_text(response_text)
+            sp_tokens = count_text(system_prompt_text)
+            hist_tokens = count_text(history_text)
 
-                def count_system_prompt():
-                    if not system_prompt_text.strip():
-                        return None
-                    return genai_client.models.count_tokens(model=token_model, contents=system_prompt_text)
+            # Derive tool/overhead tokens from the remainder.
+            # When cache is ACTIVE:
+            #   cache_read_tokens = sys prompt + tool schema (cached, billed at 90% discount)
+            #   input_tokens = history + user msg + multi-turn overhead (non-cached)
+            #   Total billable prompt = input_tokens + cache_read_tokens
+            # When cache is INACTIVE:
+            #   input_tokens = sys prompt + tool schema + history + user msg + multi-turn overhead
+            #   cache_read_tokens = 0
+            total_prompt = input_tokens + cache_read_tokens
+            known_tokens = sp_tokens + hist_tokens + user_message_tokens
+            td_tokens = max(0, total_prompt - known_tokens)
 
-                def count_history():
-                    if not history_text.strip():
-                        return None
-                    return genai_client.models.count_tokens(model=token_model, contents=history_text)
-
-                results = await asyncio.gather(
-                    loop.run_in_executor(executor, count_user),
-                    loop.run_in_executor(executor, count_bot),
-                    loop.run_in_executor(executor, count_system_prompt),
-                    loop.run_in_executor(executor, count_history),
-                )
-                user_message_tokens = results[0].total_tokens if results[0] else 0
-                bot_message_tokens = results[1].total_tokens if results[1] else 0
-                sp_tokens = results[2].total_tokens if results[2] else 0
-                hist_tokens = results[3].total_tokens if results[3] else 0
-
-                # Derive tool/overhead tokens from the remainder.
-                # When cache is ACTIVE:
-                #   cache_read_tokens = sys prompt + tool schema (cached, billed at 90% discount)
-                #   input_tokens = history + user msg + multi-turn overhead (non-cached)
-                #   Total billable prompt = input_tokens + cache_read_tokens
-                # When cache is INACTIVE:
-                #   input_tokens = sys prompt + tool schema + history + user msg + multi-turn overhead
-                #   cache_read_tokens = 0
-                total_prompt = input_tokens + cache_read_tokens
-                known_tokens = sp_tokens + hist_tokens + user_message_tokens
-                td_tokens = max(0, total_prompt - known_tokens)
-
-                logger.info(f"📊 [MSG_TOKENS] Message token counts: user={user_message_tokens}, bot={bot_message_tokens}")
-                logger.info(f"📊 [COMPONENT_TOKENS] system_prompt={sp_tokens}, history={hist_tokens}, tools_overhead={td_tokens}")
-                logger.info(f"📊 [DERIVATION] total_prompt={total_prompt} (input={input_tokens} + cache_read={cache_read_tokens}) - known={known_tokens} = tools_overhead={td_tokens}")
+            logger.info(f"📊 [MSG_TOKENS] Message token counts: user={user_message_tokens}, bot={bot_message_tokens}")
+            logger.info(f"📊 [COMPONENT_TOKENS] system_prompt={sp_tokens}, history={hist_tokens}, tools_overhead={td_tokens}")
+            logger.info(f"📊 [DERIVATION] total_prompt={total_prompt} (input={input_tokens} + cache_read={cache_read_tokens}) - known={known_tokens} = tools_overhead={td_tokens}")
         except Exception as tc_err:
             logger.warning(f"⚠️ [MSG_TOKENS] Failed to count message tokens: {tc_err}")
 
@@ -1857,30 +1836,21 @@ class StreamingService:
             if not steps:
                 return
 
-            # Count tokens for each step in parallel
-            genai_client = get_genai_client()
+            # Count tokens for each step (local estimation via LiteLLM)
             token_model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"))
-            if genai_client:
-                loop = asyncio.get_event_loop()
-                executor = ThreadPoolExecutor(max_workers=min(len(steps), 8))
+            try:
+                from litellm import token_counter
 
-                async def count_step_tokens(text_content):
-                    if not text_content.strip():
-                        return 0
-                    try:
-                        result = await loop.run_in_executor(
-                            executor,
-                            lambda: genai_client.models.count_tokens(model=token_model, contents=text_content)
-                        )
-                        return result.total_tokens if result else 0
-                    except Exception:
-                        return 0
-
-                token_results = await asyncio.gather(
-                    *[count_step_tokens(s['full_content']) for s in steps]
-                )
-                for i, tok in enumerate(token_results):
-                    steps[i]['token_count'] = tok
+                for s in steps:
+                    content = s.get("full_content") or ""
+                    if not str(content).strip():
+                        s["token_count"] = 0
+                    else:
+                        s["token_count"] = int(token_counter(model=token_model, text=str(content)) or 0)
+            except Exception:
+                # Keep token_count unset/zero on failure.
+                for s in steps:
+                    s["token_count"] = s.get("token_count", 0)
 
             # Insert all steps
             async with get_db_session() as db:

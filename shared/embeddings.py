@@ -19,6 +19,8 @@ _LEGACY_GOOGLE_EMBEDDING_FALLBACKS = {
 }
 _GOOGLE_BATCH_EMBED_LIMIT = 100
 
+USE_LITELLM_EMBEDDINGS = os.getenv("USE_LITELLM_EMBEDDINGS", "true").lower() == "true"
+
 def get_genai_client():
     from google import genai
     global _genai_client
@@ -39,6 +41,39 @@ def _google_embed_config():
         return None
     return types.EmbedContentConfig(output_dimensionality=dimensionality)
 
+def _litellm_embedding_model(provider: str, model: str) -> str:
+    # LiteLLM uses provider/model for some backends (Gemini in particular).
+    if not model:
+        return model
+    if "/" in model:
+        return model
+    if provider == "google":
+        return f"gemini/{model}"
+    return model
+
+async def _litellm_embed(texts: List[str], provider: str, model: str) -> List[List[float]]:
+    import asyncio as _asyncio
+    from litellm import embedding
+
+    dimensionality = int(os.getenv("EMBEDDING_OUTPUT_DIMENSIONALITY", str(EMBEDDING_OUTPUT_DIMENSIONALITY)))
+    litellm_model = _litellm_embedding_model(provider, model)
+
+    def _call():
+        # `dimensions` is supported for many providers/models; if unsupported, LiteLLM will raise.
+        return embedding(model=litellm_model, input=texts, dimensions=dimensionality)
+
+    resp = await _asyncio.to_thread(_call)
+    data = resp.get("data") if isinstance(resp, dict) else getattr(resp, "data", None)
+    if not data:
+        return []
+    out: List[List[float]] = []
+    for item in data:
+        if isinstance(item, dict):
+            out.append(item.get("embedding") or [])
+        else:
+            out.append(getattr(item, "embedding", []) or [])
+    return out
+
 
 def _google_embedding_model_candidates(model: str) -> List[str]:
     candidates = [model]
@@ -58,6 +93,10 @@ async def generate_embedding(query: str) -> List[float]:
     model = os.getenv("EMBEDDING_MODEL", EMBEDDING_MODEL)
     
     try:
+        if USE_LITELLM_EMBEDDINGS:
+            embeddings = await _litellm_embed([query], provider, model)
+            return embeddings[0] if embeddings else []
+
         if provider == "google":
             client = get_genai_client()
             if not client:
@@ -106,6 +145,16 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
         return []
 
     try:
+        if USE_LITELLM_EMBEDDINGS:
+            # Keep batch limit behavior consistent for Google/Gemini.
+            if provider == "google":
+                all_embeddings: List[List[float]] = []
+                for i in range(0, len(texts), _GOOGLE_BATCH_EMBED_LIMIT):
+                    batch = texts[i:i + _GOOGLE_BATCH_EMBED_LIMIT]
+                    all_embeddings.extend(await _litellm_embed(batch, provider, model))
+                return all_embeddings
+            return await _litellm_embed(texts, provider, model)
+
         if provider == "google":
             client = get_genai_client()
             if not client:
