@@ -219,6 +219,12 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
     let file_bytes = download_from_s3(state, &job.s3_key).await?;
     let extraction = extract_and_chunk(job, &file_bytes).await?;
 
+    if extraction.markdown.trim().is_empty() {
+        return Err(anyhow!(
+            "extraction produced empty markdown (mime_type may be unsupported or content extraction failed)"
+        ));
+    }
+
     let markdown_key = upload_bytes(
         state,
         format!("{}.md", job.artifact_prefix),
@@ -317,6 +323,14 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     let checksum = checksum(file_bytes);
     let mime_type = resolve_mime_type(job, file_bytes)
         .context("unable to validate or detect mime type for extraction")?;
+    info!(
+        job_id = %job.job_id,
+        document_id = %job.document_id,
+        worker_type = %job.worker_type,
+        mime_type = %mime_type,
+        bytes = file_bytes.len(),
+        "running kreuzberg extract_bytes"
+    );
     let extraction_config = build_extraction_config();
     let chunk_size = extraction_config
         .chunking
@@ -333,8 +347,23 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         .await
         .context("kreuzberg extract_bytes failed")?;
 
+    info!(
+        job_id = %job.job_id,
+        document_id = %job.document_id,
+        content_chars = result.content.chars().count(),
+        tables = result.tables.len(),
+        has_chunks = result.chunks.as_ref().map(|c| c.len()).unwrap_or(0),
+        "kreuzberg extraction completed"
+    );
+
     let enriched_tables = build_table_artifacts(&result.tables, chunk_size);
     let markdown = inject_table_kv_sections(&result.content, &enriched_tables);
+    info!(
+        job_id = %job.job_id,
+        document_id = %job.document_id,
+        markdown_chars = markdown.chars().count(),
+        "prepared markdown artifacts"
+    );
     let page_count = result.pages.as_ref().map(|pages| pages.len()).unwrap_or(0);
 
     let mut chunking_config = extraction_config.clone();
