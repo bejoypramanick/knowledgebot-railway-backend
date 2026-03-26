@@ -853,6 +853,12 @@ CATEGORY B - SAME SUBJECT, BUT NOT THE EXACT DETAIL REQUESTED:
 The search returned information about the SAME SUBJECT/DOMAIN the user asked about, but not the specific detail they wanted.
 → MANDATORY RESPONSE: "I don't have any information on this topic."
 
+CATEGORY B EXCEPTION (AMBIGUOUS USER QUERY WITH A CLEAR SCOPED FACT IN SOURCES):
+If the user's question is ambiguous (e.g., "Finland population") and the retrieved sources contain a clear, well-defined metric that plausibly matches (e.g., "Finland-born residents in <place> (2021): 15,289"), you MAY answer with that scoped fact as long as you:
+- Clearly state the scope/metric in the same sentence (what the number refers to).
+- Include inline citation markers [N] for the fact.
+- Do NOT imply it is the population of the country unless the sources explicitly say so.
+
 HOW TO DISTINGUISH A FROM B:
 - Ask: "Is the RAG result about the SAME TOPIC/DOMAIN the user asked about?"
 - If NO → Category A → "I don't have any information on this topic."
