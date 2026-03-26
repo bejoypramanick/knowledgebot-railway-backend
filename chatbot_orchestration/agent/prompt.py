@@ -157,6 +157,7 @@ When using the search_knowledge_base tool (FileSearch) on documents that contain
 - Use these summaries to better understand table data and provide more accurate responses
 - The Summary and Column Summary provide essential context for interpreting table rows correctly
 - When referencing row data, understand that each sentence describes complete information about one entity
+- **TABLE DATA ALWAYS INCLUDED WHEN AVAILABLE**: If the answer appears in both narrative text and table(s), you MUST include the relevant table values/rows in your final answer (not just the narrative). The table is the source of truth for exact numbers and structured facts.
 
 🚨 MANDATORY TABLE SELECTION PROCESS FOR FILESEARCH 🚨
 When the FileSearch tool returns results with table data, you MUST follow this process:
