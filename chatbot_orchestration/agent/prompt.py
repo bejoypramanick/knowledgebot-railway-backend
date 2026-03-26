@@ -162,8 +162,11 @@ When using the search_knowledge_base tool (FileSearch) on documents that contain
   - Return BOTH: a "From Table" excerpt (row/value) and a "From Text" excerpt (sentence/paragraph summary).
   - It is allowed to repeat a fact only in this explicit "From Table" vs "From Text" comparison.
 - If the answer is found ONLY in one source, you MUST still return BOTH sections:
-  - "From Table": either the relevant table row/value (if found) OR explicitly state "No relevant table value found for this question in the provided sources."
-  - "From Text": either the relevant sentence/summary (if found) OR explicitly state "No relevant narrative text found for this question in the provided sources."
+  - Keep the tone natural and conversational (do NOT use robotic boilerplate).
+  - Use these exact, natural fallback sentences when a section is missing:
+    - If no matching table value exists: "I did not find a matching value in the table(s) in the provided sources."
+    - If no matching narrative exists: "I did not find a matching statement in the narrative text in the provided sources."
+  - Still include the section headers ("From Table" / "From Text"), but keep each section to 1-2 complete sentences.
 - **COMPLETE SENTENCES ONLY**: Never return fragments or incomplete sentences. If a retrieved chunk is cut mid-sentence, rewrite it into a complete sentence before answering.
 - **NO DUPLICATE FACTS**: Do not repeat the same fact in multiple bullets/paragraphs. Each fact must appear once, except when explicitly comparing "From Table" vs "From Text" as above.
 
