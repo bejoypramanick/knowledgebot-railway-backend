@@ -222,5 +222,16 @@ class SessionStateManager:
             state['tools_used'] = set()
         state['tools_used'].add(tool_name)
 
+    def set_last_citation_urls(self, session_id: str, urls: list[str]) -> None:
+        """Store citation URLs for the most recent RAG tool call in this session."""
+        state = self.get_session_state(session_id)
+        state["last_citation_urls"] = urls or []
+
+    def get_last_citation_urls(self, session_id: str) -> list[str]:
+        """Get citation URLs for the most recent RAG tool call in this session."""
+        state = self.get_session_state(session_id)
+        urls = state.get("last_citation_urls") or []
+        return urls if isinstance(urls, list) else []
+
 # Global session manager instance
 session_state_manager = SessionStateManager()

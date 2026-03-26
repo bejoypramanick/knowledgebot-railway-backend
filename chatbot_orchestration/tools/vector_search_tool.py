@@ -260,6 +260,7 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                 
             # --- STEP 3: Format & Compression ---
             formatted_chunks: List[str] = []
+            citation_urls: List[str] = []
             for i, chunk in enumerate(top_chunks):
                 doc_id, doc_type = str(chunk['document_id']), chunk['document_type']
                 content = chunk['content']
@@ -275,6 +276,7 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                     url = None
                 if not url:
                     url = f"kb://{doc_type}/{doc_id}"
+                citation_urls.append(url)
 
                 # Inline citation mapping: the brain should cite facts from this chunk using [N].
                 chunk_str = (
@@ -333,6 +335,7 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
             if ctx.deps.session_id:
                 from ..service.session_manager import session_state_manager
                 session_state_manager.set_tool_used(ctx.deps.session_id, "search_knowledge_base")
+                session_state_manager.set_last_citation_urls(ctx.deps.session_id, citation_urls)
                 
             return response
             

@@ -1031,6 +1031,25 @@ class StreamingService:
                 # This must run before adding any debug sections or broadcasting.
                 full_response = self._enforce_grounded_citation_policy(message, full_response)
 
+                # Replace [N] markers with clickable links using the most recent RAG citations.
+                # Only link http(s) URLs; keep kb:// as plain text markers.
+                try:
+                    from .session_manager import session_state_manager
+
+                    urls = session_state_manager.get_last_citation_urls(session_id)
+                    if urls and full_response and re.search(r"\[\d+\]", full_response):
+                        for i, url in enumerate(urls, 1):
+                            if not isinstance(url, str):
+                                continue
+                            if not (url.startswith("http://") or url.startswith("https://")):
+                                continue
+                            full_response = full_response.replace(
+                                f"[{i}]",
+                                f'<a href="{url}" target="_blank" rel="noopener noreferrer">[{i}]</a>',
+                            )
+                except Exception as link_err:
+                    logger.warning(f"📎 [CITATION_POST] Inline link rendering failed (non-fatal): {link_err}")
+
                 # Add all debug download links if S3 upload succeeded
                 download_links = []
                 
