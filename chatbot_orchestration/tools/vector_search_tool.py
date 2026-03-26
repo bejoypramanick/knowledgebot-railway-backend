@@ -78,6 +78,53 @@ def _is_table_chunk(chunk: Dict[str, Any]) -> bool:
         return False
     return False
 
+def _ensure_table_coverage(
+    selected: List[Dict[str, Any]],
+    pool: List[Dict[str, Any]],
+    *,
+    min_tables: int,
+    max_total: int,
+) -> List[Dict[str, Any]]:
+    """
+    Ensure table chunks aren't dropped entirely by reranking.
+
+    Strategy:
+    - Keep current `selected` ordering as much as possible.
+    - If fewer than `min_tables` table chunks are present, pull additional table chunks
+      from the broader `pool` (sorted by hybrid_score) and append them.
+    - Trim to `max_total`.
+    """
+    if not selected:
+        return selected
+
+    out: List[Dict[str, Any]] = list(selected)
+    table_count = sum(1 for c in out if _is_table_chunk(c))
+    if table_count >= min_tables:
+        return out[:max_total]
+
+    # Prefer high-scoring table chunks from the original pool.
+    def _score(c: Dict[str, Any]) -> float:
+        try:
+            return float(c.get("hybrid_score") or 0.0)
+        except Exception:
+            return 0.0
+
+    existing_ids = {(str(c.get("document_id")), str(c.get("content") or "")[:200]) for c in out}
+    candidates = [c for c in pool if _is_table_chunk(c)]
+    candidates.sort(key=_score, reverse=True)
+
+    for c in candidates:
+        key = (str(c.get("document_id")), str(c.get("content") or "")[:200])
+        if key in existing_ids:
+            continue
+        out.append(c)
+        existing_ids.add(key)
+        table_count += 1
+        if table_count >= min_tables:
+            break
+
+    return out[:max_total]
+
 def _rerank_results(query: str, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Implement FlashRank Stage-2 reranking with telemetry."""
     try:
@@ -200,6 +247,16 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                 top_chunks = _rerank_results(query, chunks)
             else:
                 top_chunks = chunks[:10]
+
+            # Guardrail: ensure table chunks survive reranking so we can answer with table + narrative.
+            min_table_chunks = int(os.getenv("RAG_MIN_TABLE_CHUNKS", "2"))
+            max_total_chunks = int(os.getenv("RAG_MAX_TOP_CHUNKS", "10"))
+            top_chunks = _ensure_table_coverage(
+                top_chunks,
+                chunks,
+                min_tables=min_table_chunks,
+                max_total=max_total_chunks,
+            )
                 
             # --- STEP 3: Format & Compression ---
             formatted_chunks = []
