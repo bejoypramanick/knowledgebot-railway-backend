@@ -1,6 +1,8 @@
 import time
 import logging
 from shared.otel_logger import get_otel_logger
+from shared.otel_logger import set_request_id, get_request_id
+from shared.correlation_id import get_correlation_id, set_correlation_id
 
 from fastapi import Request
 
@@ -9,7 +11,10 @@ logger = get_otel_logger(__name__, "knowledgebase_ingestion")
 async def log_requests_middleware(request: Request, call_next):
     """Middleware to log all incoming requests with timing and status information."""
     start_time = time.time()
-    request_id = f"{int(start_time * 1000000) % 1000000:06d}"
+    # Use distributed correlation id when available.
+    corr_id = request.headers.get("X-Correlation-ID") or get_request_id() or get_correlation_id()
+    set_correlation_id(corr_id)
+    set_request_id(corr_id)
     
     # Get route pattern if available (e.g., /api/v1/knowledgebase/{action})
     route_path = request.url.path
@@ -18,20 +23,20 @@ async def log_requests_middleware(request: Request, call_next):
         if route and hasattr(route, "path"):
             route_path = f"{route.path} (matched: {request.url.path})"
 
-    logger.info(f"📨 [{request_id}] {request.method} {route_path} - Client: {request.client.host if request.client else 'unknown'}")
+    logger.info(f"📨 [{corr_id}] {request.method} {route_path} - Client: {request.client.host if request.client else 'unknown'}")
 
     try:
         response = await call_next(request)
         duration = time.time() - start_time
         
         if response.status_code >= 400:
-            logger.warning(f"↩️ [{request_id}] Response: {response.status_code} - Path: {request.url.path} - Duration: {duration:.3f}s")
+            logger.warning(f"↩️ [{corr_id}] Response: {response.status_code} - Path: {request.url.path} - Duration: {duration:.3f}s")
         else:
-            logger.info(f"↩️ [{request_id}] Response: {response.status_code} - Duration: {duration:.3f}s")
+            logger.info(f"↩️ [{corr_id}] Response: {response.status_code} - Duration: {duration:.3f}s")
 
         return response
 
     except Exception as e:
         duration = time.time() - start_time
-        logger.error(f"💥 [{request_id}] Request failed after {duration:.3f}s: {e}", exc_info=True)
+        logger.error(f"💥 [{corr_id}] Request failed after {duration:.3f}s: {e}", exc_info=True)
         raise

@@ -16,6 +16,7 @@ from knowledgebase_ingestion.service.webcrawl_service import (
 )
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import web_celery
+from shared.log_sanitizer import hash_pii
 
 logger = get_otel_logger("webcrawl_router", "knowledgebase-ingestion")
 
@@ -211,7 +212,7 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
         user_email, user_id = extract_user_from_request(request)
 
         logger.info(f"🗑️  [WEBSITE_DELETE_REQUEST] Deleting website {website_id} (hard_delete={hard_delete})")
-        logger.info(f"   Requested by: {user_email}")
+        logger.info(f"   Requested by: user_hash={hash_pii(user_email)} user_id={user_id}")
 
         from knowledgebase_ingestion.service.comprehensive_deletion_service import (
             comprehensive_deletion_service,
@@ -255,7 +256,7 @@ async def scrape_website_async_endpoint(request: Request = None):
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        logger.info(f"🔐 [AUTH] User Email: {user_email}, User ID (from header): {user_id}")
+        logger.info(f"🔐 [AUTH] User: user_hash={hash_pii(user_email)} user_id={user_id}")
         
         # Look up user_role_id from database using email
         from knowledgebase_ingestion.utils.auth import get_user_role_id_from_email

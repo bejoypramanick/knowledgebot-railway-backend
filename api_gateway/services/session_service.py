@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional
 
 from api_gateway.core.logging_config import get_railway_logger
 from shared.tracing_decorator import trace_service
+from shared.log_sanitizer import hash_pii
 
 logger = get_railway_logger(__name__)
 
@@ -78,8 +79,8 @@ class SessionService:
         self.store.create(session_id, session_data, SESSION_MAX_AGE)
         
         logger.info(
-            f"✅ Session created for {user_data.get('email')} "
-            f"(role={user_data.get('role')}) from IP {ip_address}"
+            f"✅ Session created for user_hash={hash_pii(user_data.get('email'))} "
+            f"(role={user_data.get('role')})"
         )
         
         return session_id
@@ -113,7 +114,7 @@ class SessionService:
         # Check expiration (Redis handles TTL, but double-check for in-memory)
         if session_data.get("expires_at") and session_data["expires_at"] < int(time.time()):
             self.store.delete(session_id)
-            logger.info(f"⏰ Session expired for {session_data.get('email')}")
+            logger.info(f"⏰ Session expired for user_hash={hash_pii(session_data.get('email'))}")
             return None
         
         # Security validation
@@ -121,7 +122,7 @@ class SessionService:
             if not self._validate_session_security(session_data, ip_address, user_agent):
                 # Session hijacking detected - invalidate immediately
                 self.store.delete(session_id)
-                logger.warning(f"🚨 Session invalidated for {session_data.get('email')} - security check failed")
+                logger.warning(f"🚨 Session invalidated for user_hash={hash_pii(session_data.get('email'))} - security check failed")
                 return None
         
         # Update request tracking with write-back throttling
@@ -134,7 +135,7 @@ class SessionService:
         if current_time - last_update > SESSION_UPDATE_THRESHOLD:
             session_data["last_update_time"] = current_time
             self.store.create(session_id, session_data, SESSION_MAX_AGE)
-            logger.debug(f"🔄 Session updated for {session_data.get('email')}")
+            logger.debug(f"🔄 Session updated for user_hash={hash_pii(session_data.get('email'))}")
         
         return session_data
     
@@ -172,7 +173,7 @@ class SessionService:
         session_data["expires_at"] = int(time.time()) + SESSION_MAX_AGE
         self.store.update_ttl(session_id, SESSION_MAX_AGE)
         
-        logger.info(f"✅ Session refreshed for {session_data.get('email')}")
+        logger.info(f"✅ Session refreshed for user_hash={hash_pii(session_data.get('email'))}")
         return True
     
     def _validate_session_security(

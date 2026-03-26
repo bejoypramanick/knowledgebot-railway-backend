@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from api_gateway.core.firebase_auth import verify_firebase_token
 from api_gateway.core.logging_config import get_railway_logger
+from shared.log_sanitizer import hash_pii
 
 logger = get_railway_logger(__name__)
 
@@ -104,7 +105,8 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
             if session_id:
                 # PG18: session_id IS the database PK — store directly, no resolution needed
                 request.state.session_id = session_id
-                logger.debug(f"🔄 Session ID from cookie: {session_id}")
+                # Avoid logging raw session IDs (treat as secrets).
+                logger.debug("🔄 Customer session cookie present")
 
         # Skip authentication for excluded paths (anonymous customers, public endpoints)
         is_excluded = self.is_excluded_path(path)
@@ -158,7 +160,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         request.state.user_email = session_data["email"]
         request.state.user_name = session_data["name"]
 
-        logger.debug(f"✅ Authenticated via session cookie: {session_data['email']} for {path}")
+        logger.debug(f"✅ Authenticated via session cookie: user_hash={hash_pii(session_data.get('email'))} path={path}")
 
         # Continue to next middleware/endpoint
         response = await call_next(request)

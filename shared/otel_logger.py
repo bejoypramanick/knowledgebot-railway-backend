@@ -8,10 +8,12 @@ from typing import Dict, Any, Optional
 from contextvars import ContextVar
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
+from shared.log_sanitizer import hash_pii
 
 # Context variables to store task ID and session ID for logging
 task_id_ctx_var: ContextVar[Optional[str]] = ContextVar("task_id", default=None)
 session_id_ctx_var: ContextVar[Optional[str]] = ContextVar("session_id", default=None)
+request_id_ctx_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
 
 # Admin context variables for audit trail logging
 admin_session_id_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_session_id", default=None)
@@ -41,10 +43,19 @@ def get_session_id() -> Optional[str]:
     """Get current session ID from context"""
     return session_id_ctx_var.get()
 
+def set_request_id(request_id: str) -> None:
+    """Set request correlation id for the current context."""
+    request_id_ctx_var.set(request_id)
+
+def get_request_id() -> Optional[str]:
+    """Get request correlation id from context."""
+    return request_id_ctx_var.get()
+
 def set_admin_context(session_id: str, email: str, role: str) -> None:
     """Set admin context for OTEL logging (session_id, email, role)"""
     admin_session_id_ctx_var.set(session_id)
-    admin_email_ctx_var.set(email)
+    # Never store raw email in logging context.
+    admin_email_ctx_var.set(hash_pii(email))
     admin_role_ctx_var.set(role)
 
 def get_admin_session_id() -> Optional[str]:
@@ -122,6 +133,7 @@ class OpenTelemetryLogger:
         admin_role = get_admin_role()
         task_id = get_task_id()
         session_id = get_session_id()
+        request_id = get_request_id()
         workflow = get_workflow()
 
         # Build context prefix: workflow (if present), admin context, then chat session, then task
@@ -133,12 +145,15 @@ class OpenTelemetryLogger:
 
         # Admin context - high priority when present
         if admin_email:
-            admin_str = f"admin:{admin_email}"
+            admin_str = f"admin_hash:{admin_email}"
             if admin_role:
                 admin_str += f" role:{admin_role}"
             if admin_session_id:
                 admin_str += f" admin_session:{admin_session_id[:8]}"
             context_parts.append(admin_str)
+
+        if request_id:
+            context_parts.append(f"req:{request_id}")
 
         # Chat session context
         if session_id:
@@ -183,6 +198,7 @@ class OpenTelemetryLogger:
         admin_role = get_admin_role()
         task_id = get_task_id()
         session_id = get_session_id()
+        request_id = get_request_id()
         workflow = get_workflow()
 
         # Add workflow context (highest priority)
@@ -202,6 +218,8 @@ class OpenTelemetryLogger:
             extra['task_id'] = task_id
         if session_id:
             extra['session_id'] = session_id
+        if request_id:
+            extra['request_id'] = request_id
 
         # Add custom attributes with safe names (avoid reserved LogRecord attributes)
         extra.update({

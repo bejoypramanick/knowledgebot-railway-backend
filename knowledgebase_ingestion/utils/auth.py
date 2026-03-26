@@ -5,6 +5,7 @@ from typing import Tuple, Optional
 from fastapi import Request, HTTPException
 from shared.otel_logger import get_otel_logger
 from shared.sqlalchemy_db import get_db_session
+from shared.log_sanitizer import hash_pii
 
 logger = get_otel_logger("auth", "knowledgebase-ingestion")
 
@@ -62,14 +63,14 @@ async def get_user_role_id_from_email(user_email: str) -> Optional[str]:
             user_role_id = result.scalar()
 
             if user_role_id:
-                logger.info(f"✅ Found user_role_id {user_role_id} for email {user_email}")
+                logger.info(f"✅ Found user_role_id={user_role_id} for user_hash={hash_pii(user_email)}")
             else:
-                logger.warning(f"⚠️ No user_role_id found for email {user_email}")
+                logger.warning(f"⚠️ No user_role_id found for user_hash={hash_pii(user_email)}")
 
             return user_role_id
 
     except Exception as e:
-        logger.error(f"❌ Error looking up user_role_id for {user_email}: {e}")
+        logger.error(f"❌ Error looking up user_role_id for user_hash={hash_pii(user_email)}: {e}", exc_info=True)
         return None
 
 

@@ -669,15 +669,19 @@ async def public_chat_stream(request: Request):
         settings = get_settings()
         chatbot_service_url = settings.chatbot_orchestration_url
 
-        # Log the request
-        import uuid
-        correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
-        logger.info(f"🔍 [{correlation_id}] Public chat stream request received from authorized domain")
+        # Correlation ID for end-to-end tracing across gateway -> chatbot service
+        from shared.correlation_id import get_correlation_id, add_correlation_id_headers, set_correlation_id
+        from shared.otel_logger import set_request_id
+        correlation_id = request.headers.get("X-Correlation-ID") or get_correlation_id()
+        set_correlation_id(correlation_id)
+        set_request_id(correlation_id)
+        logger.info(f"🔍 [{correlation_id}] Public chat stream request received")
 
         # Prepare headers - remove auth-related headers for public endpoint
         headers = dict(request.headers)
         headers.pop("host", None)
         headers.pop("authorization", None)
+        headers = add_correlation_id_headers(headers, correlation_id)
 
         # Make request to chatbot service — streaming SSE proxy
         # No read timeout: first chunk can take a while (RAG search + AI inference)
@@ -985,9 +989,12 @@ async def public_widget(request: Request):
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def generic_proxy_handler(request: Request, path: str):
     """Generic proxy handler that routes ALL requests to appropriate services"""
-    # Log every incoming request for debugging
-    import uuid
-    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+    # Correlation ID for end-to-end tracing across gateway -> internal services.
+    from shared.correlation_id import get_correlation_id, set_correlation_id, add_correlation_id_headers
+    from shared.otel_logger import set_request_id
+    correlation_id = request.headers.get("X-Correlation-ID") or get_correlation_id()
+    set_correlation_id(correlation_id)
+    set_request_id(correlation_id)
     logger.info(f"🔍 [{correlation_id}] API Gateway received {request.method} {request.url.path}")
     
     try:
@@ -1055,12 +1062,13 @@ async def generic_proxy_handler(request: Request, path: str):
         logger.info(f"🔍 Original path: {path}")
         logger.info(f"🔍 Clean path: {clean_path}")
         logger.info(f"🔍 Backend path: {backend_path}")
-        
+
         # Prepare headers
         headers = dict(request.headers)
         headers.pop("host", None)
-        
-        logger.info(f"🔍 Headers being sent: {dict(headers)}")
+        headers = add_correlation_id_headers(headers, correlation_id)
+
+        # Do not log forwarded headers in production (may contain PII/secrets).
         
         # Forward user data from request state
         if hasattr(request.state, 'user'):
@@ -1068,7 +1076,7 @@ async def generic_proxy_handler(request: Request, path: str):
             headers['X-User-Email'] = request.state.user.get('email', '')
             headers['X-User-Name'] = request.state.user.get('name', '')
             headers['X-User-Role'] = request.state.user.get('role', '')
-            logger.info(f"🔍 User data forwarded: {request.state.user}")
+            # Do not log user dict (contains PII).
         
         # Make HTTP request to service
         # Use longer timeout for batch operations (file uploads/deletes) and complex queries

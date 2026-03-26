@@ -12,6 +12,8 @@ from shared.otel_logger import get_otel_logger
 from ..service.chat_service import ChatService
 from ..service.agent_service import PydanticAIGatewayService
 from ..schemas.models import ChatRequest
+from shared.log_sanitizer import hash_pii
+from shared.otel_logger import set_session_id, set_workflow
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 from ..core.utils import log_endpoint_request
@@ -38,7 +40,8 @@ async def chat_with_agent_stream(request: Request):
 
         message = body.get("message")
         session_id = body.get("session_id")
-        user_email = body.get("user_email", "anonymous@example.com")
+        # Prefer gateway-forwarded user (avoid trusting client-supplied email).
+        user_email = request.headers.get("x-user-email") or body.get("user_email") or None
 
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
@@ -60,7 +63,7 @@ async def chat_with_agent_stream(request: Request):
                 raise HTTPException(status_code=404, detail="Session not found. Please refresh the page to start a new session.")
             # Re-create Redis session from PG (session was valid but Redis TTL expired)
             await store.get_or_create_session(session_uuid=session_id)
-            logger.info(f"♻️ Redis session re-created from PG for {session_id} (TTL had expired)")
+            logger.info(f"♻️ Redis session re-created from PG for session={session_id[:16]}")
 
         # Build response headers
         response_headers = {
@@ -70,8 +73,13 @@ async def chat_with_agent_stream(request: Request):
 
         # Stream the AI response directly — no session setup needed
         async def generate_response():
+            # Ensure the streaming task has the right context vars.
+            set_workflow("chat_stream")
+            set_session_id(session_id)
+            logger.info(f"💬 [CHAT_STREAM_START] session={session_id[:16]} user_hash={hash_pii(user_email)} msg_chars={len(message)}")
             async for chunk in agent_service.stream_agent_response(message, session_id, user_email):
                 yield chunk
+            logger.info(f"💬 [CHAT_STREAM_END] session={session_id[:16]}")
 
         return StreamingResponse(
             generate_response(),
@@ -79,7 +87,7 @@ async def chat_with_agent_stream(request: Request):
             headers=response_headers
         )
     except Exception as e:
-        logger.error(f"Error in chat stream: {e}")
+        logger.error(f"Error in chat stream: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/chat/history/{session_id}")

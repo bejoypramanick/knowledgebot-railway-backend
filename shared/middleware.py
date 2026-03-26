@@ -5,6 +5,7 @@ Automatically extracts or generates correlation IDs for request tracing
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from shared.correlation_id import get_correlation_id, set_correlation_id
+from shared.otel_logger import set_request_id
 import uuid
 
 
@@ -27,6 +28,8 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
         
         # Set correlation ID in context
         set_correlation_id(correlation_id)
+        # Keep OTel logger context aligned with correlation IDs.
+        set_request_id(correlation_id)
         
         # Process request
         response = await call_next(request)

@@ -11,6 +11,7 @@ from shared.otel_logger import get_otel_logger
 from shared.telemetry import setup_telemetry, instrument_fastapi
 from shared.sqlalchemy_db import close_database, health_check as db_health_check
 from shared.db_retry import initialize_database_with_retry
+from shared.middleware import CorrelationIDMiddleware
 
 # Initialize Telemetry
 # Use default behavior (span exporter disabled by default via env var)
@@ -96,6 +97,9 @@ app = FastAPI(
 
 # Instrument FastAPI for OpenTelemetry immediately after app creation
 instrument_fastapi(app, "chatbot-orchestration")
+
+# Correlation IDs (X-Correlation-ID) for end-to-end tracing/logging
+app.add_middleware(CorrelationIDMiddleware)
 
 # CORS Middleware
 # Allow all origins in production for simplicity, or restrict as needed

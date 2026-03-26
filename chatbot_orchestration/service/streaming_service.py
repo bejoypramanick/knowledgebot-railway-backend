@@ -12,6 +12,7 @@ from typing import Any, Dict, List, AsyncGenerator
 import sys
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart, BuiltinToolCallPart, BuiltinToolReturnPart, ToolCallPart, ToolReturnPart
 from shared.otel_logger import get_otel_logger, set_session_id
+from shared.log_sanitizer import hash_pii
 
 from ..core.dependencies import ChatSessionDeps
 from ..core.ai import get_genai_client
@@ -235,33 +236,9 @@ class StreamingService:
             # Get chat history for context
             chat_history = await session_state_manager.get_chat_history(session_id)
             logger.info(f"✅ Retrieved {len(chat_history)} messages from chat history")
-
-            # DEBUG: Log exact messages being passed to agent
+            # Never log chat history contents (PII/customer data). Counts only.
             if chat_history:
-                logger.info("=" * 100)
-                logger.info("🔍 DEBUG: EXACT MESSAGES FROM DATABASE")
-                logger.info("=" * 100)
-                for i, msg in enumerate(chat_history):
-                    logger.info(f"Message {i}:")
-                    logger.info(f"  Role: {msg.get('role')}")
-                    logger.info(f"  Content length: {len(msg.get('message', msg.get('content', '')))} chars")
-                    logger.info(f"  Content preview: {msg.get('message', msg.get('content', ''))[:150]}...")
-                logger.info("=" * 100)
-
-            # Log detailed chat history
-            if chat_history:
-                logger.info("=" * 100)
-                logger.info("📚 CHAT MESSAGE HISTORY (INPUT TO AGENT)")
-                logger.info(f"   Total messages in history: {len(chat_history)}")
-                logger.info("-" * 100)
-                for i, msg in enumerate(chat_history):
-                    role = msg.get('role', 'unknown').upper()
-                    content = msg.get('content', '')[:200]  # Show first 200 chars
-                    timestamp = msg.get('created_at', 'N/A')
-                    logger.info(f"   Message {i+1} [{role}] (created: {timestamp})")
-                    logger.info(f"      Preview: {content}..." if len(msg.get('content', '')) > 200 else f"      Content: {content}")
-                logger.info("=" * 100)
-                sys.stdout.flush()
+                logger.info(f"📚 [CHAT_HISTORY] session={session_id[:16]} messages={len(chat_history)}")
 
             # Convert chat history to Pydantic AI format
             pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
@@ -813,15 +790,14 @@ class StreamingService:
                                         content = getattr(part, 'content', '')
                                         content_len = len(str(content))
                                         logger.info(f"      Content length: {content_len}")
-                                        if content_len > 0:
-                                            logger.info(f"      Preview: {str(content)[:100]}...")
+                                        # Never log content previews.
                         logger.info("=" * 100)
 
                     # Log model decision process
                     logger.info("=" * 100)
                     logger.info("🔍 MODEL DECISION PROCESS & TOOL USAGE")
                     logger.info("=" * 100)
-                    logger.info(f"📝 Input message: '{message}'")
+                    logger.info(f"📝 Input message length: {len(message)} chars")
                     logger.info(f"📚 Conversation history length: {len(pydantic_messages)} messages")
                     logger.info(f"🔧 Tools available: search_knowledge_base (pgvector)")
                     sys.stdout.flush()
@@ -842,30 +818,23 @@ class StreamingService:
                                     tool_calls_made.append(tool_name)
                                     tool_args = getattr(part, 'args', {})
                                     logger.info(f"   ✅ Tool called: {tool_name}")
-                                    logger.info(f"   🔍 [TOOL_QUERY] Args: {tool_args}")
+                                    # Don't log raw tool args (often includes user text/PII). Log keys/types only.
+                                    if isinstance(tool_args, dict):
+                                        logger.info(f"   🔍 [TOOL_QUERY] args_keys={list(tool_args.keys())[:20]}")
+                                    else:
+                                        logger.info(f"   🔍 [TOOL_QUERY] args_type={type(tool_args).__name__}")
 
                                 # Detect & log tool RETURNS
                                 elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)):
                                     tool_name = getattr(part, 'tool_name', 'unknown')
                                     content = getattr(part, 'content', '')
-                                    logger.info("=" * 100)
-                                    logger.info(f"📚 [RAG_GROUNDING] Tool return from: {tool_name}")
-                                    logger.info(f"📚 [RAG_GROUNDING] Content length: {len(str(content))} chars")
-                                    logger.info("=" * 100)
-                                    # Log full grounding content in chunks to avoid OTEL truncation
-                                    content_str = str(content)
-                                    chunk_size = 2000
-                                    total_chunks = (len(content_str) + chunk_size - 1) // chunk_size
-                                    for chunk_idx in range(total_chunks):
-                                        chunk = content_str[chunk_idx * chunk_size:(chunk_idx + 1) * chunk_size]
-                                        logger.info(f"📚 [RAG_GROUNDING] [{chunk_idx + 1}/{total_chunks}]: {chunk}")
-                                    logger.info("=" * 100)
+                                    # Don't log tool return content (can contain customer data).
+                                    logger.info(f"📚 [TOOL_RETURN] name={tool_name} content_chars={len(str(content))}")
 
                                 # Log text content (model's final answer)
                                 elif part_type == 'TextPart' and hasattr(part, 'content'):
                                     content = getattr(part, 'content', '')
-                                    preview = content[:200] if len(content) > 200 else content
-                                    logger.info(f"   📝 {part_type}: {preview}...")
+                                    logger.debug(f"   📝 {part_type}: chars={len(str(content))}")
 
                     logger.info("=" * 100)
                     logger.info(f"📊 SUMMARY: {len(tool_calls_made)} tools called: {tool_calls_made if tool_calls_made else 'NONE'}")
@@ -907,7 +876,7 @@ class StreamingService:
                                         content = getattr(part, 'content', '')
                                         logger.info(f"     📝 Content type: {type(content)}, length: {len(str(content))}")
                                         if len(str(content)) > 1000:  # Large content might be thinking
-                                            logger.info(f"     🧠 LARGE CONTENT DETECTED - might be thinking: {str(content)[:200]}...")
+                                            logger.info("     🧠 LARGE CONTENT DETECTED - might be thinking (content suppressed)")
 
                                     # 🧠 LOG EXTENDED THINKING (if present)
                                     if part_type == 'ThinkingPart':
@@ -915,42 +884,12 @@ class StreamingService:
                                         logger.info("=" * 100)
                                         logger.info("🧠 MODEL EXTENDED THINKING (Reasoning Process)")
                                         logger.info("=" * 100)
-                                        
-                                        # Handle potentially long thinking content by chunking it
+
+                                        # Never log thinking text; lengths only.
                                         if thinking_content:
-                                            # Split into chunks to avoid OTEL truncation
-                                            chunk_size = 2000  # 2KB chunks
-                                            thinking_lines = thinking_content.split('\n')
-                                            
-                                            logger.info(f"🧠 THINKING CONTENT LENGTH: {len(thinking_content)} chars, {len(thinking_lines)} lines")
-                                            
-                                            # ALSO use print() to bypass OTEL limitations
-                                            print("=" * 100)
-                                            print("🧠 MODEL EXTENDED THINKING (Reasoning Process) - DIRECT PRINT")
-                                            print("=" * 100)
-                                            print(thinking_content)
-                                            print("=" * 100)
-                                            
-                                            current_chunk = ""
-                                            chunk_num = 1
-                                            
-                                            for line in thinking_lines:
-                                                if len(current_chunk) + len(line) + 1 > chunk_size:
-                                                    # Log current chunk
-                                                    if current_chunk.strip():
-                                                        logger.info(f"🧠 THINKING CHUNK {chunk_num}:")
-                                                        logger.info(current_chunk)
-                                                        chunk_num += 1
-                                                    current_chunk = line + '\n'
-                                                else:
-                                                    current_chunk += line + '\n'
-                                            
-                                            # Log final chunk
-                                            if current_chunk.strip():
-                                                logger.info(f"🧠 THINKING CHUNK {chunk_num}:")
-                                                logger.info(current_chunk)
+                                            logger.info(f"🧠 THINKING CONTENT: chars={len(thinking_content)} lines={len(thinking_content.splitlines())}")
                                         else:
-                                            logger.warning("🧠 ThinkingPart found but content is empty!")
+                                            logger.warning("🧠 ThinkingPart found but content is empty")
                                         
                                         logger.info("=" * 100)
                                     
@@ -959,11 +898,7 @@ class StreamingService:
                                         logger.info("🧠 ALTERNATIVE THINKING ATTRIBUTE FOUND!")
                                         thinking_attr = getattr(part, 'thinking', None) or getattr(part, 'thoughts', None)
                                         if thinking_attr:
-                                            print("=" * 100)
-                                            print("🧠 ALTERNATIVE THINKING CONTENT - DIRECT PRINT")
-                                            print("=" * 100)
-                                            print(thinking_attr)
-                                            print("=" * 100)
+                                            logger.info("🧠 ALTERNATIVE THINKING CONTENT present (suppressed)")
 
                                     # Extract text from TextPart
                                     if isinstance(part, TextPart):
@@ -972,7 +907,7 @@ class StreamingService:
                                         is_last_text_part = text_part_index == len(text_parts)
 
                                         logger.info(f"     🔍 TextPart {text_part_index}/{len(text_parts)}: {len(text_content)} chars")
-                                        logger.info(f"        Preview: {text_content[:80]}...")
+                                        logger.debug("        Preview suppressed")
 
                                         if text_content:
                                             if full_response == "":
@@ -1002,33 +937,15 @@ class StreamingService:
                                         logger.info(f"   Tool Call #{tool_call_count} in this response")
                                         logger.info("=" * 80)
 
-                                    # Log pgvector tool return
-                                    elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)) and getattr(part, 'tool_name', '') == 'search_knowledge_base':
-                                        logger.info("=" * 80)
-                                        logger.info("📄 PGVECTOR TOOL RESPONSE (GROUNDING DATA)")
-                                        logger.info(f"   Tool Name: {part.tool_name}")
-                                        logger.info(f"   Tool Call ID: {getattr(part, 'tool_call_id', 'N/A')}")
-                                        logger.info(f"   Content Type: {type(part.content).__name__}")
-                                        content_str = str(part.content)
-                                        logger.info(f"   Content: {content_str[:2000]}")
-
-                                        logger.info("=" * 80)
-
-                                    # Track other tool calls with detailed logging
+                                    # Track tool calls without logging args/content (may contain user text/PII).
                                     elif hasattr(part, 'tool_name'):
                                         tool_name = getattr(part, 'tool_name', 'unknown')
-                                        tool_args = getattr(part, 'args', {})
                                         tool_call_count += 1
 
-                                        # Comprehensive tool invocation logging
-                                        logger.info("=" * 80)
-                                        logger.info("🔧 TOOL INVOCATION DETECTED")
-                                        logger.info(f"   Tool Name: {tool_name}")
-                                        logger.info(f"   Tool Arguments: {json.dumps(tool_args, indent=2, ensure_ascii=False)}")
-                                        logger.info(f"   Tool Call #{tool_call_count} in this response")
-                                        logger.info(f"   Session ID: {session_id}")
-                                        logger.info(f"   User Email: {user_email}")
-                                        logger.info("=" * 80)
+                                        logger.info(
+                                            f"🔧 [TOOL_CALL] name={tool_name} idx={tool_call_count} "
+                                            f"session={session_id[:16]} user_hash={hash_pii(user_email)}"
+                                        )
 
                     logger.info(f"Agent completed with {tool_call_count} tool calls")
 
@@ -1093,7 +1010,7 @@ class StreamingService:
             if full_response:
                 logger.info("📤 Streaming final response in chunks (after enforcement check)...")
                 logger.info(f"🔍 DEBUG: full_response length = {len(full_response)} chars")
-                logger.info(f"🔍 DEBUG: full_response preview = {full_response[:100]}...")
+                logger.debug("🔍 DEBUG: full_response preview suppressed")
 
                 # 🚨 CRITICAL: Remove metadata that model may have added
                 # Strip out [Time-to-Solve: X mins] or similar timing information
@@ -1208,26 +1125,12 @@ class StreamingService:
 
             # Save complete assistant response to database
             if full_response.strip():
-                # Log the complete response with grounding truth and metadata
-                logger.info("=" * 100)
-                logger.info("📝 MODEL RESPONSE WITH GROUNDING TRUTH")
-                logger.info(f"   Session ID: {session_id}")
-                logger.info(f"   User Query: {message[:100]}...")
-                logger.info(f"   User Email: {user_email}")
-                logger.info(f"   Total Tool Calls: {tool_call_count}")
-                logger.info(f"   Response Length: {len(full_response)} characters")
-                logger.info(f"   Response Chunks: {chunk_count}")
-                logger.info("-" * 100)
-                logger.info("🔗 GROUNDING TRUTH & DATA SOURCES:")
-                logger.info(f"   Source: pgvector knowledge base ({settings.chatbot_model} model)")
-                logger.info("   Search Type: Hybrid pgvector + full-text retrieval")
-                logger.info("   Processing: Retrieved chunk context formatted by the model")
-                logger.info("   Response Format: HTML with proper citations")
-                logger.info("   Data Quality: Grounded in vectorized knowledge base chunks")
-                logger.info("-" * 100)
-                logger.info("📋 COMPLETE GEMINI RESPONSE CONTENT:")
-                logger.info(full_response)
-                logger.info("=" * 100)
+                # Never log raw user prompt or model output (can contain PII and customer data).
+                logger.info(
+                    f"📝 [MODEL_OUTPUT] session={session_id[:16]} user_hash={hash_pii(user_email)} "
+                    f"tool_calls={tool_call_count} resp_chars={len(full_response)} resp_chunks={chunk_count} "
+                    f"model={settings.chatbot_model}"
+                )
                 
                 try:
                     await session_state_manager.save_message(
@@ -1307,18 +1210,10 @@ class StreamingService:
             pipeline_timer.done()
 
             # Send completion signal via Redis (for SSE to pick up)
-            logger.info("=" * 80)
-            logger.info("🏁 STREAMING COMPLETION SUMMARY")
-            logger.info(f"   Session ID: {session_id}")
-            logger.info(f"   User Email: {user_email}")
-            logger.info(f"   Total Tool Calls Executed: {tool_call_count}")
-            logger.info(f"   Total Response Chunks: {chunk_count}")
-            logger.info(f"   Final Response Length: {len(full_response)} characters")
-            logger.info("   Grounding Truth: Response based on pgvector search results")
-            logger.info("   Primary Data Source: pgvector knowledge base")
-            logger.info("   Response Format: HTML with proper citations")
-            logger.info("   Completion Status: Successfully completed streaming")
-            logger.info("=" * 80)
+            logger.info(
+                f"🏁 [CHAT_STREAM_COMPLETE] session={session_id[:16]} user_hash={hash_pii(user_email)} "
+                f"tool_calls={tool_call_count} chunks={chunk_count} resp_chars={len(full_response)}"
+            )
             
             # Post completion event to Redis channels
             completion_data = {

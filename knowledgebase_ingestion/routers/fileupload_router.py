@@ -19,6 +19,7 @@ from knowledgebase_ingestion.service.upload_constraints_service import get_uploa
 from knowledgebase_ingestion.dao.webcrawl_dao import WebCrawlDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery
+from shared.log_sanitizer import hash_pii
 
 logger = get_otel_logger("fileupload_router", "knowledgebase-ingestion")
 
@@ -70,7 +71,7 @@ async def get_upload_constraints(request: Request = None):
         # Extract authenticated user information (optional, just for logging)
         try:
             user_email, user_id = extract_user_from_request(request)
-            logger.info(f"👤 [USER] Requested by: {user_email}")
+            logger.info(f"👤 [USER] Requested by: user_hash={hash_pii(user_email)} user_id={user_id}")
         except Exception:
             logger.info(f"👤 [USER] Requested by: unauthenticated client")
 
@@ -342,7 +343,7 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
         user_email, user_id = extract_user_from_request(request)
 
         logger.info(f"🗑️  [FILE_DELETE_REQUEST] Deleting file {file_id} (hard_delete={hard_delete})")
-        logger.info(f"   Requested by: {user_email}")
+        logger.info(f"   Requested by: user_hash={hash_pii(user_email)} user_id={user_id}")
 
         from knowledgebase_ingestion.service.comprehensive_deletion_service import (
             comprehensive_deletion_service,
@@ -397,14 +398,14 @@ async def delete_all_knowledge_endpoint(request: Request = None):
         # Safety check: require confirmation header
         confirm_header = request.headers.get("X-Confirm-Delete-All")
         if confirm_header != "true":
-            logger.warning(f"❌ [DELETE_ALL_DENIED] Delete all requested without confirmation header by {user_email}")
+            logger.warning(f"❌ [DELETE_ALL_DENIED] Delete all requested without confirmation header by user_hash={hash_pii(user_email)} user_id={user_id}")
             raise HTTPException(
                 status_code=400,
                 detail="Delete all operation requires X-Confirm-Delete-All: true header"
             )
 
         logger.info("=" * 80)
-        logger.info(f"🔴 [DELETE_ALL_REQUEST] Delete all knowledge base requested by {user_email}")
+        logger.info(f"🔴 [DELETE_ALL_REQUEST] Delete all knowledge base requested by user_hash={hash_pii(user_email)} user_id={user_id}")
         logger.info("=" * 80)
 
         # Call delete all service function
@@ -418,7 +419,7 @@ async def delete_all_knowledge_endpoint(request: Request = None):
             logger.info(f"   Websites marked as deleted: {result.get('websites_marked_deleted')}")
             logger.info(f"   Redis queues cleared: {result.get('redis_queues_cleared')}")
             logger.info(f"   Database records retained with status='deleted' for audit trail")
-            logger.info(f"   Cleared by: {user_email}")
+            logger.info(f"   Cleared by: user_hash={hash_pii(user_email)} user_id={user_id}")
 
             await _invalidate_kb_cache()
             return {
@@ -561,8 +562,7 @@ async def upload_file_async(
         # Extract authenticated user information
         logger.info("🔐 [AUTH] Extracting user information from request")
         user_email, user_id = extract_user_from_request(request)
-        logger.info(f"   User Email: {user_email}")
-        logger.info(f"   User ID (from header): {user_id}")
+        logger.info(f"   User: user_hash={hash_pii(user_email)} user_id={user_id}")
         
         # Look up user_role_id from database using email
         from knowledgebase_ingestion.utils.auth import get_user_role_id_from_email
@@ -738,7 +738,7 @@ async def upload_file_async(
             logger.info(f"   Celery Task ID: {celery_task_id}")
             logger.info(f"   Args:")
             logger.info(f"     - file_id: {file_id}")
-            logger.info(f"     - user_email: {user_email}")
+            logger.info(f"     - user_hash: {hash_pii(user_email)} user_id={user_id}")
 
             # Update DB record with the real Celery task ID
             logger.info(f"💾 [DB_UPDATE] Updating DB with real Celery task ID: {celery_task_id}")
