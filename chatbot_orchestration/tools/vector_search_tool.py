@@ -318,7 +318,13 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
             if settings.enable_context_compression:
                 logger.info(f"📉 [LLMLingua-2] Compression applied to narrative only (tables_kept={len(table_chunks)})")
                 
-            response = "I found the following in our knowledge base:\n\n" + final_context
+            # Tool output is internal context for the brain model.
+            # Provide a minimal instruction for how to cite without leaking URLs to the user.
+            response = (
+                "Use the sources below to answer the user's question.\n"
+                "When you use a fact from Source N, add an inline citation marker like [N] after that fact.\n\n"
+                + final_context
+            )
             
             # --- STEP 4: Update Cache & Session State ---
             if cache and settings.enable_semantic_caching:

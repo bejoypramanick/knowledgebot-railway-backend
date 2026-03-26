@@ -1068,6 +1068,8 @@ CRITICAL RULES FOR CITATIONS:
 - ✅ Place markers immediately after the fact they cite
 - ✅ Every non-greeting answer must contain at least one citation marker like [1]
 - ✅ Treat internal `kb://...` references as valid source URLs for citation purposes
+- ✅ If you include ANY number, measurement, or named entity from the retrieved context, you MUST attach a citation marker [N] where N matches the Source that contains it.
+- ✅ For table-derived facts (rows/columns/values), cite the Source that contains that table row/value.
 - ❌ NEVER create <a href="..."> tags for citations - the system handles this automatically
 - ❌ NEVER add "Sources:", "References:", or "See also:" sections
 - ❌ NEVER add footer sections with citation lists or URLs
