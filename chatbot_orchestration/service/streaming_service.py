@@ -106,6 +106,16 @@ class StreamingService:
         - If citations are missing, return the exact no-answer string.
         """
         no_answer = "I don't have any information on this topic."
+        # If the model already chose the no-answer response (sometimes wrapped in HTML),
+        # normalize it to the exact required plain sentence and allow it without citations.
+        try:
+            if response_text:
+                normalized = re.sub(r"<[^>]+>", "", response_text).strip()
+                normalized = re.sub(r"\s+", " ", normalized)
+                if normalized == no_answer:
+                    return no_answer
+        except Exception:
+            pass
         if self._is_greeting_only(message):
             return response_text
         if not self._has_citation_markers(response_text):
