@@ -222,13 +222,13 @@ class CachedGoogleModel(GoogleModel):
                     if not has_system_instruction or not has_tools:
                         logger.error("🚨 Invalid Gemini cache detected (missing system_instruction/tools). Rebuilding cache before continuing.")
                         from .cache_manager import gemini_cache_manager
-                        gemini_cache_manager.invalidate()
-
                         cached_system_prompt, cached_tool_functions = gemini_cache_manager.get_cached_content()
                         if not cached_system_prompt or not cached_tool_functions:
                             raise RuntimeError(
                                 "Gemini cache is invalid and no cached system_prompt/tools are available to rebuild it"
                             )
+                        # Clear the broken cache reference but keep the cached prompt/tools for rebuild.
+                        gemini_cache_manager.invalidate(keep_cached_content=True)
 
                         model_name = getattr(self, "model_name", None) or model_settings.get("model") or "gemini-2.5-flash-lite"
                         rebuilt_cache_name = await gemini_cache_manager.ensure_cache(
@@ -250,12 +250,12 @@ class CachedGoogleModel(GoogleModel):
                 logger.error(f"Failed to inspect cache contents: {inspect_error}")
                 # Deterministic policy: if we can't verify cached tools/system prompt, rebuild cache.
                 from .cache_manager import gemini_cache_manager
-                gemini_cache_manager.invalidate()
                 cached_system_prompt, cached_tool_functions = gemini_cache_manager.get_cached_content()
                 if not cached_system_prompt or not cached_tool_functions:
                     raise RuntimeError(
                         "Gemini cache inspection failed and no cached system_prompt/tools are available to rebuild it"
                     )
+                gemini_cache_manager.invalidate(keep_cached_content=True)
                 model_name = getattr(self, "model_name", None) or model_settings.get("model") or "gemini-2.5-flash-lite"
                 rebuilt_cache_name = await gemini_cache_manager.ensure_cache(
                     system_prompt=cached_system_prompt,

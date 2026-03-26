@@ -216,8 +216,12 @@ class GeminiCacheManager:
                 # Cache may already be expired/deleted on Google's side — that's fine
                 logger.warning(f"Could not delete Gemini cache {cache_name}: {e}")
 
-    def invalidate(self):
+    def invalidate(self, keep_cached_content: bool = False):
         """Clear local cache reference (does NOT delete from Google).
+
+        Args:
+            keep_cached_content: If True, preserve the last-known system prompt and
+                tool functions so we can rebuild a broken cache deterministically.
 
         Use delete_cache() to also stop Google billing.
         """
@@ -226,8 +230,9 @@ class GeminiCacheManager:
         self._cache_name = None
         self._cache_hash = None
         self._cache_created_at = 0
-        self._cached_system_prompt = None
-        self._cached_tool_functions = None
+        if not keep_cached_content:
+            self._cached_system_prompt = None
+            self._cached_tool_functions = None
 
     def get_cached_content(self) -> tuple[Optional[str], Optional[List[Callable]]]:
         """Get the cached system prompt and tool functions for reuse in fallback caches.
