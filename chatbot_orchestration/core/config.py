@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     
     # RAG Optimization Flags
-    enable_reranking: bool = True
-    enable_context_compression: bool = True
+    enable_reranking: bool = False
+    enable_context_compression: bool = False
     enable_semantic_caching: bool = True
     
     # Citation Configuration
