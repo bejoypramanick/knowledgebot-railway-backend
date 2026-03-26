@@ -64,6 +64,20 @@ def _compress_context(context_text: str) -> str:
         logger.warning(f"⚠️ LLMLingua-2 quantized compression failed: {e}")
         return context_text
 
+def _is_table_chunk(chunk: Dict[str, Any]) -> bool:
+    """Heuristic: table-aware Kreuzberg chunks should not be compressed by LLMLingua."""
+    try:
+        metadata = chunk.get("metadata") or {}
+        strategy = metadata.get("strategy") if isinstance(metadata, dict) else None
+        if strategy and "table" in str(strategy).lower():
+            return True
+        content = (chunk.get("content") or "").lstrip()
+        if content.startswith("## Table") or content.startswith("|"):
+            return True
+    except Exception:
+        return False
+    return False
+
 def _rerank_results(query: str, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Implement FlashRank Stage-2 reranking with telemetry."""
     try:
@@ -197,19 +211,40 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                 chunk_str = f"Source {i+1} ({doc_type} {doc_id}, Score: {score}):\n{content}\n"
                 formatted_chunks.append(chunk_str)
                 
-            full_context = "\n".join(formatted_chunks)
-            
-            if settings.enable_context_compression:
-                final_context = _compress_context(full_context)
+            # Preserve table chunks verbatim; compress only narrative chunks.
+            table_chunks: List[str] = []
+            narrative_chunks: List[str] = []
+            for i, chunk in enumerate(top_chunks):
+                doc_id, doc_type = str(chunk['document_id']), chunk['document_type']
+                content = chunk['content']
+                score = f"{float(chunk['hybrid_score']):.3f}"
+                chunk_str = f"Source {i+1} ({doc_type} {doc_id}, Score: {score}):\n{content}\n"
+                if _is_table_chunk(chunk):
+                    table_chunks.append(chunk_str)
+                else:
+                    narrative_chunks.append(chunk_str)
+
+            table_context = "\n".join(table_chunks).strip()
+            narrative_context = "\n".join(narrative_chunks).strip()
+
+            if settings.enable_context_compression and narrative_context:
+                compressed_narrative = _compress_context(narrative_context)
             else:
-                final_context = full_context
-                
+                compressed_narrative = narrative_context
+
+            if table_context and compressed_narrative:
+                final_context = table_context + "\n\n" + compressed_narrative
+            else:
+                final_context = table_context or compressed_narrative
+            
             total_duration = (time.time() - rag_start) * 1000
             
             # Theoretical storage savings per chunk (standard vector 3072B -> halfvec 1536B for 768d)
             # This is constant but helpful to see in telemetry for business value justification
             logger.info(f"✅ [RAG_COMPLETE] Total Retrieval Pipeline: {total_duration:.1f}ms")
             logger.info(f"📊 [HALFVEC_STATS] Using halfp-float storage: 50% byte savings per index row (1.5KB vs 3.0KB)")
+            if settings.enable_context_compression:
+                logger.info(f"📉 [LLMLingua-2] Compression applied to narrative only (tables_kept={len(table_chunks)})")
                 
             response = "I found the following in our knowledge base:\n\n" + final_context
             
