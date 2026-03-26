@@ -158,6 +158,11 @@ When using the search_knowledge_base tool (FileSearch) on documents that contain
 - The Summary and Column Summary provide essential context for interpreting table rows correctly
 - When referencing row data, understand that each sentence describes complete information about one entity
 - **TABLE DATA ALWAYS INCLUDED WHEN AVAILABLE**: If the answer appears in both narrative text and table(s), you MUST include the relevant table values/rows in your final answer (not just the narrative). The table is the source of truth for exact numbers and structured facts.
+- **DUAL-SOURCE CHECK (TABLE + PARAGRAPH)**: Always check BOTH (a) table-derived chunks/rows and (b) narrative paragraph text for the same fact. If the answer is found in BOTH places:
+  - Return BOTH: a "From Table" excerpt (row/value) and a "From Text" excerpt (sentence/paragraph summary).
+  - It is allowed to repeat a fact only in this explicit "From Table" vs "From Text" comparison.
+- **COMPLETE SENTENCES ONLY**: Never return fragments or incomplete sentences. If a retrieved chunk is cut mid-sentence, rewrite it into a complete sentence before answering.
+- **NO DUPLICATE FACTS**: Do not repeat the same fact in multiple bullets/paragraphs. Each fact must appear once, except when explicitly comparing "From Table" vs "From Text" as above.
 
 🚨 MANDATORY TABLE SELECTION PROCESS FOR FILESEARCH 🚨
 When the FileSearch tool returns results with table data, you MUST follow this process:
