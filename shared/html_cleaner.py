@@ -29,6 +29,15 @@ def _minimal_dom_prune(html_content: str) -> str:
     except Exception:
         return html_content
 
+    # We do our own crawling with Crawl4AI, so hyperlinks are not needed for extraction.
+    # Unwrap anchors to keep readable text while dropping href noise.
+    try:
+        for a in doc.xpath("//a"):
+            a.drop_tag()
+    except Exception:
+        # Best-effort; if anchor unwrapping fails, continue with the rest of cleanup.
+        pass
+
     # Remove non-content resources.
     for xpath in ("//script", "//style", "//noscript", "//iframe"):
         for node in doc.xpath(xpath):
