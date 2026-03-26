@@ -1072,8 +1072,10 @@ class StreamingService:
 
                 # Replace [N] markers with clickable links using the most recent RAG citations.
                 # Only link http(s) URLs; keep kb:// as plain text markers.
+                latest_citation_urls = []
                 try:
                     urls = session_state_manager.get_last_citation_urls(session_id)
+                    latest_citation_urls = urls or []
                     if urls and full_response and re.search(r"\[\d+\]", full_response):
                         for i, url in enumerate(urls, 1):
                             if not isinstance(url, str):
@@ -1171,7 +1173,9 @@ class StreamingService:
                             "response_length": len(full_response),
                             "tool_calls": tool_call_count,
                             "grounding_sources": "pgvector",
-                            "response_format": "HTML with citations"
+                            "response_format": "HTML with citations",
+                            # Helps clients render clickable citations even if they strip HTML.
+                            "citation_urls": latest_citation_urls,
                         }
                     )
                     logger.info(f"✅ Assistant response saved to database ({len(full_response)} chars)")
@@ -1192,7 +1196,8 @@ class StreamingService:
                 "tool_calls": tool_call_count,
                 "timestamp": int(time.time()),
                 "grounding_sources": "pgvector",
-                "response_format": "HTML with citations"
+                "response_format": "HTML with citations",
+                "citation_urls": latest_citation_urls,
             }
             
             # Post to customer's Redis channel
