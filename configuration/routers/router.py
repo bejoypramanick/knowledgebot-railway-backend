@@ -1473,6 +1473,34 @@ async def send_customer_message(request: Request):
         logger.error(f"Error sending customer message: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/admin/chat-sessions/{session_id}/messages")
+async def get_session_messages(session_id: str, request: Request):
+    """
+    Load the full conversation for a session (page load/reload).
+
+    Returns *all* roles present in `chat_messages` (customer/user, bot/assistant, agent/human),
+    ordered oldest -> newest.
+    """
+    try:
+        # Ensure caller is authenticated (API gateway injects this header).
+        header_email = request.headers.get("X-User-Email", "")
+        if not header_email:
+            raise HTTPException(status_code=401, detail="User identity not found. X-User-Email header is required.")
+
+        messages = await chat_log_service.get_session_messages(session_id)
+        return {
+            "success": True,
+            "session_id": session_id,
+            "messages": messages,
+            "total_messages": len(messages),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading session messages for session {session_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to load chat messages")
+
 @router.post("/admin/chat-sessions/messages")
 async def send_agent_message(request: Request):
     """Send a message from an agent or customer in a chat session
