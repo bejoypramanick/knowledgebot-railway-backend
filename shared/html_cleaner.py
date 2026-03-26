@@ -38,8 +38,8 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
         # *fail loudly* so the deployment can be fixed (no silent degradation).
         cleaned = trafilatura.extract(
             html_content,
+            include_comments=False,
             include_tables=True,
-            include_images=True,
             include_links=False,
             output_format="html",
             url=url,
