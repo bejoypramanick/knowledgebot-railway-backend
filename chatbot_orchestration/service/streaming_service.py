@@ -56,6 +56,58 @@ class StreamingService:
             logger.warning(f"Failed to get user_display_id for {session_id}: {e}")
             return "User"
 
+    def _is_greeting_only(self, message: str) -> bool:
+        """True if message is just a greeting/pleasantry (no RAG/citations required)."""
+        if not (message or "").strip():
+            return True
+        text = message.strip().lower()
+        greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "greetings"]
+        return any(g == text or text.startswith(g + " ") for g in greeting_patterns)
+
+    def _has_citation_markers(self, response_text: str) -> bool:
+        """Detect inline citation markers like [1] or clickable <a>...</a> citations."""
+        if not response_text:
+            return False
+        if re.search(r"\[\d+\]", response_text):
+            return True
+        if re.search(r"<a[^>]+>\\s*\\[\\d+\\]\\s*</a>", response_text, flags=re.IGNORECASE):
+            return True
+        return False
+
+    def _enforce_grounded_citation_policy(self, message: str, response_text: str) -> str:
+        """
+        Product requirement:
+        - Non-greeting answers must be grounded and include citations.
+        - If citations are missing, return the exact no-answer string.
+        """
+        no_answer = "I don't have any information on this topic."
+        if self._is_greeting_only(message):
+            return response_text
+        # If the model tries to "explain" lack of info, normalize to the exact required string.
+        # We intentionally keep this heuristic broad to prevent verbose non-answers.
+        lowered = (response_text or "").strip().lower()
+        if lowered and no_answer.lower() in lowered and lowered != no_answer.lower():
+            return no_answer
+        no_answer_markers = (
+            "i cannot provide information",
+            "i can't provide information",
+            "the knowledge base does not contain",
+            "does not contain information",
+            "no information on",
+            "no information about",
+            "no information found",
+            "no relevant information",
+            "the search results",
+            "search results contain",
+            "but no information",
+            "not available in the knowledge base",
+        )
+        if any(m in lowered for m in no_answer_markers):
+            return no_answer
+        if not self._has_citation_markers(response_text):
+            return no_answer
+        return response_text
+
     def _convert_db_messages_to_pydantic_ai(self, db_messages: List[Dict[str, Any]]) -> List[Any]:
         """Convert database messages to Pydantic AI message format."""
         pydantic_messages = []
@@ -995,6 +1047,10 @@ class StreamingService:
                         logger.info("📎 [CITATION_POST] No structured citations found in response")
                 except Exception as citation_error:
                     logger.warning(f"📎 [CITATION_POST] Citation processing failed (non-fatal): {citation_error}")
+
+                # Enforce "no answer without citations" for non-greeting requests.
+                # This must run before adding any debug sections or broadcasting.
+                full_response = self._enforce_grounded_citation_policy(message, full_response)
 
                 # Add all debug download links if S3 upload succeeded
                 download_links = []
