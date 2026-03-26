@@ -259,13 +259,28 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
             )
                 
             # --- STEP 3: Format & Compression ---
-            formatted_chunks = []
+            formatted_chunks: List[str] = []
+            sources: List[str] = []
             for i, chunk in enumerate(top_chunks):
                 doc_id, doc_type = str(chunk['document_id']), chunk['document_type']
                 content = chunk['content']
                 score = f"{float(chunk['hybrid_score']):.3f}"
-                
-                chunk_str = f"Source {i+1} ({doc_type} {doc_id}, Score: {score}):\n{content}\n"
+
+                # Prefer canonical URL for websites; otherwise fall back to a stable KB reference.
+                url = None
+                try:
+                    meta = chunk.get("metadata") or {}
+                    if isinstance(meta, dict):
+                        url = meta.get("url") or meta.get("source_url")
+                except Exception:
+                    url = None
+                if not url:
+                    url = f"kb://{doc_type}/{doc_id}"
+
+                # Provide explicit citation handles so the model can ALWAYS cite facts.
+                # The brain should reference these as [1], [2], ... in the answer.
+                sources.append(f"[{i+1}] {url}")
+                chunk_str = f"Source {i+1} ({doc_type} {doc_id}, Score: {score}) [cite {i+1}]:\n{content}\n"
                 formatted_chunks.append(chunk_str)
                 
             # Preserve table chunks verbatim; compress only narrative chunks.
@@ -293,6 +308,10 @@ async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) ->
                 final_context = table_context + "\n\n" + compressed_narrative
             else:
                 final_context = table_context or compressed_narrative
+
+            # Append a sources section for citation mapping.
+            if sources:
+                final_context = final_context.rstrip() + "\n\nSOURCES:\n" + "\n".join(sources) + "\n"
             
             total_duration = (time.time() - rag_start) * 1000
             
