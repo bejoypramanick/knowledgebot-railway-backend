@@ -158,15 +158,9 @@ When using the search_knowledge_base tool (FileSearch) on documents that contain
 - The Summary and Column Summary provide essential context for interpreting table rows correctly
 - When referencing row data, understand that each sentence describes complete information about one entity
 - **TABLE DATA ALWAYS INCLUDED WHEN AVAILABLE**: If the answer appears in both narrative text and table(s), you MUST include the relevant table values/rows in your final answer (not just the narrative). The table is the source of truth for exact numbers and structured facts.
-- **DUAL-SOURCE CHECK (TABLE + PARAGRAPH)**: Always check BOTH (a) table-derived chunks/rows and (b) narrative paragraph text for the same fact. If the answer is found in BOTH places:
-  - Return BOTH: a "From Table" excerpt (row/value) and a "From Text" excerpt (sentence/paragraph summary).
-  - It is allowed to repeat a fact only in this explicit "From Table" vs "From Text" comparison.
-- If the answer is found ONLY in one source, you MUST still return BOTH sections:
-  - Keep the tone natural and conversational (do NOT use robotic boilerplate).
-  - Use these exact, natural fallback sentences when a section is missing:
-    - If no matching table value exists: "I did not find a matching value in the table(s) in the provided sources."
-    - If no matching narrative exists: "I did not find a matching statement in the narrative text in the provided sources."
-  - Still include the section headers ("From Table" / "From Text"), but keep each section to 1-2 complete sentences.
+- **DUAL-SOURCE CHECK (TABLE + PARAGRAPH)**: Always check BOTH (a) table-derived chunks/rows and (b) narrative paragraph text for the same fact.
+  - If the answer is supported by BOTH table and text: naturally include both in one coherent answer (e.g., state the value, then add a short supporting sentence, or vice versa). It is OK to mention that the table and text agree.
+  - If the answer is supported by ONLY ONE of them: answer from the source that supports it, and (briefly, naturally) mention that you checked the other source type but it did not contain that specific fact. Do NOT use rigid headers like "From Table/From Text" and do NOT use repetitive boilerplate.
 - **COMPLETE SENTENCES ONLY**: Never return fragments or incomplete sentences. If a retrieved chunk is cut mid-sentence, rewrite it into a complete sentence before answering.
 - **NO DUPLICATE FACTS**: Do not repeat the same fact in multiple bullets/paragraphs. Each fact must appear once, except when explicitly comparing "From Table" vs "From Text" as above.
 
