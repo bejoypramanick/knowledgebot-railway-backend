@@ -372,6 +372,9 @@ async def search_knowledge_base(
             # Provide a minimal instruction for how to cite without leaking URLs to the user.
             response = (
                 "Use the sources below to answer the user's question.\n"
+                "If a source table directly contains the exact year, row, field, or cell the user asked for, answer with that exact matched value directly.\n"
+                "For direct table hits, prefer a short sentence that states the exact value from the matching row instead of a generic summary.\n"
+                "Do not say 'Insufficient data provided' or similar generic fallback phrases when the answer is present in the retrieved table rows.\n"
                 "When you use a fact from Source N, add an inline citation marker like [N] after that fact.\n\n"
                 + final_context
             )

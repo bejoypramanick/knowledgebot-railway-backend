@@ -125,6 +125,13 @@ class StreamingService:
         - If neither citations nor RAG grounding are present, return the exact no-answer string.
         """
         no_answer = "I don't have any information on this topic."
+        invalid_fallbacks = {
+            "insufficient data provided.",
+            "insufficient information provided.",
+            "not enough information provided.",
+            "insufficient data available.",
+            "insufficient information available.",
+        }
         # If the model already chose the no-answer response (sometimes wrapped in HTML),
         # normalize it to the exact required plain sentence and allow it without citations.
         try:
@@ -132,6 +139,8 @@ class StreamingService:
                 normalized = re.sub(r"<[^>]+>", "", response_text).strip()
                 normalized = re.sub(r"\s+", " ", normalized)
                 if normalized == no_answer:
+                    return no_answer
+                if normalized.lower() in invalid_fallbacks:
                     return no_answer
         except Exception:
             pass

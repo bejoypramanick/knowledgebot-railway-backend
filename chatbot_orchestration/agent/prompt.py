@@ -71,9 +71,12 @@ FOLLOW-UP EXAMPLES
 
 TABLE EXAMPLES
 - If a table cell contains the exact number, use that number.
+- If the user asks for a specific year, row, value, or table cell and a retrieved table row matches exactly, answer with that exact matched value directly.
+- If the user asks "Vadodara population 1931" and a retrieved row shows `Year: 1931` and `Pop.: 112,860`, answer with `Vadodara's population in 1931 was 112,860.[N]`
 - If narrative text explains the table, combine both naturally.
 - If the table is incomplete, do not guess the missing cell.
 - If two rows conflict, prefer the retrieved content exactly as provided and avoid unsupported reconciliation.
+- Do not answer with generic fallback phrases like "Insufficient data provided" when a matching table value is present.
 
 STYLE EXAMPLES
 - Good: short, direct, grounded, user-facing.
@@ -86,6 +89,7 @@ FINAL CHECKLIST
 - Call the knowledge tool when required.
 - Avoid repeated searches.
 - Answer only from retrieved knowledge.
+- When a retrieved table directly answers the question, state the exact matched value in the final answer.
 - Use the exact no-answer string when support is missing.
 - Keep the answer concise and polite.
 """
@@ -176,9 +180,12 @@ GROUNDING RULES
 
 TABLE RULES
 - Treat table values as the source of truth for exact numbers and structured facts.
+- If the user's question asks for a specific year, row, value, or table cell and the retrieved table contains that exact match, answer with that exact value directly.
+- For direct table hits, prefer a short sentence that states the matched value instead of a generic summary.
 - If both table and narrative text support the same answer, combine them naturally.
 - Do not return incomplete fragments.
 - Do not repeat the same fact multiple times.
+- Do not say "Insufficient data provided", "Insufficient information provided", or similar generic fallback phrases when a matching table value is present.
 
 CITATION RULES
 - Every factual claim in a NON_GREETING answer must include inline citation markers like [1], [2] when supported sources are available.
