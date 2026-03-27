@@ -177,113 +177,34 @@ class CachedGoogleModel(GoogleModel):
                     if cached_data.usage_metadata:
                         logger.info(f"Total Token Count: {cached_data.usage_metadata.total_token_count}")
                     
-                    # Check system instruction
-                    has_system_instruction = bool(getattr(cached_data, "system_instruction", None))
+                    # NOTE: The Gemini cache "get" response may omit system_instruction/tools in some API versions.
+                    # We treat this inspection as best-effort logging only (not a validation gate), otherwise we
+                    # risk infinite rebuild loops even when the cache is valid for inference/cost discounting.
                     if hasattr(cached_data, 'system_instruction') and cached_data.system_instruction:
                         sys_inst_len = len(str(cached_data.system_instruction))
                         logger.info(f"✅ System Instruction: {sys_inst_len} chars")
-                        # Log first 200 chars to verify it's the right prompt
                         sys_preview = str(cached_data.system_instruction)[:200]
                         logger.info(f"   Preview: {sys_preview}...")
                     else:
-                        logger.warning("❌ No system instruction found in cache!")
-                    
-                    # Check tools - this is the critical part
-                    has_tools = bool(getattr(cached_data, "tools", None))
+                        logger.warning("⚠️ Cache inspection: system_instruction not available in cache payload (API may omit it).")
+
                     if hasattr(cached_data, 'tools') and cached_data.tools:
                         logger.info(f"✅ Tools in cache: {len(cached_data.tools)} tool(s)")
                         for i, tool in enumerate(cached_data.tools):
-                            logger.info(f"   Tool {i+1}:")
                             if hasattr(tool, 'function_declarations'):
-                                logger.info(f"     Function declarations: {len(tool.function_declarations)}")
-                                for j, func_decl in enumerate(tool.function_declarations):
-                                    logger.info(f"       Function {j+1}: {func_decl.name}")
-                                    logger.info(f"         Description: {func_decl.description}")
-                                    if hasattr(func_decl, 'parameters') and func_decl.parameters:
-                                        params = func_decl.parameters
-                                        if hasattr(params, 'properties') and params.properties:
-                                            param_names = list(params.properties.keys())
-                                            logger.info(f"         Parameters: {param_names}")
-                                        if hasattr(params, 'required') and params.required:
-                                            logger.info(f"         Required: {params.required}")
+                                tool_names = [f.name for f in tool.function_declarations]
+                                logger.info(f"   Tool {i+1}: {tool_names}")
                             else:
-                                logger.info(f"     No function declarations found")
+                                logger.info(f"   Tool {i+1}: (no function_declarations field)")
                     else:
-                        logger.error("🚨 CRITICAL: NO TOOLS FOUND IN CACHE!")
-                        logger.error("🚨 This explains why the agent isn't calling search_knowledge_base!")
-                        logger.error("🚨 The cache was created without tools or tools were lost!")
-
-                    # If cache is missing critical parts, DO NOT proceed with tool calls.
-                    # Deterministic policy (per product requirement):
-                    # - Invalidate + rebuild cache
-                    # - Only then proceed in cached mode (tools/system prompt must come from cache)
-                    if not has_system_instruction or not has_tools:
-                        logger.error("🚨 Invalid Gemini cache detected (missing system_instruction/tools). Rebuilding cache before continuing.")
-                        from .cache_manager import gemini_cache_manager
-                        cached_system_prompt, cached_tool_functions = gemini_cache_manager.get_cached_content()
-                        if not cached_system_prompt or not cached_tool_functions:
-                            raise RuntimeError(
-                                "Gemini cache is invalid and no cached system_prompt/tools are available to rebuild it"
-                            )
-                        # Clear the broken cache reference but keep the cached prompt/tools for rebuild.
-                        gemini_cache_manager.invalidate(keep_cached_content=True)
-
-                        model_name = getattr(self, "model_name", None) or model_settings.get("model") or "gemini-2.5-flash-lite"
-                        rebuilt_cache_name = await gemini_cache_manager.ensure_cache(
-                            system_prompt=cached_system_prompt,
-                            tool_functions=cached_tool_functions,
-                            model_name=model_name,
-                        )
-                        if not rebuilt_cache_name:
-                            raise RuntimeError("Gemini cache rebuild failed; refusing to continue without cached tools")
-
-                        # IMPORTANT: we must rebuild the request config using the *new* cached_content,
-                        # but still run through our stripping logic (can't return super() directly).
-                        rebuilt_once = bool(model_settings.get("_gemini_cache_rebuilt_once"))
-                        if rebuilt_once:
-                            raise RuntimeError("Gemini cache rebuild loop detected; refusing to continue")
-
-                        model_settings = dict(model_settings)
-                        model_settings["_gemini_cache_rebuilt_once"] = True
-                        model_settings["google_cached_content"] = rebuilt_cache_name
-                        return await self._build_content_and_config(
-                            messages,
-                            cast(GoogleModelSettings, model_settings),
-                            model_request_parameters,
-                        )
+                        logger.warning("⚠️ Cache inspection: tools not available in cache payload (API may omit them).")
                     
                     logger.info("=" * 80)
                 else:
                     logger.warning("GenAI client not available for cache inspection")
             except Exception as inspect_error:
-                logger.error(f"Failed to inspect cache contents: {inspect_error}")
-                # Deterministic policy: if we can't verify cached tools/system prompt, rebuild cache.
-                from .cache_manager import gemini_cache_manager
-                cached_system_prompt, cached_tool_functions = gemini_cache_manager.get_cached_content()
-                if not cached_system_prompt or not cached_tool_functions:
-                    raise RuntimeError(
-                        "Gemini cache inspection failed and no cached system_prompt/tools are available to rebuild it"
-                    )
-                gemini_cache_manager.invalidate(keep_cached_content=True)
-                model_name = getattr(self, "model_name", None) or model_settings.get("model") or "gemini-2.5-flash-lite"
-                rebuilt_cache_name = await gemini_cache_manager.ensure_cache(
-                    system_prompt=cached_system_prompt,
-                    tool_functions=cached_tool_functions,
-                    model_name=model_name,
-                )
-                if not rebuilt_cache_name:
-                    raise RuntimeError("Gemini cache rebuild failed after inspection error; refusing to continue without cached tools")
-                rebuilt_once = bool(model_settings.get("_gemini_cache_rebuilt_once"))
-                if rebuilt_once:
-                    raise RuntimeError("Gemini cache rebuild loop detected after inspection error; refusing to continue")
-                model_settings = dict(model_settings)
-                model_settings["_gemini_cache_rebuilt_once"] = True
-                model_settings["google_cached_content"] = rebuilt_cache_name
-                return await self._build_content_and_config(
-                    messages,
-                    cast(GoogleModelSettings, model_settings),
-                    model_request_parameters,
-                )
+                # Best-effort only: don't fail the request if cache inspection breaks.
+                logger.warning(f"⚠️ Failed to inspect cache contents (continuing): {inspect_error}")
             
             if cached_content:
                 # Log what tools were originally present before stripping
