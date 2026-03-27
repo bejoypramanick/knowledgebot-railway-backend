@@ -272,5 +272,11 @@ class AgentManager:
             return self.cache_name_cache.get(session_id)
         return None
 
+    def set_cached_cache_name(self, session_id: str, cache_name: Optional[str]) -> None:
+        """Update the cached Gemini context cache_name for a session."""
+        if not hasattr(self, 'cache_name_cache'):
+            self.cache_name_cache = {}
+        self.cache_name_cache[session_id] = cache_name
+
 # Global agent manager instance
 agent_manager = AgentManager()

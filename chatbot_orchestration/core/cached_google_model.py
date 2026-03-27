@@ -253,6 +253,16 @@ class CachedGoogleModel(GoogleModel):
                     refreshed_settings["google_cached_content"] = rebuilt_cache_name
                     refreshed_settings = cast(GoogleModelSettings, refreshed_settings)
 
+                    session_id = getattr(model_request_parameters, 'deps', None)
+                    session_id = getattr(session_id, 'session_id', None)
+                    if session_id:
+                        try:
+                            from ..service.agent_manager import agent_manager
+                            agent_manager.set_cached_cache_name(session_id, rebuilt_cache_name)
+                            logger.info(f"Updated session cache reference to rebuilt cache: {rebuilt_cache_name}")
+                        except Exception as cache_update_error:
+                            logger.warning(f"Could not update session cache reference after rebuild: {cache_update_error}")
+
                     logger.info(f"Retrying request with rebuilt cache: {rebuilt_cache_name}")
                     return await super()._generate_content(messages, stream, refreshed_settings, model_request_parameters)
                 

@@ -83,15 +83,8 @@ class GeminiCacheManager:
         async with self._lock:
             content_hash = self._compute_hash(system_prompt, tool_functions)
 
-            # Check for force refresh environment variable
-            force_refresh = os.getenv("FORCE_CACHE_REFRESH", "false").lower() == "true"
-            if force_refresh:
-                logger.warning("🔄 FORCE_CACHE_REFRESH=true - forcing cache recreation")
-                self._cache_name = None
-                self._cache_hash = None
-
             # Reuse existing cache if hash matches and not expired
-            if self.cache_name and self._cache_hash == content_hash and not force_refresh:
+            if self.cache_name and self._cache_hash == content_hash:
                 logger.info(f"Reusing existing Gemini cache: {self._cache_name} (hash: {content_hash})")
                 # Preserve prompt/tools so we can deterministically rebuild if the cache turns out to be
                 # missing system_instruction/tools (or Google returns a cache error).
