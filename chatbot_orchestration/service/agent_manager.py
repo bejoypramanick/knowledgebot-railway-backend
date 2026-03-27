@@ -270,7 +270,10 @@ class AgentManager:
 
             agent = Agent(
                 model,
+                output_type=str,
                 system_prompt=system_prompt,
+                retries=3,
+                output_retries=3,
                 tools=[search_knowledge_base],
                 deps_type=ChatSessionDeps,
                 end_strategy='exhaustive'

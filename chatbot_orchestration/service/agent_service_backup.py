@@ -411,7 +411,10 @@ class PydanticAIGatewayService:
                     fallback_model = GoogleModel(settings.chatbot_model)
                     fallback_agent = Agent(
                         fallback_model,
+                        output_type=str,
                         system_prompt=agent.system_prompt,
+                        retries=3,
+                        output_retries=3,
                         tools=agent.tools,
                         deps_type=ChatSessionDeps,
                     )
@@ -721,9 +724,12 @@ class PydanticAIGatewayService:
                     # Create tools instance and pass to Agent
                     tools_instance = KnowledgeTools()
                     agent = Agent(
-                        tools_instance,  # Pass tools class instance
-                        model=google_model,  # Pass model separately
+                        google_model,
+                        output_type=str,
                         # system_prompt omitted - already in cached content
+                        retries=3,
+                        output_retries=3,
+                        tools=tools_instance,
                         deps_type=ChatSessionDeps
                     )
                     logger.info("✅ Agent created with cached system prompt")
@@ -762,9 +768,12 @@ class PydanticAIGatewayService:
                     # Create tools instance and pass to Agent
                     tools_instance = KnowledgeTools()
                     agent = Agent(
-                        tools_instance,  # Pass tools class instance
-                        model=google_model,  # Pass model separately
+                        google_model,
+                        output_type=str,
                         system_prompt=system_prompt,
+                        retries=3,
+                        output_retries=3,
+                        tools=tools_instance,
                         deps_type=ChatSessionDeps
                     )
                     logger.info("✅ Agent created with full system prompt (no caching)")
