@@ -1,6 +1,7 @@
 import json
 import os
 import hashlib
+import re
 from typing import List, Dict, Any, Optional, Annotated
 from pydantic_ai import RunContext
 
@@ -18,6 +19,11 @@ logger = get_otel_logger("vector_search_tool", "chatbot-orchestration")
 
 # --- Redis Semantic Cache Setup ---
 _semantic_cache_client: Optional[redis.Redis] = None
+
+
+def _normalize_query_for_turn_cache(query: str) -> str:
+    normalized = re.sub(r"\s+", " ", (query or "").strip().lower())
+    return normalized
 
 async def _get_cache_client() -> redis.Redis:
     global _semantic_cache_client
@@ -172,6 +178,28 @@ async def search_knowledge_base(
             "Respond briefly, warmly, and directly to the user without citations."
         )
 
+    normalized_query = _normalize_query_for_turn_cache(query)
+    prior_call_count = ctx.deps.search_call_counts.get(normalized_query, 0)
+    if prior_call_count >= 1:
+        logger.warning(
+            f"🛑 [DUPLICATE_TOOL_QUERY] Blocking repeated search_knowledge_base call "
+            f"for normalized query: '{normalized_query}' (count={prior_call_count + 1})"
+        )
+        prior_result = ctx.deps.search_call_results.get(normalized_query)
+        if prior_result:
+            return (
+                "Search already completed for this exact query in this message. "
+                "Use the previous search result to answer now. "
+                "Do not call search_knowledge_base again for the same query.\n\n"
+                + prior_result
+            )
+        return (
+            "Search already completed for this exact query in this message. "
+            "Use the previous search result to answer now. "
+            "Do not call search_knowledge_base again for the same query."
+        )
+    ctx.deps.search_call_counts[normalized_query] = prior_call_count + 1
+
     # --- STEP 0: Semantic Caching (Redis) ---
     cache = None
     import time
@@ -187,6 +215,7 @@ async def search_knowledge_base(
             if cached_result:
                 duration = (time.time() - cache_start) * 1000
                 logger.info(f"⚡ [Redis] Semantic Cache HIT (Latency: {duration:.1f}ms) for query: '{query}'")
+                ctx.deps.search_call_results[normalized_query] = cached_result
                 return cached_result
             logger.info(f"❄️ [Redis] Semantic Cache MISS")
         except Exception as e:
@@ -385,6 +414,8 @@ async def search_knowledge_base(
             # --- STEP 4: Update Cache & Session State ---
             if cache and settings.enable_semantic_caching:
                 await cache.set(cache_key, response, ex=3600) # Cache for 1 hour
+
+            ctx.deps.search_call_results[normalized_query] = response
 
             if ctx.deps.session_id:
                 from ..service.session_manager import session_state_manager

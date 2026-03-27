@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Dict
 
 
 @dataclass
@@ -10,3 +10,5 @@ class ChatSessionDeps:
     No more separate session_db_id — the UUID is both the identifier and PK.
     """
     session_id: str  # PG18 UUIDv7 database primary key (e.g., "019535a0-1234-7abc-8def-0123456789ab")
+    search_call_counts: Dict[str, int] = field(default_factory=dict)
+    search_call_results: Dict[str, str] = field(default_factory=dict)
