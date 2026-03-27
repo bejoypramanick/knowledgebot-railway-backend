@@ -9,3 +9,4 @@ class ChatSessionDeps:
     No more separate session_db_id — the UUID is both the identifier and PK.
     """
     session_id: str  # PG18 UUIDv7 database primary key (e.g., "019535a0-1234-7abc-8def-0123456789ab")
+    search_tool_calls: int = 0
