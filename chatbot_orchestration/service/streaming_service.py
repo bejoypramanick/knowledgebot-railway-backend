@@ -1039,8 +1039,9 @@ class StreamingService:
             model_message_type, full_response = self._extract_model_message_type(full_response)
 
             # Hard requirement: non-greeting queries must use retrieval tools.
-            # If this is violated, fail fast (do not return an ungrounded model response).
-            if tool_call_count == 0 and message.strip() and model_message_type == "NON_GREETING":
+            # If the model omitted MESSAGE_TYPE, treat it conservatively as NON_GREETING.
+            effective_message_type = model_message_type or "NON_GREETING"
+            if tool_call_count == 0 and message.strip() and effective_message_type == "NON_GREETING":
                 raise RuntimeError("retrieval tool not called for non-greeting request")
 
             # ================================================================
@@ -1118,6 +1119,7 @@ class StreamingService:
                         )
                     logger.info(
                         f"🧭 [ANSWER_DIAG] message_type={model_message_type or 'UNKNOWN'} "
+                        f"effective_message_type={effective_message_type} "
                         f"tool_calls={tool_call_count} citations_before={'yes' if had_citations_before else 'no'} "
                         f"final_reason={'citation_enforcement' if full_response != before_enforcement else 'ok'}"
                     )
