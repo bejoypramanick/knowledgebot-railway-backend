@@ -357,7 +357,7 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     );
 
     let enriched_tables = build_table_artifacts(&result.tables, chunk_size);
-    let markdown = result.content.clone();
+    let markdown = strip_table_markdown_sections(&result.content, &enriched_tables);
     info!(
         job_id = %job.job_id,
         document_id = %job.document_id,
@@ -665,26 +665,43 @@ fn build_table_artifacts(tables: &[Table], max_characters: usize) -> Vec<TableAr
         .collect()
 }
 
-fn inject_table_kv_sections(content: &str, tables: &[TableArtifact]) -> String {
-    let mut enriched = content.to_string();
-    let mut replaced_any = false;
+fn strip_table_markdown_sections(content: &str, tables: &[TableArtifact]) -> String {
+    let mut stripped = content.to_string();
 
     for table in tables {
-        if !table.original_markdown.trim().is_empty() && enriched.contains(&table.original_markdown) {
-            enriched = enriched.replacen(&table.original_markdown, &table.kv_markdown, 1);
-            replaced_any = true;
+        let table_markdown = table.original_markdown.trim();
+        if table_markdown.is_empty() {
+            continue;
+        }
+
+        if stripped.contains(table_markdown) {
+            stripped = stripped.replacen(table_markdown, "", 1);
         }
     }
 
-    if !replaced_any && !tables.is_empty() {
-        enriched.push_str("\n\n# Extracted Tables\n");
-        for table in tables {
-            enriched.push_str("\n\n");
-            enriched.push_str(&table.kv_markdown);
+    normalize_spacing_after_table_removal(&stripped)
+}
+
+fn normalize_spacing_after_table_removal(content: &str) -> String {
+    let mut normalized = String::new();
+    let mut blank_line_count = 0usize;
+
+    for line in content.lines() {
+        let is_blank = line.trim().is_empty();
+        if is_blank {
+            blank_line_count += 1;
+            if blank_line_count > 2 {
+                continue;
+            }
+            normalized.push('\n');
+        } else {
+            blank_line_count = 0;
+            normalized.push_str(line.trim_end());
+            normalized.push('\n');
         }
     }
 
-    enriched
+    normalized.trim().to_string()
 }
 
 fn derive_headers(table: &Table) -> Vec<String> {
