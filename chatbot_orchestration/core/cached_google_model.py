@@ -140,6 +140,13 @@ class CachedGoogleModel(GoogleModel):
     ) -> tuple[list[ContentUnionDict], GenerateContentConfigDict]:
         contents, config = await super()._build_content_and_config(messages, model_settings, model_request_parameters)
 
+        # Disable the Google GenAI SDK's Automatic Function Calling loop.
+        # Pydantic AI already manages tool execution, and leaving SDK-level AFC enabled
+        # causes repeated remote tool-call cycles (default maximum_remote_calls=10).
+        config_dict = cast(dict[str, Any], config)
+        config_dict['automatic_function_calling'] = {'disable': True}
+        config = cast(GenerateContentConfigDict, config_dict)
+
         cached_content = model_settings.get('google_cached_content')
         if cached_content:
             logger.info(f"Gemini cache active: {cached_content}")
