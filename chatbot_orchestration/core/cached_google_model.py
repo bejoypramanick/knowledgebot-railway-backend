@@ -145,7 +145,10 @@ class CachedGoogleModel(GoogleModel):
         # Pydantic AI already manages tool execution, and leaving SDK-level AFC enabled
         # causes repeated remote tool-call cycles (default maximum_remote_calls=10).
         config_dict = cast(dict[str, Any], config)
-        config_dict['automatic_function_calling'] = AutomaticFunctionCallingConfig(disable=True)
+        config_dict['automatic_function_calling'] = AutomaticFunctionCallingConfig(
+            disable=True,
+            maximum_remote_calls=0,
+        )
         config = cast(GenerateContentConfigDict, config_dict)
         logger.info(
             f"Gemini automatic_function_calling config: {config_dict.get('automatic_function_calling')}"
