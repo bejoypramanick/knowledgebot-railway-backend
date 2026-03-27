@@ -844,6 +844,7 @@ class StreamingService:
                         logger.debug(f"all_messages received: count={len(all_messages)}")
 
                     tool_calls_made = []
+                    tool_returns_seen = []
                     for i, msg in enumerate(all_messages):
                         msg_type = type(msg).__name__
                         logger.info(f"📌 Message {i}: {msg_type}")
@@ -868,6 +869,7 @@ class StreamingService:
                                 # Detect & log tool RETURNS
                                 elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)):
                                     tool_name = getattr(part, 'tool_name', 'unknown')
+                                    tool_returns_seen.append(tool_name)
                                     content = getattr(part, 'content', '')
                                     # Don't log tool return content (can contain customer data).
                                     logger.info(f"📚 [TOOL_RETURN] name={tool_name} content_chars={len(str(content))}")
@@ -1222,6 +1224,8 @@ class StreamingService:
                         f"🧭 [ANSWER_DIAG] message_type={model_message_type or 'UNKNOWN'} "
                         f"effective_message_type={effective_message_type} "
                         f"tool_calls={tool_call_count} tool_returns={tool_return_count} "
+                        f"tool_names_called={','.join(sorted(set(tool_calls_made))) if tool_calls_made else 'none'} "
+                        f"tool_names_returned={','.join(sorted(set(tool_returns_seen))) if tool_returns_seen else 'none'} "
                         f"citations_before={'yes' if had_citations_before else 'no'} "
                         f"grounding_from_rag={'yes' if grounding_received_from_rag else 'no'} "
                         f"rag_tool_used={'yes' if rag_tool_used else 'no'} "
