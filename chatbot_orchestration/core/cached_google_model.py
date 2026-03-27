@@ -140,72 +140,22 @@ class CachedGoogleModel(GoogleModel):
     ) -> tuple[list[ContentUnionDict], GenerateContentConfigDict]:
         contents, config = await super()._build_content_and_config(messages, model_settings, model_request_parameters)
 
+        force_tool_calling = bool(model_settings.get('force_tool_calling'))
+        if force_tool_calling:
+            config_dict = cast(dict[str, Any], config)
+            config_dict['tool_config'] = {
+                'function_calling_config': {
+                    'mode': 'ANY',
+                    'allowed_function_names': ['search_knowledge_base'],
+                }
+            }
+            config = cast(GenerateContentConfigDict, config_dict)
+
         cached_content = model_settings.get('google_cached_content')
         if cached_content:
             logger.info(f"Gemini cache active: {cached_content}")
             logger.info("Stripping system_instruction, tools, tool_config from API request (included in cache)")
-            
-            # INSPECT CACHED CONTENT - Retrieve and log what's actually in the cache
-            try:
-                from ..core.ai import get_genai_client
-                client = get_genai_client()
-                if client:
-                    logger.info("🔍 INSPECTING GEMINI CACHE CONTENTS...")
-                    cached_data = await client.aio.caches.get(name=cached_content)
-                    
-                    logger.info("=" * 80)
-                    logger.info("📋 CACHED CONTENT INSPECTION")
-                    logger.info("=" * 80)
-                    logger.info(f"Cache Name: {cached_data.name}")
-                    logger.info(f"Display Name: {cached_data.display_name}")
-                    logger.info(f"Model: {cached_data.model}")
-                    
-                    # Check if state attribute exists (API might have changed)
-                    if hasattr(cached_data, 'state'):
-                        logger.info(f"State: {cached_data.state}")
-                    else:
-                        logger.info("State: Not available (API change)")
-                    
-                    # Check other optional attributes
-                    if hasattr(cached_data, 'create_time'):
-                        logger.info(f"Create Time: {cached_data.create_time}")
-                    if hasattr(cached_data, 'update_time'):
-                        logger.info(f"Update Time: {cached_data.update_time}")
-                    if hasattr(cached_data, 'expire_time'):
-                        logger.info(f"Expire Time: {cached_data.expire_time}")
-                    
-                    if cached_data.usage_metadata:
-                        logger.info(f"Total Token Count: {cached_data.usage_metadata.total_token_count}")
-                    
-                    # NOTE: The Gemini cache "get" response may omit system_instruction/tools in some API versions.
-                    # We treat this inspection as best-effort logging only (not a validation gate), otherwise we
-                    # risk infinite rebuild loops even when the cache is valid for inference/cost discounting.
-                    if hasattr(cached_data, 'system_instruction') and cached_data.system_instruction:
-                        sys_inst_len = len(str(cached_data.system_instruction))
-                        logger.info(f"✅ System Instruction: {sys_inst_len} chars")
-                        sys_preview = str(cached_data.system_instruction)[:200]
-                        logger.info(f"   Preview: {sys_preview}...")
-                    else:
-                        logger.warning("⚠️ Cache inspection: system_instruction not available in cache payload (API may omit it).")
 
-                    if hasattr(cached_data, 'tools') and cached_data.tools:
-                        logger.info(f"✅ Tools in cache: {len(cached_data.tools)} tool(s)")
-                        for i, tool in enumerate(cached_data.tools):
-                            if hasattr(tool, 'function_declarations'):
-                                tool_names = [f.name for f in tool.function_declarations]
-                                logger.info(f"   Tool {i+1}: {tool_names}")
-                            else:
-                                logger.info(f"   Tool {i+1}: (no function_declarations field)")
-                    else:
-                        logger.warning("⚠️ Cache inspection: tools not available in cache payload (API may omit them).")
-                    
-                    logger.info("=" * 80)
-                else:
-                    logger.warning("GenAI client not available for cache inspection")
-            except Exception as inspect_error:
-                # Best-effort only: don't fail the request if cache inspection breaks.
-                logger.warning(f"⚠️ Failed to inspect cache contents (continuing): {inspect_error}")
-            
             if cached_content:
                 # Log what tools were originally present before stripping
                 original_tools = config.get('tools', [])

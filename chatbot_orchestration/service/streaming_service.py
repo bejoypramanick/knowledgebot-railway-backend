@@ -683,9 +683,14 @@ class StreamingService:
                     logger.warning(f"Could not fetch response_policy: {e}, using default 0.5")
 
                 # Build model settings with proper fields
+                force_tool_calling = not self._is_greeting_only(message)
                 model_settings_kwargs: dict = {
                     'temperature': response_policy,
                 }
+
+                if force_tool_calling:
+                    model_settings_kwargs['force_tool_calling'] = True
+                    logger.info("🔧 Forcing Gemini function-calling for non-greeting request")
 
                 if ENABLE_EXTENDED_THINKING:
                     from google.genai.types import ThinkingConfigDict
@@ -696,8 +701,10 @@ class StreamingService:
                 else:
                     logger.info(f"🧠 Extended thinking DISABLED for this request")
 
-                if cache_name:
+                if cache_name and not force_tool_calling:
                     model_settings_kwargs['google_cached_content'] = cache_name
+                elif cache_name and force_tool_calling:
+                    logger.info("Bypassing Gemini cached content for forced-tool request")
 
                 model_settings = GoogleModelSettings(**model_settings_kwargs)
 

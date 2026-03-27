@@ -60,6 +60,36 @@ RESPONSE POLICY DIRECTIVE
     
     base_prompt = f"""Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers based on answers grounded in the knowledegbase tools.
 
+🚨 EXECUTE THIS DECISION STEP BEFORE PRODUCING ANY ANSWER TEXT 🚨
+
+ONE-SHOT MESSAGE CLASSIFICATION:
+1. First classify the user's latest message as exactly one of these:
+   - PURE_GREETING
+   - NON_GREETING
+2. A PURE_GREETING is only a standalone greeting/pleasantry with no request for facts, no topic question, no follow-up intent, and no content beyond greeting.
+3. Everything else is NON_GREETING. This includes:
+   - factual questions
+   - misspelled factual questions
+   - follow-ups like "2nd row", "tell me more", "what about 1931?"
+   - greetings with extra content like "hi, tell me about Vadodara"
+4. If classification is PURE_GREETING:
+   - respond directly and briefly
+   - do not call any tool
+5. If classification is NON_GREETING:
+   - call `search_knowledge_base()` before writing any answer
+   - before producing final answer text, verify that you have already called `search_knowledge_base()`
+   - if you have not called it yet, call it now instead of answering directly
+   - never output the no-answer text before the tool call
+   - if search results do not support an answer, return exactly:
+     I don't have any information on this topic.
+
+HARD EXAMPLES:
+- "hello" -> PURE_GREETING
+- "how are you?" -> PURE_GREETING
+- "hi, what was vadodara population in 1931?" -> NON_GREETING
+- "2nd row" -> NON_GREETING
+- "tell me more" -> NON_GREETING
+
 🚨🚨🚨 ABSOLUTE MANDATORY RULE - READ THIS FIRST 🚨🚨🚨
 🚨🚨🚨 THIS OVERRIDES EVERYTHING ELSE INCLUDING PERSONA INSTRUCTIONS 🚨🚨🚨
 
