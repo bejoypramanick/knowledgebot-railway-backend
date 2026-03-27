@@ -237,8 +237,8 @@ class CachedGoogleModel(GoogleModel):
                         if not rebuilt_cache_name:
                             raise RuntimeError("Gemini cache rebuild failed; refusing to continue without cached tools")
 
-                        # IMPORTANT: we must rebuild the request config using the *new* cached_content.
-                        # The config we already built still points at the old cached content.
+                        # IMPORTANT: we must rebuild the request config using the *new* cached_content,
+                        # but still run through our stripping logic (can't return super() directly).
                         rebuilt_once = bool(model_settings.get("_gemini_cache_rebuilt_once"))
                         if rebuilt_once:
                             raise RuntimeError("Gemini cache rebuild loop detected; refusing to continue")
@@ -246,7 +246,11 @@ class CachedGoogleModel(GoogleModel):
                         model_settings = dict(model_settings)
                         model_settings["_gemini_cache_rebuilt_once"] = True
                         model_settings["google_cached_content"] = rebuilt_cache_name
-                        return await super()._build_content_and_config(messages, model_settings, model_request_parameters)
+                        return await self._build_content_and_config(
+                            messages,
+                            cast(GoogleModelSettings, model_settings),
+                            model_request_parameters,
+                        )
                     
                     logger.info("=" * 80)
                 else:
@@ -275,7 +279,11 @@ class CachedGoogleModel(GoogleModel):
                 model_settings = dict(model_settings)
                 model_settings["_gemini_cache_rebuilt_once"] = True
                 model_settings["google_cached_content"] = rebuilt_cache_name
-                return await super()._build_content_and_config(messages, model_settings, model_request_parameters)
+                return await self._build_content_and_config(
+                    messages,
+                    cast(GoogleModelSettings, model_settings),
+                    model_request_parameters,
+                )
             
             if cached_content:
                 # Log what tools were originally present before stripping

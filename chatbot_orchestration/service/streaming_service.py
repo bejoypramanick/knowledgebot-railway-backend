@@ -331,6 +331,27 @@ class StreamingService:
             if cache_name:
                 # Cache active: system prompt is in the cache
                 logger.info("System prompt served from Gemini cache (skipping prepend)")
+                # Safety: if earlier runs (or DB history) contain a prepended SystemPromptPart,
+                # remove it before calling Agent.iter() to avoid Gemini 400:
+                # cachedContent cannot be used with a request setting system_instruction/tools/tool_config.
+                try:
+                    from pydantic_ai.messages import ModelRequest, SystemPromptPart
+
+                    def _is_system_prompt_request(msg: object) -> bool:
+                        if not isinstance(msg, ModelRequest):
+                            return False
+                        parts = getattr(msg, "parts", None) or []
+                        return any(isinstance(p, SystemPromptPart) for p in parts)
+
+                    before = len(pydantic_messages)
+                    pydantic_messages = [m for m in pydantic_messages if not _is_system_prompt_request(m)]
+                    removed = before - len(pydantic_messages)
+                    if removed:
+                        logger.warning(
+                            f"⚠️ Removed {removed} SystemPromptPart message(s) from history because Gemini cache is active"
+                        )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to sanitize message_history for cached mode: {e}")
             elif has_chat_history:
                 # FOLLOW-UP MESSAGE (no cache): Must prepend system prompt to message_history
                 system_prompt_text = agent_manager.get_cached_system_prompt(session_id)
