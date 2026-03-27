@@ -121,8 +121,11 @@ class StreamingService:
         """
         Product requirement:
         - Non-greeting answers must be grounded.
-        - Inline citations are preferred, but grounded RAG retrieval is also accepted.
-        - If neither citations nor RAG grounding are present, return the exact no-answer string.
+        - For factual non-greeting answers, inline citations are required.
+        - RAG grounding alone is not enough to trust an uncited final answer, because
+          retrieval may have happened without the model actually using the retrieved facts.
+        - If the answer is not the exact no-answer response and lacks citations, return
+          the exact no-answer string.
         """
         no_answer = "I don't have any information on this topic."
         invalid_fallbacks = {
@@ -145,8 +148,6 @@ class StreamingService:
         except Exception:
             pass
         if message_type == "PURE_GREETING":
-            return response_text
-        if grounding_received_from_rag:
             return response_text
         if not self._has_citation_markers(response_text):
             return no_answer
@@ -1158,7 +1159,6 @@ class StreamingService:
                         effective_message_type == "NON_GREETING"
                         and tool_call_count >= 1
                         and not had_citations_before
-                        and not grounding_received_from_rag
                         and before_enforcement.strip() != "I don't have any information on this topic."
                     )
 
@@ -1212,17 +1212,6 @@ class StreamingService:
                                     f"tool_returns={repair_tool_returns} "
                                     f"citations_after={'yes' if had_citations_before else 'no'}"
                                 )
-                    elif (
-                        effective_message_type == "NON_GREETING"
-                        and tool_call_count >= 1
-                        and not had_citations_before
-                        and grounding_received_from_rag
-                        and before_enforcement.strip() != "I don't have any information on this topic."
-                    ):
-                        logger.info(
-                            "📎 [CITATION_REPAIR_SKIPPED] Grounding received from RAG; allowing answer without inline citations"
-                        )
-
                     # Normalize combined citations like [1, 2] so enforcement/linking work.
                     full_response = self._normalize_citation_markers(full_response)
                     full_response = self._enforce_grounded_citation_policy(
@@ -1241,6 +1230,7 @@ class StreamingService:
                     logger.info(
                         f"🧭 [ANSWER_DIAG] message_type={model_message_type or 'UNKNOWN'} "
                         f"effective_message_type={effective_message_type} "
+                        f"user_query={message[:120]!r} "
                         f"explicit_cache_used={'yes' if cache_name else 'no'} "
                         f"cache_name={cache_name or 'none'} "
                         f"tool_calls={tool_call_count} tool_returns={tool_return_count} "
