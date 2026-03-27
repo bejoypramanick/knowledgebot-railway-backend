@@ -24,7 +24,7 @@ tenacity>=8.2.2
 
 # Chatbot Orchestration Service-Specific Requirements
 # Pydantic AI
-pydantic-ai>=1.70.0
+pydantic-ai>=1.68.0
 
 # LiteLLM (provider-agnostic chat, embeddings, token counting)
 litellm>=1.50.0
