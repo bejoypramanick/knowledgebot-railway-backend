@@ -1092,6 +1092,7 @@ class StreamingService:
                 # This must run before adding any debug sections or broadcasting.
                 try:
                     before_enforcement = full_response
+                    had_citations_before = self._has_citation_markers(before_enforcement or "")
                     # Normalize combined citations like [1, 2] so enforcement/linking work.
                     full_response = self._normalize_citation_markers(full_response)
                     full_response = self._enforce_grounded_citation_policy(message, full_response)
@@ -1103,6 +1104,11 @@ class StreamingService:
                             f"🛑 [CITATION_ENFORCEMENT] Missing/invalid citations; replaced model output with no-answer. "
                             f"model_preview='{prev}'"
                         )
+                    logger.info(
+                        f"🧭 [ANSWER_DIAG] greeting={'yes' if self._is_greeting_only(message) else 'no'} "
+                        f"tool_calls={tool_call_count} citations_before={'yes' if had_citations_before else 'no'} "
+                        f"final_reason={'citation_enforcement' if full_response != before_enforcement else 'ok'}"
+                    )
                 except Exception:
                     full_response = self._enforce_grounded_citation_policy(message, full_response)
 

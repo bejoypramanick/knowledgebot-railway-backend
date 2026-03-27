@@ -259,8 +259,10 @@ async def search_knowledge_base(
             
             # --- STEP 2: Reranking ---
             chunks = [dict(row) for row in rows]
+            flashrank_applied = False
             if settings.enable_reranking:
                 top_chunks = _rerank_results(query, chunks)
+                flashrank_applied = top_chunks != chunks[:10]
             else:
                 top_chunks = chunks[:10]
 
@@ -312,11 +314,15 @@ async def search_knowledge_base(
 
             table_context = "\n".join(table_chunks).strip()
             narrative_context = "\n".join(narrative_chunks).strip()
+            narrative_before_chars = len(narrative_context)
 
+            llmlingua_applied = False
             if settings.enable_context_compression and narrative_context:
                 compressed_narrative = _compress_context(narrative_context)
+                llmlingua_applied = compressed_narrative != narrative_context
             else:
                 compressed_narrative = narrative_context
+            narrative_after_chars = len(compressed_narrative)
 
             if table_context and compressed_narrative:
                 final_context = table_context + "\n\n" + compressed_narrative
@@ -381,6 +387,18 @@ async def search_knowledge_base(
                 )
             except Exception:
                 pass
+
+            logger.info(
+                f"🧭 [RAG_DIAG] query='{query[:120]}' hit=yes rows={len(rows)} top={len(top_chunks)} "
+                f"tables={len(table_chunks)} narrative={len(narrative_chunks)} "
+                f"flashrank={'on' if settings.enable_reranking else 'off'} "
+                f"flashrank_applied={'yes' if flashrank_applied else 'no'} "
+                f"flashrank_knn_before={len(chunks)} flashrank_after={len(top_chunks)} "
+                f"llmlingua={'on' if settings.enable_context_compression else 'off'} "
+                f"llmlingua_applied={'yes' if llmlingua_applied else 'no'} "
+                f"llmlingua_before_chars={narrative_before_chars} llmlingua_after_chars={narrative_after_chars} "
+                f"citations={len(citation_urls)}"
+            )
             
             # --- STEP 4: Update Cache & Session State ---
             if cache and settings.enable_semantic_caching:
