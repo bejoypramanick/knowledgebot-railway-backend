@@ -159,23 +159,6 @@ class GeminiCacheManager:
                 if cached_content.usage_metadata:
                     logger.info(f"Cached tokens: {cached_content.usage_metadata.total_token_count}")
                 
-                # DEBUG: Immediately inspect the cache we just created
-                debug_cache = os.getenv("DEBUG_GEMINI_CACHE", "false").lower() == "true"
-                if debug_cache:
-                    logger.info("🔍 DEBUG_GEMINI_CACHE enabled - inspecting newly created cache...")
-                    inspection = await self.inspect_cache()
-                    logger.info("=" * 80)
-                    logger.info("🔍 CACHE CREATION VERIFICATION")
-                    logger.info("=" * 80)
-                    for key, value in inspection.items():
-                        if key == "tool_functions":
-                            logger.info(f"{key}: {len(value)} functions")
-                            for func in value:
-                                logger.info(f"  - {func['name']}: {func['description']}")
-                        else:
-                            logger.info(f"{key}: {value}")
-                    logger.info("=" * 80)
-
                 return self._cache_name
 
             except Exception as e:
@@ -244,59 +227,6 @@ class GeminiCacheManager:
             Tuple of (system_prompt, tool_functions) or (None, None) if not available
         """
         return self._cached_system_prompt, self._cached_tool_functions
-
-    async def inspect_cache(self) -> dict:
-        """Inspect the current cache contents for debugging.
-        
-        Returns:
-            Dictionary with cache inspection results
-        """
-        if not self.cache_name:
-            return {"error": "No active cache"}
-        
-        try:
-            from ..core.ai import get_genai_client
-            client = get_genai_client()
-            if not client:
-                return {"error": "GenAI client not available"}
-            
-            cached_data = await client.aio.caches.get(name=self.cache_name)
-            
-            inspection = {
-                "cache_name": cached_data.name,
-                "display_name": cached_data.display_name,
-                "model": cached_data.model,
-                "state": getattr(cached_data, 'state', 'Not available'),
-                "create_time": str(getattr(cached_data, 'create_time', 'Not available')),
-                "update_time": str(getattr(cached_data, 'update_time', 'Not available')),
-                "expire_time": str(getattr(cached_data, 'expire_time', 'Not available')),
-                "has_system_instruction": bool(hasattr(cached_data, 'system_instruction') and cached_data.system_instruction),
-                "tools_count": 0,
-                "tool_functions": []
-            }
-            
-            if cached_data.usage_metadata:
-                inspection["total_token_count"] = cached_data.usage_metadata.total_token_count
-            
-            if hasattr(cached_data, 'system_instruction') and cached_data.system_instruction:
-                inspection["system_instruction_length"] = len(str(cached_data.system_instruction))
-                inspection["system_instruction_preview"] = str(cached_data.system_instruction)[:200]
-            
-            if hasattr(cached_data, 'tools') and cached_data.tools:
-                inspection["tools_count"] = len(cached_data.tools)
-                for tool in cached_data.tools:
-                    if hasattr(tool, 'function_declarations'):
-                        for func_decl in tool.function_declarations:
-                            inspection["tool_functions"].append({
-                                "name": func_decl.name,
-                                "description": func_decl.description,
-                                "parameters": list(func_decl.parameters.properties.keys()) if hasattr(func_decl, 'parameters') and func_decl.parameters and hasattr(func_decl.parameters, 'properties') else []
-                            })
-            
-            return inspection
-            
-        except Exception as e:
-            return {"error": f"Failed to inspect cache: {e}"}
 
 
 # Global singleton
