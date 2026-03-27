@@ -1241,6 +1241,8 @@ class StreamingService:
                     logger.info(
                         f"🧭 [ANSWER_DIAG] message_type={model_message_type or 'UNKNOWN'} "
                         f"effective_message_type={effective_message_type} "
+                        f"explicit_cache_used={'yes' if cache_name else 'no'} "
+                        f"cache_name={cache_name or 'none'} "
                         f"tool_calls={tool_call_count} tool_returns={tool_return_count} "
                         f"tool_names_called={','.join(sorted(set(tool_calls_made))) if tool_calls_made else 'none'} "
                         f"tool_names_returned={','.join(sorted(set(tool_returns_seen))) if tool_returns_seen else 'none'} "
