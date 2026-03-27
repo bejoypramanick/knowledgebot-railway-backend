@@ -730,89 +730,79 @@ class StreamingService:
                     yield f"data: {json.dumps({'error': 'Service temporarily rate limited. Please try again in a moment.'})}\n\n"
                     return
 
-                # Retry logic for rate limiting (429 errors)
-                max_retries = 3
-                retry_attempt = 0
-                last_error = None
-                run = None
+                async def _run_agent_once(active_model_settings):
+                    max_retries = 3
+                    retry_attempt = 0
+                    active_run = None
 
-                while retry_attempt < max_retries:
-                    try:
-                        # Determine whether to pass message_history:
-                        # - Cache active: ALWAYS pass message_history (system prompt in cache)
-                        # - No cache, first message: DON'T pass (use Agent.system_prompt)
-                        # - No cache, follow-up: PASS (includes prepended system prompt)
-                        use_message_history = cache_name is not None or has_chat_history
+                    while retry_attempt < max_retries:
+                        try:
+                            use_message_history = active_model_settings.get('google_cached_content') is not None or has_chat_history
 
-                        if use_message_history:
-                            async with agent.iter(
-                                message,
-                                message_history=pydantic_messages,
-                                deps=session_deps,
-                                model_settings=model_settings
-                            ) as run:
-                                from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-                                async for event in run:
-                                    logger.debug(f"Event: {type(event).__name__}")
-                                break
-                        else:
-                            # First message, no cache: use Agent.system_prompt
-                            async with agent.iter(
-                                message,
-                                deps=session_deps,
-                                model_settings=model_settings
-                            ) as run:
-                                from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-                                async for event in run:
-                                    logger.debug(f"Event: {type(event).__name__}")
-                                break
-
-                    except Exception as e:
-                        error_str = str(e)
-                        last_error = e
-                        
-                        # Check if this is a 429 rate limit error
-                        if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or 'quota' in error_str.lower():
-                            retry_attempt += 1
-                            if retry_attempt < max_retries:
-                                # Extract retry delay from error if available
-                                retry_delay = 10  # Default 10 seconds
-                                if 'retry' in error_str.lower():
-                                    # Try to extract delay from error message
-                                    match = re.search(r'(\d+\.?\d*)\s*s', error_str)
-                                    if match:
-                                        retry_delay = float(match.group(1))
-                                
-                                logger.warning(f"⚠️ Rate limit hit (429) - Attempt {retry_attempt}/{max_retries}")
-                                logger.warning(f"⏳ Retrying in {retry_delay:.1f} seconds...")
-                                await asyncio.sleep(retry_delay)
-                                continue
+                            if use_message_history:
+                                async with agent.iter(
+                                    message,
+                                    message_history=pydantic_messages,
+                                    deps=session_deps,
+                                    model_settings=active_model_settings
+                                ) as active_run:
+                                    async for event in active_run:
+                                        logger.debug(f"Event: {type(event).__name__}")
+                                    return active_run
                             else:
-                                logger.error(f"❌ Rate limit exceeded after {max_retries} retries")
-                                # Return clean error instead of re-raising
-                                error_data = {
-                                    "type": "error",
-                                    "error_code": "RATE_LIMIT_EXCEEDED",
-                                    "message": "I'm currently experiencing high demand. Please try again in a few moments.",
-                                    "session_id": session_id,
-                                    "timestamp": int(time.time())
-                                }
-                                json_response = json.dumps(error_data, ensure_ascii=False)
-                                yield f"data: {json_response}\n\n"
-                                return
-                        else:
-                            # Not a rate limit error - return clean error instead of re-raising
-                            logger.error(f"❌ Agent.iter() setup failed: {str(e)}")
-                            error_data = {
-                                "type": "error",
-                                "error_code": "AGENT_SETUP_ERROR", 
-                                "message": "I apologize, but I encountered an error while setting up the response. Please try again.",
-                                "session_id": session_id,
-                                "timestamp": int(time.time())
-                            }
-                            json_response = json.dumps(error_data, ensure_ascii=False)
-                            yield f"data: {json_response}\n\n"
-                            return
+                                async with agent.iter(
+                                    message,
+                                    deps=session_deps,
+                                    model_settings=active_model_settings
+                                ) as active_run:
+                                    async for event in active_run:
+                                        logger.debug(f"Event: {type(event).__name__}")
+                                    return active_run
+
+                        except Exception as e:
+                            error_str = str(e)
+                            if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or 'quota' in error_str.lower():
+                                retry_attempt += 1
+                                if retry_attempt < max_retries:
+                                    retry_delay = 10
+                                    if 'retry' in error_str.lower():
+                                        match = re.search(r'(\d+\.?\d*)\s*s', error_str)
+                                        if match:
+                                            retry_delay = float(match.group(1))
+                                    logger.warning(f"⚠️ Rate limit hit (429) - Attempt {retry_attempt}/{max_retries}")
+                                    logger.warning(f"⏳ Retrying in {retry_delay:.1f} seconds...")
+                                    await asyncio.sleep(retry_delay)
+                                    continue
+                                raise RuntimeError("RATE_LIMIT_EXCEEDED")
+
+                            raise RuntimeError(f"AGENT_SETUP_ERROR::{str(e)}")
+
+                try:
+                    run = await _run_agent_once(model_settings)
+                except RuntimeError as e:
+                    if str(e) == "RATE_LIMIT_EXCEEDED":
+                        logger.error(f"❌ Rate limit exceeded after retries")
+                        error_data = {
+                            "type": "error",
+                            "error_code": "RATE_LIMIT_EXCEEDED",
+                            "message": "I'm currently experiencing high demand. Please try again in a few moments.",
+                            "session_id": session_id,
+                            "timestamp": int(time.time())
+                        }
+                        json_response = json.dumps(error_data, ensure_ascii=False)
+                        yield f"data: {json_response}\n\n"
+                        return
+                    logger.error(f"❌ Agent.iter() setup failed: {str(e)}")
+                    error_data = {
+                        "type": "error",
+                        "error_code": "AGENT_SETUP_ERROR",
+                        "message": "I apologize, but I encountered an error while setting up the response. Please try again.",
+                        "session_id": session_id,
+                        "timestamp": int(time.time())
+                    }
+                    json_response = json.dumps(error_data, ensure_ascii=False)
+                    yield f"data: {json_response}\n\n"
+                    return
 
                 # Check if we successfully got a run object
                 if run is None:
@@ -1042,7 +1032,40 @@ class StreamingService:
             # If the model omitted MESSAGE_TYPE, treat it conservatively as NON_GREETING.
             effective_message_type = model_message_type or "NON_GREETING"
             if tool_call_count == 0 and message.strip() and effective_message_type == "NON_GREETING":
-                raise RuntimeError("retrieval tool not called for non-greeting request")
+                logger.warning("🔁 No retrieval tool call detected for effective NON_GREETING message; retrying once with forced tool calling")
+                forced_model_settings = dict(model_settings_kwargs)
+                forced_model_settings.pop('google_cached_content', None)
+                forced_model_settings['force_tool_calling'] = True
+
+                retry_run = await _run_agent_once(forced_model_settings)
+                if retry_run is not None:
+                    retry_messages = retry_run.all_messages()
+                    full_response = ""
+                    chunk_count = 0
+                    tool_call_count = 0
+
+                    for msg in retry_messages:
+                        if not hasattr(msg, 'parts'):
+                            continue
+                        for part in msg.parts:
+                            if isinstance(part, TextPart):
+                                text_content = getattr(part, 'content', '')
+                                if text_content:
+                                    full_response = text_content
+                                    chunk_count += 1
+                            if hasattr(part, 'tool_name'):
+                                tool_call_count += 1
+
+                    model_message_type, full_response = self._extract_model_message_type(full_response)
+                    effective_message_type = model_message_type or "NON_GREETING"
+                    logger.info(
+                        f"🔁 [FORCED_TOOL_RETRY] message_type={model_message_type or 'UNKNOWN'} "
+                        f"effective_message_type={effective_message_type} tool_calls={tool_call_count}"
+                    )
+
+                if tool_call_count == 0 and effective_message_type == "NON_GREETING":
+                    logger.error("❌ Forced retrieval retry still produced zero tool calls; returning no-answer response")
+                    full_response = "I don't have any information on this topic."
 
             # ================================================================
             # ================================================================

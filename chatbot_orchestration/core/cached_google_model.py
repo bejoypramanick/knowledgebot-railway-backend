@@ -35,9 +35,12 @@ try:
     from google.genai import errors as genai_errors
     from google.genai.types import (
         AutomaticFunctionCallingConfig,
+        FunctionCallingConfig,
+        FunctionCallingConfigMode,
         GenerateContentConfigDict,
         GenerateContentResponse,
         ContentUnionDict,
+        ToolConfig,
     )
 except ImportError:
     pass
@@ -149,6 +152,14 @@ class CachedGoogleModel(GoogleModel):
             disable=True,
             maximum_remote_calls=0,
         )
+        if model_settings.get('force_tool_calling'):
+            logger.info("Force tool calling enabled for this request")
+            config_dict['tool_config'] = ToolConfig(
+                function_calling_config=FunctionCallingConfig(
+                    mode=FunctionCallingConfigMode.ANY,
+                    allowed_function_names=['search_knowledge_base'],
+                )
+            )
         config = cast(GenerateContentConfigDict, config_dict)
         logger.info(
             f"Gemini automatic_function_calling config: {config_dict.get('automatic_function_calling')}"
