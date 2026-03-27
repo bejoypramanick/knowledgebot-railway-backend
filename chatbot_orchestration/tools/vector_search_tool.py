@@ -277,7 +277,7 @@ async def search_knowledge_base(
             rows = result.mappings().all()
             
             if not rows:
-                return "No relevant information found in the knowledge base."
+                return "I don't have any information on this topic."
             
             # --- STEP 2: Reranking ---
             chunks = [dict(row) for row in rows]
