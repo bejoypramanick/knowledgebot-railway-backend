@@ -1030,16 +1030,7 @@ class StreamingService:
             # Hard requirement: non-greeting queries must use retrieval tools.
             # If this is violated, fail fast (do not return an ungrounded model response).
             if tool_call_count == 0 and message.strip() and not self._is_greeting_only(message):
-                # Allow the explicit no-answer response to pass through even if the model failed
-                # to call the retrieval tool. This is still safe (no hallucinated facts), and
-                # avoids breaking the chat stream on harmless behavior.
-                normalized = (full_response or "").strip()
-                if normalized in {"I don't have any information on this topic.", "<p>I don't have any information on this topic.</p>"}:
-                    logger.warning(
-                        "⚠️ [TOOL_REQUIREMENT] Tool not called, but model returned explicit no-answer; allowing response"
-                    )
-                else:
-                    raise RuntimeError("retrieval tool not called for non-greeting request")
+                raise RuntimeError("retrieval tool not called for non-greeting request")
 
             # ================================================================
             # ================================================================
