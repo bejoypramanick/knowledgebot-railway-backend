@@ -1,7 +1,7 @@
 import json
 import os
 import hashlib
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Annotated
 from pydantic_ai import RunContext
 
 from shared.otel_logger import get_otel_logger
@@ -152,10 +152,26 @@ def _rerank_results(query: str, chunks: List[Dict[str, Any]]) -> List[Dict[str, 
         logger.warning(f"⚠️ FlashRank reranking failed: {e}")
         return chunks[:10]
 
-async def search_knowledge_base(ctx: RunContext[ChatSessionDeps], query: str) -> str:
+async def search_knowledge_base(
+    ctx: RunContext[ChatSessionDeps],
+    query: Annotated[str, "The user's normalized information request or greeting text. For a non-greeting message, one search call is usually enough, but additional calls are allowed when they search for distinct new information needed to answer a genuinely multi-part question."],
+    greeting_flag: Annotated[Optional[bool], "Set to true only when the latest user message is a pure greeting with no information request. Set to false for all other messages. For non-greeting messages, avoid repeating the same search again for the same user message unless the query meaning materially changes."] = None,
+) -> str:
     """
     Advanced Knowledge Base Search with Hybrid Search, Reranking, Compression, and Caching.
+
+    For non-greeting turns, one call is the default.
+    Multiple calls are acceptable only when each call has a distinct purpose and retrieves
+    new information needed to answer a complex or multi-part question.
+    Repeating the same search for the same user message is unnecessary.
     """
+    if greeting_flag is True:
+        logger.info("👋 [GREETING_BYPASS] Greeting flag=true, skipping pgvector retrieval")
+        return (
+            "Greeting-only message detected. Do not use knowledge base facts. "
+            "Respond briefly, warmly, and directly to the user without citations."
+        )
+
     # --- STEP 0: Semantic Caching (Redis) ---
     cache = None
     import time

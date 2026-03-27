@@ -74,12 +74,16 @@ ONE-SHOT MESSAGE CLASSIFICATION:
    - greetings with extra content like "hi, tell me about Vadodara"
 4. If classification is PURE_GREETING:
    - use semantic intent, not a fixed phrase list
-   - respond directly and briefly
-   - if any tool or knowledge-base result exists, ignore it for the final answer
+   - call `search_knowledge_base(query=<latest user message>, greeting_flag=true)` exactly once
+   - after the tool returns, respond directly and briefly
+   - do not use knowledge-base facts or citations in the final answer
 5. If classification is NON_GREETING:
-   - call `search_knowledge_base()` exactly once before writing any answer
-   - after the first `search_knowledge_base()` result returns, do not call it again for the same user message
-   - use that first result to answer the user or return the no-answer response
+   - call `search_knowledge_base(query=<actual user request>, greeting_flag=false)` before writing any answer
+   - for most NON_GREETING messages, one search call should be enough
+   - if the question is genuinely multi-part, ambiguous, or requires combining distinct facts, you may call `search_knowledge_base()` more than once
+   - every additional call must have a distinct purpose and search for new information
+   - do not repeat, retry, or reformulate the same search for the same user message unless the query meaning materially changes
+   - use the retrieved result(s) to answer the user or return the no-answer response
    - never output the no-answer text before the tool call
    - if search results do not support an answer, return exactly:
      I don't have any information on this topic.

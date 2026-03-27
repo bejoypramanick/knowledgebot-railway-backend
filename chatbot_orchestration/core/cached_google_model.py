@@ -140,17 +140,6 @@ class CachedGoogleModel(GoogleModel):
     ) -> tuple[list[ContentUnionDict], GenerateContentConfigDict]:
         contents, config = await super()._build_content_and_config(messages, model_settings, model_request_parameters)
 
-        force_tool_calling = bool(model_settings.get('force_tool_calling'))
-        if force_tool_calling:
-            config_dict = cast(dict[str, Any], config)
-            config_dict['tool_config'] = {
-                'function_calling_config': {
-                    'mode': 'ANY',
-                    'allowed_function_names': ['search_knowledge_base'],
-                }
-            }
-            config = cast(GenerateContentConfigDict, config_dict)
-
         cached_content = model_settings.get('google_cached_content')
         if cached_content:
             logger.info(f"Gemini cache active: {cached_content}")
