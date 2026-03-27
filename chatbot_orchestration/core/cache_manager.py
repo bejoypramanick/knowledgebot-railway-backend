@@ -93,6 +93,10 @@ class GeminiCacheManager:
             # Reuse existing cache if hash matches and not expired
             if self.cache_name and self._cache_hash == content_hash and not force_refresh:
                 logger.info(f"Reusing existing Gemini cache: {self._cache_name} (hash: {content_hash})")
+                # Preserve prompt/tools so we can deterministically rebuild if the cache turns out to be
+                # missing system_instruction/tools (or Google returns a cache error).
+                self._cached_system_prompt = system_prompt
+                self._cached_tool_functions = tool_functions
                 return self._cache_name
 
             # Need to create new cache
