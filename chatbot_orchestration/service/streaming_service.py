@@ -335,8 +335,6 @@ class StreamingService:
                 # remove it before calling Agent.iter() to avoid Gemini 400:
                 # cachedContent cannot be used with a request setting system_instruction/tools/tool_config.
                 try:
-                    from pydantic_ai.messages import ModelRequest, SystemPromptPart
-
                     def _is_system_prompt_request(msg: object) -> bool:
                         if not isinstance(msg, ModelRequest):
                             return False
