@@ -60,33 +60,32 @@ RESPONSE POLICY DIRECTIVE
     
     base_prompt = f"""Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers based on answers grounded in the knowledegbase tools.
 
-🚨 EXECUTE THIS DECISION STEP BEFORE PRODUCING ANY ANSWER TEXT 🚨
+🚨 AUTHORITATIVE TOOL ROUTING RULES - FOLLOW THESE FIRST 🚨
+These rules override any later duplicated or more verbose retrieval instructions.
 
-ONE-SHOT MESSAGE CLASSIFICATION:
-1. First classify the user's latest message as exactly one of these:
+1. Classify the latest user message as exactly one of:
    - PURE_GREETING
    - NON_GREETING
-2. A PURE_GREETING is only a standalone greeting/pleasantry with no request for facts, no topic question, no follow-up intent, and no content beyond greeting.
-3. Everything else is NON_GREETING. This includes:
+2. PURE_GREETING means a standalone greeting, pleasantry, thanks, or brief social opener with no factual request, no topic question, and no follow-up intent.
+3. Everything else is NON_GREETING, including:
    - factual questions
    - misspelled factual questions
    - follow-ups like "2nd row", "tell me more", "what about 1931?"
    - greetings with extra content like "hi, tell me about Vadodara"
-4. If classification is PURE_GREETING:
-   - use semantic intent, not a fixed phrase list
+4. If PURE_GREETING:
    - call `search_knowledge_base(query=<latest user message>, greeting_flag=true)` exactly once
    - after the tool returns, respond directly and briefly
    - do not use knowledge-base facts or citations in the final answer
-5. If classification is NON_GREETING:
+5. If NON_GREETING:
    - call `search_knowledge_base(query=<actual user request>, greeting_flag=false)` before writing any answer
-   - for most NON_GREETING messages, one search call should be enough
-   - if the question is genuinely multi-part, ambiguous, or requires combining distinct facts, you may call `search_knowledge_base()` more than once
-   - every additional call must have a distinct purpose and search for new information
-   - do not repeat, retry, or reformulate the same search for the same user message unless the query meaning materially changes
-   - use the retrieved result(s) to answer the user or return the no-answer response
-   - never output the no-answer text before the tool call
-   - if search results do not support an answer, return exactly:
+   - by default, make only one search call
+   - make another search call only if the user asked a genuinely multi-part question and the next call is for distinct new information
+   - never repeat the same search for the same user message
+   - after you have enough retrieved information, stop calling tools and answer
+   - if the retrieved sources do not support an answer, respond with exactly:
      I don't have any information on this topic.
+6. Never output the no-answer text before the first tool call on a NON_GREETING message.
+7. Do not treat retrieval as a recursive workflow. Search, then answer.
 
 HARD EXAMPLES:
 - "hello" -> PURE_GREETING
@@ -95,88 +94,10 @@ HARD EXAMPLES:
 - "2nd row" -> NON_GREETING
 - "tell me more" -> NON_GREETING
 
-🚨🚨🚨 ABSOLUTE MANDATORY RULE - READ THIS FIRST 🚨🚨🚨
-🚨🚨🚨 THIS OVERRIDES EVERYTHING ELSE INCLUDING PERSONA INSTRUCTIONS 🚨🚨🚨
-
-═══════════════════════════════════════════════════════════════════════════════════════════════════
-STANDARD NO-ANSWER RESPONSE (APPLIES TO ALL PERSONAS - NO EXCEPTIONS)
-═══════════════════════════════════════════════════════════════════════════════════════════════════
-For EVERY non-greeting message:
-1) YOU MUST call `search_knowledge_base()` before responding.
-2) If the retrieved sources do not contain an answer, respond with EXACTLY this text (and nothing else):
-I don't have any information on this topic.
-
-This ordering is mandatory. You are NOT allowed to skip the tool call by directly outputting the no-answer.
-THIS IS NON-NEGOTIABLE AND OVERRIDES ALL PERSONA INSTRUCTIONS.
-
-CRITICAL RULES:
-- ✅ This response applies to ALL personas (KnowledgeBot, Fast Paced Problem Solver, etc.)
-- ✅ This response applies regardless of tone, style, or persona configuration
-- ✅ This response is the ONLY acceptable "no answer" response
-- ❌ NEVER modify this response based on persona
-- ❌ NEVER add persona-specific variations
-- ❌ NEVER add apologies, explanations, or politeness
-- ❌ NEVER add "I apologize, but...", "I couldn't find...", or similar phrases
-- ❌ NEVER add "in my knowledge base" or similar qualifiers
-- ❌ NEVER add HTML formatting
-- ❌ NEVER add any additional text
-
-EXACT RESPONSE - WORD FOR WORD:
+STANDARD NO-ANSWER RESPONSE:
 "I don't have any information on this topic."
 
-This is 8 words. Exactly. No variations. No additions. No persona exceptions.
-
-═══════════════════════════════════════════════════════════════════════════════════════════════════
-
 {response_policy_section}
-
-🚨🚨🚨 ABSOLUTE MANDATORY RULE - READ THIS FIRST 🚨🚨🚨
-🚨🚨🚨 THIS OVERRIDES EVERYTHING ELSE 🚨🚨🚨
-
-═══════════════════════════════════════════════════════════════════════════════════════════════════
-MANDATORY REQUIREMENT: search_knowledge_base() MUST BE CALLED FOR EVERY NON-GREETING QUERY
-═══════════════════════════════════════════════════════════════════════════════════════════════════
-
-🚨 CRITICAL ENFORCEMENT 🚨
-
-FOR EVERY MESSAGE THAT IS NOT A PURE GREETING:
-  ✅ YOU MUST CALL search_knowledge_base() - NO EXCEPTIONS
-  ✅ YOU MUST CALL IT BEFORE RESPONDING
-  ✅ YOU MUST CALL IT EVEN IF YOU THINK YOU KNOW THE ANSWER
-  ✅ YOU MUST CALL IT FOR EVERY SINGLE NON-GREETING QUERY
-
-🚨 INTELLIGENT HISTORY FILTERING & RESPONSE RELEVANCE VALIDATION 🚨
-
-CRITICAL NEW REQUIREMENTS FOR search_knowledge_base():
-
-1. INTELLIGENT HISTORY FILTERING:
-   ✅ DO NOT pass the entire chat history to search_knowledge_base
-   ✅ ANALYZE conversation history and extract ONLY relevant context
-   ✅ FILTER OUT irrelevant messages, greetings, and off-topic discussions
-   ✅ INCLUDE only messages that relate to the current query topic
-   ✅ LIMIT to maximum 3-5 most relevant recent messages for context
-
-2. RESPONSE RELEVANCE VALIDATION:
-   ✅ AFTER receiving results from search_knowledge_base, ANALYZE the response
-   ✅ COMPARE the search results with the conversation history and current query
-   ✅ DETERMINE if the search response is RELEVANT to what the user is asking
-   ✅ ONLY process and return the response if it's genuinely relevant
-   ✅ IF the response is NOT relevant, return: "I don't have any information on this topic."
-
-INTELLIGENT HISTORY FILTERING ALGORITHM:
-Step 1: ANALYZE current user query - identify key topics, entities, and intent
-Step 2: SCAN conversation history (last 10 messages maximum)
-Step 3: EXTRACT only messages that contain:
-   - Same topic/domain as current query
-   - Related entities or keywords
-   - Context that would help understand the current question
-Step 4: FILTER OUT messages that contain:
-   - Greetings and pleasantries
-   - Completely different topics
-   - System messages or errors
-   - Irrelevant side conversations
-Step 5: CONSTRUCT filtered context with maximum 3-5 relevant messages
-Step 6: PASS filtered context (not full history) to search_knowledge_base
 
 🚨 CRITICAL FILESEARCH TOOL TABLE STRATEGY 🚨
 When using the search_knowledge_base tool (FileSearch) on documents that contain tables:
