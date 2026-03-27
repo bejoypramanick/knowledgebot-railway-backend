@@ -164,6 +164,13 @@ class CachedGoogleModel(GoogleModel):
                     allowed_function_names=['search_knowledge_base'],
                 )
             )
+        elif model_settings.get('disable_tool_calling'):
+            logger.info("Tool calling disabled for this request")
+            config_dict['tool_config'] = ToolConfig(
+                function_calling_config=FunctionCallingConfig(
+                    mode=FunctionCallingConfigMode.NONE,
+                )
+            )
         config = cast(GenerateContentConfigDict, config_dict)
         logger.info(
             f"Gemini automatic_function_calling config: {config_dict.get('automatic_function_calling')}"

@@ -663,6 +663,7 @@ class StreamingService:
             chunk_count = 0
             tool_call_count = 0
             agent_s3_download_url = None  # Initialize for S3 upload
+            run_messages = []
             
             # Import Redis pubsub manager for posting responses to channels
             from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_all_agents, broadcast_event_to_agent
@@ -730,19 +731,21 @@ class StreamingService:
                     yield f"data: {json.dumps({'error': 'Service temporarily rate limited. Please try again in a moment.'})}\n\n"
                     return
 
-                async def _run_agent_once(active_model_settings):
+                async def _run_agent_once(active_model_settings, override_message=None, override_history=None):
                     max_retries = 3
                     retry_attempt = 0
                     active_run = None
 
                     while retry_attempt < max_retries:
                         try:
-                            use_message_history = active_model_settings.get('google_cached_content') is not None or has_chat_history
+                            active_message = override_message or message
+                            active_history = override_history if override_history is not None else pydantic_messages
+                            use_message_history = active_model_settings.get('google_cached_content') is not None or bool(active_history)
 
                             if use_message_history:
                                 async with agent.iter(
-                                    message,
-                                    message_history=pydantic_messages,
+                                    active_message,
+                                    message_history=active_history,
                                     deps=session_deps,
                                     model_settings=active_model_settings
                                 ) as active_run:
@@ -751,7 +754,7 @@ class StreamingService:
                                     return active_run
                             else:
                                 async with agent.iter(
-                                    message,
+                                    active_message,
                                     deps=session_deps,
                                     model_settings=active_model_settings
                                 ) as active_run:
@@ -825,6 +828,7 @@ class StreamingService:
                 try:
                     # Get all messages from the run (this is the correct API for agent.iter())
                     all_messages = run.all_messages()
+                    run_messages = all_messages
                     logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
 
                     # 📁 UPLOAD AGENT RESPONSE TO S3 FOR DOWNLOAD (if enabled)
@@ -1129,6 +1133,59 @@ class StreamingService:
                 try:
                     before_enforcement = full_response
                     had_citations_before = self._has_citation_markers(before_enforcement or "")
+
+                    if (
+                        effective_message_type == "NON_GREETING"
+                        and tool_call_count >= 1
+                        and not had_citations_before
+                        and before_enforcement.strip() != "I don't have any information on this topic."
+                    ):
+                        logger.warning("🔁 [CITATION_REPAIR] Grounded answer missing citations; retrying once with stronger citation-only instruction")
+                        repair_message = (
+                            "Your previous answer was missing required inline citations. "
+                            "Rewrite the answer using only the already retrieved sources from this conversation. "
+                            "Do not call any tools. "
+                            "Do not add new facts. "
+                            "Keep the answer concise. "
+                            "Start with exactly one metadata line: MESSAGE_TYPE: NON_GREETING "
+                            "and ensure every factual sentence ends with citation markers like [1] or [1][2]. "
+                            "If you cannot produce a fully grounded cited answer, return exactly: "
+                            "I don't have any information on this topic."
+                        )
+                        repair_settings = dict(model_settings_kwargs)
+                        repair_settings.pop('google_cached_content', None)
+                        repair_settings['disable_tool_calling'] = True
+
+                        repair_run = await _run_agent_once(
+                            repair_settings,
+                            override_message=repair_message,
+                            override_history=run_messages,
+                        )
+                        if repair_run is not None:
+                            repair_messages = repair_run.all_messages()
+                            repaired_response = ""
+                            repair_tool_calls = 0
+                            for msg in repair_messages:
+                                if not hasattr(msg, 'parts'):
+                                    continue
+                                for part in msg.parts:
+                                    if isinstance(part, TextPart):
+                                        text_content = getattr(part, 'content', '')
+                                        if text_content:
+                                            repaired_response = text_content
+                                    if hasattr(part, 'tool_name'):
+                                        repair_tool_calls += 1
+                            if repaired_response:
+                                model_message_type, repaired_response = self._extract_model_message_type(repaired_response)
+                                effective_message_type = model_message_type or "NON_GREETING"
+                                full_response = repaired_response
+                                had_citations_before = self._has_citation_markers(full_response or "")
+                                logger.info(
+                                    f"🔁 [CITATION_REPAIR] message_type={model_message_type or 'UNKNOWN'} "
+                                    f"effective_message_type={effective_message_type} tool_calls={repair_tool_calls} "
+                                    f"citations_after={'yes' if had_citations_before else 'no'}"
+                                )
+
                     # Normalize combined citations like [1, 2] so enforcement/linking work.
                     full_response = self._normalize_citation_markers(full_response)
                     full_response = self._enforce_grounded_citation_policy(model_message_type, full_response)
