@@ -99,6 +99,17 @@ class StreamingService:
 
         return re.sub(r"\[\s*(\d+(?:\s*,\s*\d+)+)\s*\]", repl, response_text)
 
+    def _extract_message_type_header(self, response_text: str) -> tuple[str | None, str]:
+        """Extract machine-readable MESSAGE_TYPE header and remove it from user-facing text."""
+        if not response_text:
+            return None, response_text
+        match = re.match(r"^\s*MESSAGE_TYPE:\s*(PURE_GREETING|NON_GREETING)\s*\n?", response_text)
+        if not match:
+            return None, response_text
+        message_type = match.group(1)
+        cleaned = response_text[match.end():].lstrip()
+        return message_type, cleaned
+
     def _enforce_grounded_citation_policy(self, message: str, response_text: str) -> str:
         """
         Product requirement:
@@ -1036,7 +1047,13 @@ class StreamingService:
 
             # Hard requirement: non-greeting queries must use retrieval tools.
             # If this is violated, fail fast (do not return an ungrounded model response).
-            if tool_call_count == 0 and message.strip() and not self._is_greeting_only(message):
+            response_message_type, full_response = self._extract_message_type_header(full_response)
+
+            if (
+                tool_call_count == 0
+                and message.strip()
+                and response_message_type == "NON_GREETING"
+            ):
                 raise RuntimeError("retrieval tool not called for non-greeting request")
 
             # ================================================================
