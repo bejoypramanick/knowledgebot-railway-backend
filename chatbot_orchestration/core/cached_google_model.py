@@ -34,6 +34,7 @@ from .cache_manager import GeminiCacheManager
 try:
     from google.genai import errors as genai_errors
     from google.genai.types import (
+        AutomaticFunctionCallingConfig,
         GenerateContentConfigDict,
         GenerateContentResponse,
         ContentUnionDict,
@@ -144,8 +145,12 @@ class CachedGoogleModel(GoogleModel):
         # Pydantic AI already manages tool execution, and leaving SDK-level AFC enabled
         # causes repeated remote tool-call cycles (default maximum_remote_calls=10).
         config_dict = cast(dict[str, Any], config)
-        config_dict['automatic_function_calling'] = {'disable': True}
+        config_dict['automatic_function_calling'] = AutomaticFunctionCallingConfig(disable=True)
         config = cast(GenerateContentConfigDict, config_dict)
+        logger.info(
+            "Gemini automatic_function_calling config: %s",
+            config_dict.get('automatic_function_calling'),
+        )
 
         cached_content = model_settings.get('google_cached_content')
         if cached_content:
