@@ -208,16 +208,28 @@ async def search_knowledge_base(
             cached_result = await cache.get(cache_key)
             if cached_result:
                 duration = (time.time() - cache_start) * 1000
+                cached_response = cached_result
+                cached_citation_urls: List[str] = []
+                try:
+                    cached_payload = json.loads(cached_result)
+                    if isinstance(cached_payload, dict):
+                        cached_response = str(cached_payload.get("response") or "")
+                        urls = cached_payload.get("citation_urls") or []
+                        if isinstance(urls, list):
+                            cached_citation_urls = [str(url) for url in urls if isinstance(url, str)]
+                except Exception:
+                    # Backward compatibility for legacy string-only cache entries.
+                    cached_response = cached_result
                 logger.info(f"⚡ [Redis] Semantic Cache HIT (Latency: {duration:.1f}ms) for query: '{query}'")
                 logger.info(
                     f"🧭 [RAG_STATE_WRITE] path=semantic_cache_hit session_id={ctx.deps.session_id or 'none'} "
-                    f"citation_count=0 tool_used=yes"
+                    f"citation_count={len(cached_citation_urls)} tool_used=yes"
                 )
                 if ctx.deps.session_id:
                     from ..service.session_manager import session_state_manager
                     session_state_manager.set_tool_used(ctx.deps.session_id, "search_knowledge_base")
-                    session_state_manager.set_last_citation_urls(ctx.deps.session_id, [])
-                return cached_result
+                    session_state_manager.set_last_citation_urls(ctx.deps.session_id, cached_citation_urls)
+                return cached_response
             logger.info(f"❄️ [Redis] Semantic Cache MISS")
         except Exception as e:
             logger.warning(f"⚠️ Cache lookup failed: {e}")
@@ -448,7 +460,14 @@ async def search_knowledge_base(
             
             # --- STEP 4: Update Cache & Session State ---
             if cache and settings.enable_semantic_caching:
-                await cache.set(cache_key, response, ex=3600) # Cache for 1 hour
+                cache_payload = json.dumps(
+                    {
+                        "response": response,
+                        "citation_urls": citation_urls,
+                    },
+                    ensure_ascii=False,
+                )
+                await cache.set(cache_key, cache_payload, ex=3600) # Cache for 1 hour
 
             if ctx.deps.session_id:
                 from ..service.session_manager import session_state_manager
