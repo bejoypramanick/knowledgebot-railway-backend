@@ -774,6 +774,11 @@ class StreamingService:
                                     continue
                                 raise RuntimeError("RATE_LIMIT_EXCEEDED")
 
+                            logger.error(
+                                f"❌ Agent.iter() inner setup exception type={type(e).__name__} repr={repr(e)} "
+                                f"cause={repr(getattr(e, '__cause__', None))}",
+                                exc_info=True,
+                            )
                             raise RuntimeError(f"AGENT_SETUP_ERROR::{str(e)}")
 
                 try:
@@ -791,7 +796,11 @@ class StreamingService:
                         json_response = json.dumps(error_data, ensure_ascii=False)
                         yield f"data: {json_response}\n\n"
                         return
-                    logger.error(f"❌ Agent.iter() setup failed: {str(e)}")
+                    logger.error(
+                        f"❌ Agent.iter() setup failed: {str(e)} type={type(e).__name__} repr={repr(e)} "
+                        f"cause={repr(getattr(e, '__cause__', None))}",
+                        exc_info=True,
+                    )
                     error_data = {
                         "type": "error",
                         "error_code": "AGENT_SETUP_ERROR",
