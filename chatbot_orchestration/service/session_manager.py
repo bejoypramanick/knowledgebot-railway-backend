@@ -222,6 +222,16 @@ class SessionStateManager:
             state['tools_used'] = set()
         state['tools_used'].add(tool_name)
 
+    def get_tools_used(self, session_id: str) -> list[str]:
+        """Get the set of tools recorded for this session as a sorted list."""
+        state = self.get_session_state(session_id)
+        tools = state.get("tools_used") or set()
+        if isinstance(tools, set):
+            return sorted(str(tool) for tool in tools)
+        if isinstance(tools, list):
+            return sorted(str(tool) for tool in tools)
+        return []
+
     def set_last_citation_urls(self, session_id: str, urls: list[str]) -> None:
         """Store citation URLs for the most recent RAG tool call in this session."""
         state = self.get_session_state(session_id)

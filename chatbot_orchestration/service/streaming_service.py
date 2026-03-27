@@ -1141,7 +1141,11 @@ class StreamingService:
                 try:
                     before_enforcement = full_response
                     had_citations_before = self._has_citation_markers(before_enforcement or "")
-                    grounding_received_from_rag = bool(session_state_manager.get_last_citation_urls(session_id))
+                    rag_source_urls = session_state_manager.get_last_citation_urls(session_id)
+                    rag_sources_count = len(rag_source_urls)
+                    grounding_received_from_rag = bool(rag_source_urls)
+                    session_tools_used = session_state_manager.get_tools_used(session_id)
+                    rag_tool_used = "search_knowledge_base" in session_tools_used
 
                     should_attempt_citation_repair = (
                         effective_message_type == "NON_GREETING"
@@ -1228,6 +1232,9 @@ class StreamingService:
                         f"effective_message_type={effective_message_type} "
                         f"tool_calls={tool_call_count} citations_before={'yes' if had_citations_before else 'no'} "
                         f"grounding_from_rag={'yes' if grounding_received_from_rag else 'no'} "
+                        f"rag_tool_used={'yes' if rag_tool_used else 'no'} "
+                        f"rag_sources_count={rag_sources_count} "
+                        f"session_tools={','.join(session_tools_used) if session_tools_used else 'none'} "
                         f"final_reason={'citation_enforcement' if full_response != before_enforcement else 'ok'}"
                     )
                 except Exception:
