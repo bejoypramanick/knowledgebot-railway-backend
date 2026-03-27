@@ -345,19 +345,34 @@ class CachedGoogleModel(GoogleModel):
                 cached_content = model_settings.get('google_cached_content')
                 if cached_content and _is_cache_error(e):
                     logger.warning(f"Stale Gemini cache detected ({cached_content}): {e}")
-                    logger.info("Invalidating cache and retrying with inline system_instruction + tools")
+                    logger.info("Invalidating cache and rebuilding before retrying (no inline fallback)")
 
-                    # Invalidate local cache so future requests don't hit this again
                     from .cache_manager import gemini_cache_manager
-                    gemini_cache_manager.invalidate()
 
-                    # Strip google_cached_content from settings and retry
-                    fallback_settings = dict(model_settings)
-                    fallback_settings.pop('google_cached_content', None)
-                    fallback_settings = cast(GoogleModelSettings, fallback_settings)
+                    # Preserve cached prompt/tools so we can deterministically rebuild.
+                    cached_system_prompt, cached_tool_functions = gemini_cache_manager.get_cached_content()
+                    gemini_cache_manager.invalidate(keep_cached_content=True)
 
-                    logger.info("Retrying request without cache (inline fallback)")
-                    return await super()._generate_content(messages, stream, fallback_settings, model_request_parameters)
+                    if not cached_system_prompt or not cached_tool_functions:
+                        raise RuntimeError(
+                            "Gemini cache is stale/invalid and no cached system_prompt/tools are available to rebuild it"
+                        )
+
+                    model_name_for_cache = model_settings.get("model") or self.model_name or "gemini-2.5-flash-lite"
+                    rebuilt_cache_name = await gemini_cache_manager.ensure_cache(
+                        system_prompt=cached_system_prompt,
+                        tool_functions=cached_tool_functions,
+                        model_name=model_name_for_cache,
+                    )
+                    if not rebuilt_cache_name:
+                        raise RuntimeError("Gemini cache rebuild failed after cache error; refusing inline fallback")
+
+                    refreshed_settings = dict(model_settings)
+                    refreshed_settings["google_cached_content"] = rebuilt_cache_name
+                    refreshed_settings = cast(GoogleModelSettings, refreshed_settings)
+
+                    logger.info(f"Retrying request with rebuilt cache: {rebuilt_cache_name}")
+                    return await super()._generate_content(messages, stream, refreshed_settings, model_request_parameters)
                 
                 # PATTERN 1 & 3: Handle 503 errors with exponential backoff
                 if _is_503_error(e):
