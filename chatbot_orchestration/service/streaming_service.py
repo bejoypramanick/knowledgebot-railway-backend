@@ -64,6 +64,19 @@ class StreamingService:
         greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "greetings"]
         return any(g == text or text.startswith(g + " ") for g in greeting_patterns)
 
+    def _extract_model_message_type(self, response_text: str) -> tuple[str | None, str]:
+        """Extract model-reported message type header and return cleaned response text."""
+        if not response_text:
+            return None, response_text
+
+        match = re.match(r"^\s*MESSAGE_TYPE:\s*(PURE_GREETING|NON_GREETING)\s*\n?", response_text, flags=re.IGNORECASE)
+        if not match:
+            return None, response_text
+
+        message_type = match.group(1).upper()
+        cleaned = response_text[match.end():].lstrip()
+        return message_type, cleaned
+
     def _has_citation_markers(self, response_text: str) -> bool:
         """Detect inline citation markers like [1] or clickable <a>...</a> citations."""
         if not response_text:
@@ -99,7 +112,7 @@ class StreamingService:
 
         return re.sub(r"\[\s*(\d+(?:\s*,\s*\d+)+)\s*\]", repl, response_text)
 
-    def _enforce_grounded_citation_policy(self, message: str, response_text: str) -> str:
+    def _enforce_grounded_citation_policy(self, message_type: str | None, response_text: str) -> str:
         """
         Product requirement:
         - Non-greeting answers must be grounded and include citations.
@@ -116,7 +129,7 @@ class StreamingService:
                     return no_answer
         except Exception:
             pass
-        if self._is_greeting_only(message):
+        if message_type == "PURE_GREETING":
             return response_text
         if not self._has_citation_markers(response_text):
             return no_answer
@@ -1001,9 +1014,8 @@ class StreamingService:
 
                         if not is_greeting:
                             logger.error(f"TOOL CALL REQUIREMENT NOT MET: query='{message[:80]}', tools=0")
-                            logger.error(f"🚨 CRITICAL: Agent should have used search_knowledge_base for non-greeting query")
                             logger.error(f"🚨 Response was: {full_response[:100]}...")
-                            logger.error(f"🚨 This indicates the agent is not using the pgvector retrieval tool")
+                            logger.error("🚨 Model returned zero tool calls; final enforcement will use model-reported MESSAGE_TYPE")
 
                 except Exception as result_error:
                     logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)
@@ -1024,9 +1036,11 @@ class StreamingService:
 
             pipeline_timer.mark("response_extraction")
 
+            model_message_type, full_response = self._extract_model_message_type(full_response)
+
             # Hard requirement: non-greeting queries must use retrieval tools.
             # If this is violated, fail fast (do not return an ungrounded model response).
-            if tool_call_count == 0 and message.strip() and not self._is_greeting_only(message):
+            if tool_call_count == 0 and message.strip() and model_message_type == "NON_GREETING":
                 raise RuntimeError("retrieval tool not called for non-greeting request")
 
             # ================================================================
@@ -1093,7 +1107,7 @@ class StreamingService:
                     had_citations_before = self._has_citation_markers(before_enforcement or "")
                     # Normalize combined citations like [1, 2] so enforcement/linking work.
                     full_response = self._normalize_citation_markers(full_response)
-                    full_response = self._enforce_grounded_citation_policy(message, full_response)
+                    full_response = self._enforce_grounded_citation_policy(model_message_type, full_response)
                     if full_response != before_enforcement:
                         # Dev-friendly diagnostic: show why we blanked the answer.
                         # WARNING: This logs model output (may include user/KB content). Keep brief.
@@ -1103,12 +1117,12 @@ class StreamingService:
                             f"model_preview='{prev}'"
                         )
                     logger.info(
-                        f"🧭 [ANSWER_DIAG] greeting={'yes' if self._is_greeting_only(message) else 'no'} "
+                        f"🧭 [ANSWER_DIAG] message_type={model_message_type or 'UNKNOWN'} "
                         f"tool_calls={tool_call_count} citations_before={'yes' if had_citations_before else 'no'} "
                         f"final_reason={'citation_enforcement' if full_response != before_enforcement else 'ok'}"
                     )
                 except Exception:
-                    full_response = self._enforce_grounded_citation_policy(message, full_response)
+                    full_response = self._enforce_grounded_citation_policy(model_message_type, full_response)
 
                 # Replace [N] markers with clickable links using the most recent RAG citations.
                 # Only link http(s) URLs; keep kb:// as plain text markers.
