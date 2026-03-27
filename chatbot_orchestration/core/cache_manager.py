@@ -126,8 +126,7 @@ class GeminiCacheManager:
                     tools=gemini_tools if gemini_tools else None,
                     tool_config=types.ToolConfig(
                         function_calling_config=types.FunctionCallingConfig(
-                            mode=types.FunctionCallingConfigMode.ANY,
-                            allowed_function_names=["search_knowledge_base"],
+                            mode=types.FunctionCallingConfigMode.AUTO,
                         )
                     ) if gemini_tools else None,
                     ttl=f"{self._cache_ttl}s",
@@ -138,7 +137,7 @@ class GeminiCacheManager:
                 logger.info(f"Cache config includes:")
                 logger.info(f"  - System instruction: {len(system_prompt)} chars")
                 logger.info(f"  - Tools: {len(gemini_tools) if gemini_tools else 0} tool(s)")
-                logger.info(f"  - Forced tool calling: {'yes' if gemini_tools else 'no'}")
+                logger.info(f"  - Tool calling mode: {'AUTO' if gemini_tools else 'none'}")
                 if gemini_tools:
                     for tool in gemini_tools:
                         if hasattr(tool, 'function_declarations'):
