@@ -670,6 +670,7 @@ class StreamingService:
             full_response = ""
             chunk_count = 0
             tool_call_count = 0
+            tool_return_count = 0
             agent_s3_download_url = None  # Initialize for S3 upload
             run_messages = []
             
@@ -973,8 +974,8 @@ class StreamingService:
                                                 full_response = text_content  # ← KEY FIX: Use the latest response
                                                 chunk_count += 1
 
-                                    # Track tool calls without logging args/content (may contain user text/PII).
-                                    if hasattr(part, 'tool_name'):
+                                    # Track only actual tool call parts; returns are counted separately.
+                                    if isinstance(part, (BuiltinToolCallPart, ToolCallPart)):
                                         tool_name = getattr(part, 'tool_name', 'unknown')
                                         tool_call_count += 1
 
@@ -982,8 +983,12 @@ class StreamingService:
                                             f"🔧 [TOOL_CALL] name={tool_name} idx={tool_call_count} "
                                             f"session={session_id[:16]} user_hash={hash_pii(user_email)}"
                                         )
+                                    elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)):
+                                        tool_return_count += 1
 
-                    logger.info(f"Agent completed with {tool_call_count} tool calls")
+                    logger.info(
+                        f"Agent completed with {tool_call_count} tool calls and {tool_return_count} tool returns"
+                    )
 
                     # Monitor tool call compliance
                     if tool_call_count == 0 and message.strip():
@@ -1055,6 +1060,7 @@ class StreamingService:
                     full_response = ""
                     chunk_count = 0
                     tool_call_count = 0
+                    tool_return_count = 0
 
                     for msg in retry_messages:
                         if not hasattr(msg, 'parts'):
@@ -1065,14 +1071,17 @@ class StreamingService:
                                 if text_content:
                                     full_response = text_content
                                     chunk_count += 1
-                            if hasattr(part, 'tool_name'):
+                            if isinstance(part, (BuiltinToolCallPart, ToolCallPart)):
                                 tool_call_count += 1
+                            elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)):
+                                tool_return_count += 1
 
                     model_message_type, full_response = self._extract_model_message_type(full_response)
                     effective_message_type = model_message_type or "NON_GREETING"
                     logger.info(
                         f"🔁 [FORCED_TOOL_RETRY] message_type={model_message_type or 'UNKNOWN'} "
-                        f"effective_message_type={effective_message_type} tool_calls={tool_call_count}"
+                        f"effective_message_type={effective_message_type} tool_calls={tool_call_count} "
+                        f"tool_returns={tool_return_count}"
                     )
 
                 if tool_call_count == 0 and effective_message_type == "NON_GREETING":
@@ -1181,6 +1190,7 @@ class StreamingService:
                             repair_messages = repair_run.all_messages()
                             repaired_response = ""
                             repair_tool_calls = 0
+                            repair_tool_returns = 0
                             for msg in repair_messages:
                                 if not hasattr(msg, 'parts'):
                                     continue
@@ -1189,8 +1199,10 @@ class StreamingService:
                                         text_content = getattr(part, 'content', '')
                                         if text_content:
                                             repaired_response = text_content
-                                    if hasattr(part, 'tool_name'):
+                                    if isinstance(part, (BuiltinToolCallPart, ToolCallPart)):
                                         repair_tool_calls += 1
+                                    elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)):
+                                        repair_tool_returns += 1
                             if repaired_response:
                                 model_message_type, repaired_response = self._extract_model_message_type(repaired_response)
                                 effective_message_type = model_message_type or "NON_GREETING"
@@ -1199,6 +1211,7 @@ class StreamingService:
                                 logger.info(
                                     f"🔁 [CITATION_REPAIR] message_type={model_message_type or 'UNKNOWN'} "
                                     f"effective_message_type={effective_message_type} tool_calls={repair_tool_calls} "
+                                    f"tool_returns={repair_tool_returns} "
                                     f"citations_after={'yes' if had_citations_before else 'no'}"
                                 )
                     elif (
@@ -1230,7 +1243,8 @@ class StreamingService:
                     logger.info(
                         f"🧭 [ANSWER_DIAG] message_type={model_message_type or 'UNKNOWN'} "
                         f"effective_message_type={effective_message_type} "
-                        f"tool_calls={tool_call_count} citations_before={'yes' if had_citations_before else 'no'} "
+                        f"tool_calls={tool_call_count} tool_returns={tool_return_count} "
+                        f"citations_before={'yes' if had_citations_before else 'no'} "
                         f"grounding_from_rag={'yes' if grounding_received_from_rag else 'no'} "
                         f"rag_tool_used={'yes' if rag_tool_used else 'no'} "
                         f"rag_sources_count={rag_sources_count} "
