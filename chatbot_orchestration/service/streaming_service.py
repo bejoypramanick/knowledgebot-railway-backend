@@ -333,58 +333,36 @@ class StreamingService:
 
             pipeline_timer.mark("session_setup_and_history")
 
-            # System Prompt Strategy: Cache-aware handling
-            #
-            # If Gemini cache is active:
-            #   - System prompt is IN the cache, no need to prepend or rely on Agent.system_prompt
-            #   - Always pass message_history (even for first messages)
-            #
-            # If no cache (fallback - existing two-tier logic):
-            #   1. FIRST MESSAGE: Don't provide message_history, use Agent.system_prompt
-            #   2. FOLLOW-UP: Prepend SystemPromptPart to message_history
-
-            has_chat_history = len(pydantic_messages) > 0
-            cache_name = agent_manager.get_cached_cache_name(session_id)
+            # System Prompt Strategy: explicit Gemini cache is required.
+            cache_name = await agent_manager.ensure_session_cache(session_id)
 
             logger.info(f"System prompt strategy: cache={'active: ' + cache_name if cache_name else 'none'}, "
                         f"history={len(pydantic_messages)} messages")
 
-            if cache_name:
-                # Cache active: system prompt is in the cache
-                logger.info("System prompt served from Gemini cache (skipping prepend)")
-                # Safety: if earlier runs (or DB history) contain a prepended SystemPromptPart,
-                # remove it before calling Agent.iter() to avoid Gemini 400:
-                # cachedContent cannot be used with a request setting system_instruction/tools/tool_config.
-                try:
-                    def _is_system_prompt_request(msg: object) -> bool:
-                        if not isinstance(msg, ModelRequest):
-                            return False
-                        parts = getattr(msg, "parts", None) or []
-                        return any(isinstance(p, SystemPromptPart) for p in parts)
+            if not cache_name:
+                raise RuntimeError(f"Gemini cache is required but unavailable for session {session_id}")
 
-                    before = len(pydantic_messages)
-                    pydantic_messages = [m for m in pydantic_messages if not _is_system_prompt_request(m)]
-                    removed = before - len(pydantic_messages)
-                    if removed:
-                        logger.warning(
-                            f"⚠️ Removed {removed} SystemPromptPart message(s) from history because Gemini cache is active"
-                        )
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to sanitize message_history for cached mode: {e}")
-            elif has_chat_history:
-                # FOLLOW-UP MESSAGE (no cache): Must prepend system prompt to message_history
-                system_prompt_text = agent_manager.get_cached_system_prompt(session_id)
+            # Cache active: system prompt is in the cache.
+            logger.info("System prompt served from Gemini cache (skipping prepend)")
+            # Safety: if earlier runs (or DB history) contain a prepended SystemPromptPart,
+            # remove it before calling Agent.iter() to avoid Gemini 400:
+            # cachedContent cannot be used with a request setting system_instruction/tools/tool_config.
+            try:
+                def _is_system_prompt_request(msg: object) -> bool:
+                    if not isinstance(msg, ModelRequest):
+                        return False
+                    parts = getattr(msg, "parts", None) or []
+                    return any(isinstance(p, SystemPromptPart) for p in parts)
 
-                if system_prompt_text:
-                    system_prompt_msg = ModelRequest(parts=[SystemPromptPart(content=system_prompt_text)])
-                    pydantic_messages.insert(0, system_prompt_msg)
-                    logger.info(f"System prompt prepended to message_history ({len(system_prompt_text)} chars)")
-                else:
-                    logger.error(f"System prompt not found in cache for session {session_id}")
-                    raise RuntimeError(f"System prompt not found for session {session_id}")
-            else:
-                # FIRST MESSAGE (no cache): Agent.system_prompt will be used automatically
-                logger.info("First message: using Agent.system_prompt (no cache fallback)")
+                before = len(pydantic_messages)
+                pydantic_messages = [m for m in pydantic_messages if not _is_system_prompt_request(m)]
+                removed = before - len(pydantic_messages)
+                if removed:
+                    logger.warning(
+                        f"⚠️ Removed {removed} SystemPromptPart message(s) from history because Gemini cache is active"
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to sanitize message_history for cached mode: {e}")
 
             # 🚨 CRITICAL: Check if user is requesting human agent BEFORE AI responds
             logger.info(f"🔍 Checking if user is requesting human agent...")

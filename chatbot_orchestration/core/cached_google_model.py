@@ -8,7 +8,7 @@ from the GenerateContentConfig when a cache is active.
 
 Resilience: If Google expires the cache before our local TTL detects it,
 _generate_content catches the stale-cache error, invalidates the local cache,
-rebuilds the config WITH system_instruction/tools (inline fallback), and retries.
+rebuilds explicit cached content, and retries.
 
 Resilience Patterns:
 1. Exponential Backoff: Retries with jittered backoff for 503 errors
@@ -133,7 +133,7 @@ class CachedGoogleModel(GoogleModel):
     """GoogleModel subclass that strips tools/system_instruction from API request when cache is active.
 
     If the cache turns out to be stale (Google expired it), automatically retries
-    without cache so the request succeeds with inline system_instruction + tools.
+    after rebuilding explicit cached content.
     """
 
     async def _build_content_and_config(
@@ -219,8 +219,8 @@ class CachedGoogleModel(GoogleModel):
         3. Circuit Breaker: Trips after 10 failures in 60s, blocks for 60s
         
         If the cached_content reference is expired/invalid on Google's side,
-        catch the error, invalidate local cache, rebuild config without cache,
-        and retry with inline system_instruction + tools.
+        catch the error, invalidate local cache, rebuild explicit cached content,
+        and retry with the refreshed cache reference.
         """
         
         # Get model name from settings or use default
@@ -337,11 +337,8 @@ class CachedGoogleModel(GoogleModel):
         OPTIMIZATION: Creates a separate cache for fallback model using the same
         system prompt and tools to maintain performance benefits.
         
-        The fallback will use either:
-        - Cached mode: If fallback cache creation succeeds
-        - Inline mode: If cache creation fails (system_instruction + tools)
-        
-        This ensures RAG search and all tool functionality works identically in fallback mode.
+        The fallback must create a new explicit cache for the fallback model.
+        Inline system prompting is not allowed.
         """
         primary_model = self.model_name or "gemini-2.5-flash-lite"
         fallback_model = "gemini-2.0-flash"
@@ -383,21 +380,16 @@ class CachedGoogleModel(GoogleModel):
                     # Add cache reference to fallback settings
                     fallback_settings['google_cached_content'] = fallback_cache_name
                 else:
-                    logger.info("ℹ️ Fallback cache creation returned None, using inline mode")
+                    raise RuntimeError("Fallback cache creation returned None; refusing inline fallback")
             else:
                 logger.warning("⚠️ Could not retrieve cached system prompt and tools from global cache manager")
-                logger.info("ℹ️ This may happen if primary cache was not created or expired")
-                logger.info("ℹ️ Fallback will use inline mode with system_instruction + tools from Agent")
+                raise RuntimeError("Could not retrieve cached system prompt and tools for fallback cache rebuild")
                 
         except Exception as cache_error:
-            logger.warning(f"⚠️ Fallback cache creation failed: {cache_error}, using inline mode")
-            fallback_cache_name = None
+            logger.error(f"⚠️ Fallback cache creation failed: {cache_error}")
+            raise RuntimeError("Fallback model requires explicit cache but cache rebuild failed") from cache_error
         
-        if fallback_cache_name:
-            logger.info("ℹ️ Fallback will use cached system_instruction + tools")
-        else:
-            logger.info("ℹ️ Fallback will use inline system_instruction + tools (no cache)")
-            logger.info("ℹ️ Note: Fallback may have slightly higher token usage due to no cache")
+        logger.info("ℹ️ Fallback will use cached system_instruction + tools")
         
         logger.info("ℹ️ RAG search and all tools will function identically")
         
@@ -414,8 +406,7 @@ class CachedGoogleModel(GoogleModel):
             result = await fallback_instance._generate_content_direct(
                 messages, stream, fallback_settings, model_request_parameters
             )
-            cache_mode = "cached" if fallback_cache_name else "inline"
-            logger.info(f"✅ Fallback to {fallback_model} succeeded ({cache_mode} mode)")
+            logger.info(f"✅ Fallback to {fallback_model} succeeded (cached mode)")
             return result
         except Exception as fallback_error:
             logger.error(f"❌ Fallback to {fallback_model} also failed: {fallback_error}")

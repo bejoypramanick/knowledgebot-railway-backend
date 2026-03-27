@@ -142,6 +142,34 @@ class AgentManager:
         """Get cached system prompt for a session if it exists."""
         return self.system_prompt_cache.get(session_id)
 
+    async def ensure_session_cache(self, session_id: str) -> Optional[str]:
+        """Ensure an explicit Gemini cache exists for this session's current system prompt and tools."""
+        system_prompt = self.get_cached_system_prompt(session_id)
+        if not system_prompt:
+            logger.warning(f"No cached system prompt available to rebuild Gemini cache for session: {session_id}")
+            self.set_cached_cache_name(session_id, None)
+            return None
+
+        try:
+            from ..core.cache_manager import gemini_cache_manager
+
+            model_name = os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite")
+            cache_name = await gemini_cache_manager.ensure_cache(
+                system_prompt=system_prompt,
+                tool_functions=[search_knowledge_base],
+                model_name=model_name,
+            )
+            self.set_cached_cache_name(session_id, cache_name)
+            if cache_name:
+                logger.info(f"Ensured Gemini cache for session {session_id}: {cache_name}")
+            else:
+                logger.warning(f"Gemini cache unavailable after ensure for session {session_id}")
+            return cache_name
+        except Exception as cache_error:
+            logger.warning(f"Failed to ensure Gemini cache for session {session_id}: {cache_error}")
+            self.set_cached_cache_name(session_id, None)
+            return None
+
     async def clear_agent_cache(self, session_id: str = None):
         """Clear cached agent for a session or all sessions.
         
@@ -176,6 +204,7 @@ class AgentManager:
         # Check if we already have a cached agent for this session
         # Force new agent if tools are needed to ensure fresh tool state
         if session_id in self.agent_cache and not force_new:
+            await self.ensure_session_cache(session_id)
             logger.info(f"✅ Reusing cached agent for session: {session_id}")
             logger.info("💰 No agent creation overhead - instant response!")
             logger.info("="*80)
@@ -224,9 +253,10 @@ class AgentManager:
             if cache_name:
                 logger.info(f"Gemini cache active: {cache_name}")
             else:
-                logger.info("Gemini cache not available, using inline system prompt (fallback)")
+                raise RuntimeError("Gemini cache is required but could not be created")
         except Exception as cache_error:
-            logger.warning(f"Gemini cache creation failed: {cache_error}, using fallback")
+            logger.error(f"Gemini cache creation failed: {cache_error}")
+            raise
 
         # Get standard model wrapper based on chosen LLM
         logger.info("Creating agent for session")
