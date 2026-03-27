@@ -112,11 +112,17 @@ class StreamingService:
 
         return re.sub(r"\[\s*(\d+(?:\s*,\s*\d+)+)\s*\]", repl, response_text)
 
-    def _enforce_grounded_citation_policy(self, message_type: str | None, response_text: str) -> str:
+    def _enforce_grounded_citation_policy(
+        self,
+        message_type: str | None,
+        response_text: str,
+        grounding_received_from_rag: bool = False,
+    ) -> str:
         """
         Product requirement:
-        - Non-greeting answers must be grounded and include citations.
-        - If citations are missing, return the exact no-answer string.
+        - Non-greeting answers must be grounded.
+        - Inline citations are preferred, but grounded RAG retrieval is also accepted.
+        - If neither citations nor RAG grounding are present, return the exact no-answer string.
         """
         no_answer = "I don't have any information on this topic."
         # If the model already chose the no-answer response (sometimes wrapped in HTML),
@@ -130,6 +136,8 @@ class StreamingService:
         except Exception:
             pass
         if message_type == "PURE_GREETING":
+            return response_text
+        if grounding_received_from_rag:
             return response_text
         if not self._has_citation_markers(response_text):
             return no_answer
@@ -1133,14 +1141,18 @@ class StreamingService:
                 try:
                     before_enforcement = full_response
                     had_citations_before = self._has_citation_markers(before_enforcement or "")
+                    grounding_received_from_rag = bool(session_state_manager.get_last_citation_urls(session_id))
 
-                    if (
+                    should_attempt_citation_repair = (
                         effective_message_type == "NON_GREETING"
                         and tool_call_count >= 1
                         and not had_citations_before
+                        and not grounding_received_from_rag
                         and before_enforcement.strip() != "I don't have any information on this topic."
-                    ):
-                        logger.warning("🔁 [CITATION_REPAIR] Grounded answer missing citations; retrying once with stronger citation-only instruction")
+                    )
+
+                    if should_attempt_citation_repair:
+                        logger.warning("🔁 [CITATION_REPAIR] Non-greeting answer missing both citations and RAG grounding; retrying once with stronger citation-only instruction")
                         repair_message = (
                             "Your previous answer was missing required inline citations. "
                             "Rewrite the answer using only the already retrieved sources from this conversation. "
@@ -1185,10 +1197,24 @@ class StreamingService:
                                     f"effective_message_type={effective_message_type} tool_calls={repair_tool_calls} "
                                     f"citations_after={'yes' if had_citations_before else 'no'}"
                                 )
+                    elif (
+                        effective_message_type == "NON_GREETING"
+                        and tool_call_count >= 1
+                        and not had_citations_before
+                        and grounding_received_from_rag
+                        and before_enforcement.strip() != "I don't have any information on this topic."
+                    ):
+                        logger.info(
+                            "📎 [CITATION_REPAIR_SKIPPED] Grounding received from RAG; allowing answer without inline citations"
+                        )
 
                     # Normalize combined citations like [1, 2] so enforcement/linking work.
                     full_response = self._normalize_citation_markers(full_response)
-                    full_response = self._enforce_grounded_citation_policy(model_message_type, full_response)
+                    full_response = self._enforce_grounded_citation_policy(
+                        model_message_type,
+                        full_response,
+                        grounding_received_from_rag=grounding_received_from_rag,
+                    )
                     if full_response != before_enforcement:
                         # Dev-friendly diagnostic: show why we blanked the answer.
                         # WARNING: This logs model output (may include user/KB content). Keep brief.
@@ -1201,10 +1227,15 @@ class StreamingService:
                         f"🧭 [ANSWER_DIAG] message_type={model_message_type or 'UNKNOWN'} "
                         f"effective_message_type={effective_message_type} "
                         f"tool_calls={tool_call_count} citations_before={'yes' if had_citations_before else 'no'} "
+                        f"grounding_from_rag={'yes' if grounding_received_from_rag else 'no'} "
                         f"final_reason={'citation_enforcement' if full_response != before_enforcement else 'ok'}"
                     )
                 except Exception:
-                    full_response = self._enforce_grounded_citation_policy(model_message_type, full_response)
+                    full_response = self._enforce_grounded_citation_policy(
+                        model_message_type,
+                        full_response,
+                        grounding_received_from_rag=bool(session_state_manager.get_last_citation_urls(session_id)),
+                    )
 
                 # Replace [N] markers with clickable links using the most recent RAG citations.
                 # Only link http(s) URLs; keep kb:// as plain text markers.
