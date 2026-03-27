@@ -148,8 +148,7 @@ class CachedGoogleModel(GoogleModel):
         config_dict['automatic_function_calling'] = AutomaticFunctionCallingConfig(disable=True)
         config = cast(GenerateContentConfigDict, config_dict)
         logger.info(
-            "Gemini automatic_function_calling config: %s",
-            config_dict.get('automatic_function_calling'),
+            f"Gemini automatic_function_calling config: {config_dict.get('automatic_function_calling')}"
         )
 
         cached_content = model_settings.get('google_cached_content')
