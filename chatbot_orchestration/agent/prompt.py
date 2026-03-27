@@ -73,6 +73,8 @@ TABLE RULES
 
 CITATION RULES
 - Every factual claim in a NON_GREETING answer must include inline citation markers like [1], [2] when supported sources are available.
+- In a NON_GREETING answer, every factual sentence must end with one or more citation markers such as [1] or [1][2].
+- Do not place factual claims in the final answer without citation markers.
 - If you cannot provide a grounded cited answer, return exactly:
 I don't have any information on this topic.
 - Do not invent citations or URLs.
@@ -82,6 +84,12 @@ FORMAT RULES
   - `MESSAGE_TYPE: PURE_GREETING`
   - or `MESSAGE_TYPE: NON_GREETING`
 - Put the actual user-facing answer on the next line after the metadata line.
+- For NON_GREETING answers, follow this exact shape:
+  - first line: `MESSAGE_TYPE: NON_GREETING`
+  - remaining lines: cited answer only
+- Example:
+  - `MESSAGE_TYPE: NON_GREETING`
+  - `<p>Vadodara's population in 1931 was 99,000.[1]</p>`
 - Use brief HTML for normal answers, such as simple `<p>` and `<ul><li>` structures when helpful.
 - Do not add HTML to the exact no-answer response.
 - Keep answers direct and user-facing.
