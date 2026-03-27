@@ -33,6 +33,18 @@ async def _get_cache_client() -> redis.Redis:
 
 from shared.embeddings import generate_embedding
 
+
+def _estimate_text_tokens(text: str) -> int:
+    """Best-effort local token estimate for diagnostics."""
+    if not text:
+        return 0
+    try:
+        from litellm import token_counter
+
+        return int(token_counter(model="gemini/gemini-2.5-flash-lite", text=text) or 0)
+    except Exception:
+        return max(1, len(text) // 4)
+
 def _compress_context(context_text: str) -> str:
     """Implement LLMLingua-2 quantized compression with telemetry."""
     try:
@@ -315,14 +327,22 @@ async def search_knowledge_base(
             table_context = "\n".join(table_chunks).strip()
             narrative_context = "\n".join(narrative_chunks).strip()
             narrative_before_chars = len(narrative_context)
+            narrative_before_tokens = _estimate_text_tokens(narrative_context)
 
             llmlingua_applied = False
+            llmlingua_reason = "disabled"
             if settings.enable_context_compression and narrative_context:
                 compressed_narrative = _compress_context(narrative_context)
                 llmlingua_applied = compressed_narrative != narrative_context
+                llmlingua_reason = "compressed" if llmlingua_applied else "no_change"
             else:
                 compressed_narrative = narrative_context
+                if not settings.enable_context_compression:
+                    llmlingua_reason = "disabled"
+                elif not narrative_context:
+                    llmlingua_reason = "no_narrative"
             narrative_after_chars = len(compressed_narrative)
+            narrative_after_tokens = _estimate_text_tokens(compressed_narrative)
 
             if table_context and compressed_narrative:
                 final_context = table_context + "\n\n" + compressed_narrative
@@ -396,7 +416,9 @@ async def search_knowledge_base(
                 f"flashrank_knn_before={len(chunks)} flashrank_after={len(top_chunks)} "
                 f"llmlingua={'on' if settings.enable_context_compression else 'off'} "
                 f"llmlingua_applied={'yes' if llmlingua_applied else 'no'} "
+                f"llmlingua_reason={llmlingua_reason} "
                 f"llmlingua_before_chars={narrative_before_chars} llmlingua_after_chars={narrative_after_chars} "
+                f"llmlingua_before_tokens={narrative_before_tokens} llmlingua_after_tokens={narrative_after_tokens} "
                 f"citations={len(citation_urls)}"
             )
             
