@@ -209,6 +209,14 @@ async def search_knowledge_base(
             if cached_result:
                 duration = (time.time() - cache_start) * 1000
                 logger.info(f"⚡ [Redis] Semantic Cache HIT (Latency: {duration:.1f}ms) for query: '{query}'")
+                logger.info(
+                    f"🧭 [RAG_STATE_WRITE] path=semantic_cache_hit session_id={ctx.deps.session_id or 'none'} "
+                    f"citation_count=0 tool_used=yes"
+                )
+                if ctx.deps.session_id:
+                    from ..service.session_manager import session_state_manager
+                    session_state_manager.set_tool_used(ctx.deps.session_id, "search_knowledge_base")
+                    session_state_manager.set_last_citation_urls(ctx.deps.session_id, [])
                 return cached_result
             logger.info(f"❄️ [Redis] Semantic Cache MISS")
         except Exception as e:
@@ -277,6 +285,9 @@ async def search_knowledge_base(
             rows = result.mappings().all()
             
             if not rows:
+                logger.info(
+                    f"🧭 [RAG_EARLY_RETURN] reason=no_rows session_id={ctx.deps.session_id or 'none'} query='{query[:120]}'"
+                )
                 return "I don't have any information on this topic."
             
             # --- STEP 2: Reranking ---
@@ -443,6 +454,12 @@ async def search_knowledge_base(
                 from ..service.session_manager import session_state_manager
                 session_state_manager.set_tool_used(ctx.deps.session_id, "search_knowledge_base")
                 session_state_manager.set_last_citation_urls(ctx.deps.session_id, citation_urls)
+                logger.info(
+                    f"🧭 [RAG_STATE_WRITE] path=live_retrieval session_id={ctx.deps.session_id} "
+                    f"citation_count={len(citation_urls)} tool_used=yes"
+                )
+            else:
+                logger.warning("🧭 [RAG_STATE_WRITE] skipped: missing session_id on tool context")
                 
             return response
             
