@@ -33,6 +33,12 @@ litellm>=1.50.0
 google-genai>=1.68.0
 google-auth>=2.38.0
 
+# RAG reranking
+flashrank>=0.2.10
+
+# Context compression
+llmlingua>=0.2.2
+
 # Enhanced email validation
 email-validator>=2.0.0
 
