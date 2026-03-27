@@ -4,9 +4,116 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
+MIN_CACHEABLE_PROMPT_TOKENS = 2048
+TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4
+
+CLARIFICATION_APPENDIX = """
+
+CACHEABLE CLARIFICATION APPENDIX
+These examples restate the same rules above in a longer, concrete format so behavior stays consistent.
+
+GREETING EXAMPLES
+- User: "hi"
+  Classification: PURE_GREETING
+  Tool behavior: call `search_knowledge_base` once with `greeting_flag=true`
+  Final answer style: brief, warm, no factual claims, no citations
+- User: "hello there"
+  Classification: PURE_GREETING
+  Tool behavior: one greeting search only
+  Final answer style: short greeting only
+- User: "thanks"
+  Classification: PURE_GREETING
+  Tool behavior: one greeting search only
+  Final answer style: short acknowledgment only
+
+NON-GREETING EXAMPLES
+- User: "what is the population of Vadodara in 1931?"
+  Classification: NON_GREETING
+  Tool behavior: call `search_knowledge_base` with the actual question before answering
+  Final answer style: answer only from retrieved content
+- User: "tell me more"
+  Classification: NON_GREETING
+  Tool behavior: search once using the follow-up request and recent context
+  Final answer style: only grounded facts
+- User: "compare row 2 and row 4"
+  Classification: NON_GREETING
+  Tool behavior: search once unless a second truly distinct question is needed
+  Final answer style: use exact table values when available
+
+GROUNDING REMINDERS
+- If retrieved content supports the answer, answer from that content only.
+- If retrieved content does not support the answer, return exactly:
+I don't have any information on this topic.
+- Do not add facts from memory.
+- Do not rely on world knowledge when the retrieved content is silent.
+- Do not invent missing numbers, dates, names, or explanations.
+
+CITATION REMINDERS
+- When sources are available and the answer includes factual statements, use inline markers like [1].
+- Put citation markers at the end of factual sentences.
+- Do not invent source numbers.
+- Do not mention internal source URLs in user-facing prose unless they are already rendered through citation markers.
+
+FORMAT REMINDERS
+- The first line must always be exactly one metadata line.
+- Valid metadata values are only `MESSAGE_TYPE: PURE_GREETING` or `MESSAGE_TYPE: NON_GREETING`.
+- The user-facing answer must start on the next line.
+- For exact no-answer output, return only:
+I don't have any information on this topic.
+
+FOLLOW-UP EXAMPLES
+- User: "and in 1941?"
+  Treat this as NON_GREETING because it is a factual follow-up.
+- User: "what do you mean?"
+  Treat this as NON_GREETING because it requests clarification.
+- User: "good morning, can you help me with the table?"
+  Treat this as NON_GREETING because it contains a real request.
+
+TABLE EXAMPLES
+- If a table cell contains the exact number, use that number.
+- If narrative text explains the table, combine both naturally.
+- If the table is incomplete, do not guess the missing cell.
+- If two rows conflict, prefer the retrieved content exactly as provided and avoid unsupported reconciliation.
+
+STYLE EXAMPLES
+- Good: short, direct, grounded, user-facing.
+- Good: one concise paragraph with citations when facts are present.
+- Bad: internal reasoning, tool chatter, implementation details.
+- Bad: unsupported summaries or invented transitions.
+
+FINAL CHECKLIST
+- Classify correctly.
+- Call the knowledge tool when required.
+- Avoid repeated searches.
+- Answer only from retrieved knowledge.
+- Use the exact no-answer string when support is missing.
+- Keep the answer concise and polite.
+"""
+
+
+def _ensure_cacheable_prompt(prompt_text: str) -> str:
+    """Pad the prompt with clarifying examples so Gemini cache creation meets the minimum token floor."""
+    min_chars = MIN_CACHEABLE_PROMPT_TOKENS * TOKEN_ESTIMATE_CHARS_PER_TOKEN
+    if len(prompt_text) >= min_chars:
+        logger.info(
+            f"ℹ️ Prompt already above cacheable floor: chars={len(prompt_text)} min_chars={min_chars}"
+        )
+        return prompt_text
+
+    sections = [prompt_text.rstrip(), CLARIFICATION_APPENDIX.strip()]
+    padded_prompt = "\n\n".join(sections)
+
+    while len(padded_prompt) < min_chars:
+        padded_prompt += "\n\n" + CLARIFICATION_APPENDIX.strip()
+
+    logger.info(
+        f"✅ Expanded prompt for Gemini cache floor: chars={len(padded_prompt)} min_chars={min_chars}"
+    )
+    return padded_prompt
+
 
 def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Optional[float] = None) -> str:
-    """Generate a compact system prompt for knowledge-base grounded answering."""
+    """Generate a cache-safe system prompt for knowledge-base grounded answering."""
     logger.info("🚀 Generating system prompt:")
     logger.info(f"  - custom_prompt: '{custom_prompt[:50] if custom_prompt else 'None'}...' (truncated)")
     logger.info(f"  - response_policy: {response_policy} (0=Strict, 1=Flexi)")
@@ -121,7 +228,7 @@ Now process the user's message using these rules."""
 {custom_prompt}
 
 {base_prompt}"""
-        return final_prompt
+        return _ensure_cacheable_prompt(final_prompt)
 
     logger.info("ℹ️ No custom prompt provided - using base system prompt only")
-    return base_prompt + "\n\n<!-- compact prompt -->"
+    return _ensure_cacheable_prompt(base_prompt + "\n\n<!-- cacheable prompt -->")
