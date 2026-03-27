@@ -357,7 +357,7 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     );
 
     let enriched_tables = build_table_artifacts(&result.tables, chunk_size);
-    let markdown = inject_table_kv_sections(&result.content, &enriched_tables);
+    let markdown = result.content.clone();
     info!(
         job_id = %job.job_id,
         document_id = %job.document_id,
@@ -412,8 +412,8 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
             }]
         });
 
-    // Add dedicated table row chunks with explicit row ranges + headers replicated.
-    // These chunks improve table Q&A because retrieval can land directly on a row-group.
+    // Use dedicated row-group table chunks for retrieval instead of also rewriting tables into
+    // the main markdown stream. This keeps RAG recall strong while avoiding duplicate table hits.
     let base_chunk_index = chunks.len();
     let mut next_chunk_index = base_chunk_index;
     for table in &enriched_tables {
@@ -471,8 +471,9 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "page_count": page_count,
         "detected_languages": result.detected_languages,
         "document_structure_included": result.document.is_some(),
-        "table_kv_enabled": true,
-        "table_aware_chunking_enabled": true,
+        "table_kv_enabled": false,
+        "table_aware_chunking_enabled": false,
+        "table_row_chunks_enabled": true,
     });
 
     Ok(ExtractionArtifacts { markdown, chunks, tables, metadata })
