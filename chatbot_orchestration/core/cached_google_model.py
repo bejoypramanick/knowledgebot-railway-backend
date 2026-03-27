@@ -25,7 +25,7 @@ from collections import deque
 
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models import ModelRequestParameters
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessage, BuiltinToolReturnPart, ToolReturnPart
 from shared.otel_logger import get_otel_logger
 
 # Import cache manager for fallback cache creation
@@ -152,7 +152,11 @@ class CachedGoogleModel(GoogleModel):
             disable=True,
             maximum_remote_calls=0,
         )
-        if model_settings.get('force_tool_calling'):
+        has_tool_return = any(
+            any(isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)) for part in getattr(msg, 'parts', []) or [])
+            for msg in messages
+        )
+        if model_settings.get('force_tool_calling') and not has_tool_return:
             logger.info("Force tool calling enabled for this request")
             config_dict['tool_config'] = ToolConfig(
                 function_calling_config=FunctionCallingConfig(
