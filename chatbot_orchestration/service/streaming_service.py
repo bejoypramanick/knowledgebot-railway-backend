@@ -693,6 +693,7 @@ class StreamingService:
 
                 model_settings_kwargs: dict = {
                     'temperature': response_policy,
+                    'max_output_tokens': 300,
                 }
 
                 if ENABLE_EXTENDED_THINKING:
