@@ -866,6 +866,7 @@ class StreamingService:
                         logger.error(
                             f"❌ Agent.iter() inner setup exception type={type(e).__name__} repr={repr(e)} "
                             f"cause={repr(getattr(e, '__cause__', None))} "
+                            f"temperature={active_model_settings.get('temperature')} "
                             f"recent_events={recent_event_summaries if 'recent_event_summaries' in locals() else []} "
                             f"message_history_tail={last_message_history_summary if 'last_message_history_summary' in locals() else []}",
                             exc_info=True,
@@ -887,45 +888,21 @@ class StreamingService:
                         json_response = json.dumps(error_data, ensure_ascii=False)
                         yield f"data: {json_response}\n\n"
                         return
-                    retried_with_temp_07 = False
-                    if str(e).startswith("AGENT_SETUP_ERROR::"):
-                        current_temperature = model_settings_kwargs.get('temperature')
-                        if current_temperature != 0.7:
-                            logger.warning(
-                                f"⚠️ Agent setup hard-stopped at temperature={current_temperature}; "
-                                f"retrying once with temperature=0.7"
-                            )
-                            temp_retry_settings = dict(model_settings_kwargs)
-                            temp_retry_settings['temperature'] = 0.7
-                            try:
-                                run = await _run_agent_once(temp_retry_settings)
-                                retried_with_temp_07 = True
-                                logger.info("✅ Temperature fallback retry succeeded at temperature=0.7")
-                            except RuntimeError as retry_error:
-                                logger.error(
-                                    f"❌ Temperature fallback retry failed: {retry_error} "
-                                    f"type={type(retry_error).__name__} repr={repr(retry_error)}",
-                                    exc_info=True,
-                                )
-                                e = retry_error
-                    if retried_with_temp_07:
-                        pass
-                    else:
-                        logger.error(
-                            f"❌ Agent.iter() setup failed: {str(e)} type={type(e).__name__} repr={repr(e)} "
-                            f"cause={repr(getattr(e, '__cause__', None))}",
-                            exc_info=True,
-                        )
-                        error_data = {
-                            "type": "error",
-                            "error_code": "AGENT_SETUP_ERROR",
-                            "message": "I apologize, but I encountered an error while setting up the response. Please try again.",
-                            "session_id": session_id,
-                            "timestamp": int(time.time())
-                        }
-                        json_response = json.dumps(error_data, ensure_ascii=False)
-                        yield f"data: {json_response}\n\n"
-                        return
+                    logger.error(
+                        f"❌ Agent.iter() setup failed: {str(e)} type={type(e).__name__} repr={repr(e)} "
+                        f"cause={repr(getattr(e, '__cause__', None))}",
+                        exc_info=True,
+                    )
+                    error_data = {
+                        "type": "error",
+                        "error_code": "AGENT_SETUP_ERROR",
+                        "message": "I apologize, but I encountered an error while setting up the response. Please try again.",
+                        "session_id": session_id,
+                        "timestamp": int(time.time())
+                    }
+                    json_response = json.dumps(error_data, ensure_ascii=False)
+                    yield f"data: {json_response}\n\n"
+                    return
 
                 # Check if we successfully got a run object
                 if run is None:
