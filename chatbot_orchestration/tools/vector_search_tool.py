@@ -60,65 +60,18 @@ def _compress_context(context_text: str) -> str:
         return context_text
 
 def _is_table_chunk(chunk: Dict[str, Any]) -> bool:
-    """Heuristic: table-aware Kreuzberg chunks should not be compressed by LLMLingua."""
+    """Heuristic: table-aware Kreuzberg chunks are structured row/table chunks."""
     try:
         metadata = chunk.get("metadata") or {}
         strategy = metadata.get("strategy") if isinstance(metadata, dict) else None
         if strategy and "table" in str(strategy).lower():
             return True
         content = (chunk.get("content") or "").lstrip()
-        if content.startswith("## Table") or content.startswith("|"):
+        if content.startswith("## Table") or content.startswith("|") or content.startswith("### Row"):
             return True
     except Exception:
         return False
     return False
-
-def _ensure_table_coverage(
-    selected: List[Dict[str, Any]],
-    pool: List[Dict[str, Any]],
-    *,
-    min_tables: int,
-    max_total: int,
-) -> List[Dict[str, Any]]:
-    """
-    Ensure table chunks aren't dropped entirely by reranking.
-
-    Strategy:
-    - Keep current `selected` ordering as much as possible.
-    - If fewer than `min_tables` table chunks are present, pull additional table chunks
-      from the broader `pool` (sorted by hybrid_score) and append them.
-    - Trim to `max_total`.
-    """
-    if not selected:
-        return selected
-
-    out: List[Dict[str, Any]] = list(selected)
-    table_count = sum(1 for c in out if _is_table_chunk(c))
-    if table_count >= min_tables:
-        return out[:max_total]
-
-    # Prefer high-scoring table chunks from the original pool.
-    def _score(c: Dict[str, Any]) -> float:
-        try:
-            return float(c.get("hybrid_score") or 0.0)
-        except Exception:
-            return 0.0
-
-    existing_ids = {(str(c.get("document_id")), str(c.get("content") or "")[:200]) for c in out}
-    candidates = [c for c in pool if _is_table_chunk(c)]
-    candidates.sort(key=_score, reverse=True)
-
-    for c in candidates:
-        key = (str(c.get("document_id")), str(c.get("content") or "")[:200])
-        if key in existing_ids:
-            continue
-        out.append(c)
-        existing_ids.add(key)
-        table_count += 1
-        if table_count >= min_tables:
-            break
-
-    return out[:max_total]
 
 def _rerank_results(query: str, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Implement FlashRank Stage-2 reranking with telemetry."""
@@ -179,10 +132,9 @@ async def search_knowledge_base(
 
     import time
     rag_start = time.time()
-    table_rows_hint = "Remember to check in all Columns and Row"
     effective_query = query
-    if greeting_flag is not True and table_rows_hint not in query:
-        effective_query = f"{query} {table_rows_hint}".strip()
+    fts_query = effective_query
+    flashrank_query = effective_query
 
     logger.info(f"🔍 Starting advanced retrieval for: '{effective_query}'")
     
@@ -215,12 +167,12 @@ async def search_knowledge_base(
                           AND w.processing_status = 'deleted'
                     )
                     ORDER BY embedding <=> cast(:vector as halfvec)
-                    LIMIT 50
+                    LIMIT 80
                 ),
                 fts_matches AS (
-                    SELECT id, ts_rank_cd(to_tsvector('english', content), websearch_to_tsquery('english', :query)) as fts_score
+                    SELECT id, ts_rank_cd(to_tsvector('english', content), websearch_to_tsquery('english', :fts_query)) as fts_score
                     FROM document_chunks
-                    WHERE to_tsvector('english', content) @@ websearch_to_tsquery('english', :query)
+                    WHERE to_tsvector('english', content) @@ websearch_to_tsquery('english', :fts_query)
                       AND NOT EXISTS (
                           SELECT 1 FROM file_uploads f
                           WHERE f.id = document_chunks.document_id
@@ -233,17 +185,50 @@ async def search_knowledge_base(
                             AND document_chunks.document_type = 'website'
                             AND w.processing_status = 'deleted'
                       )
-                    LIMIT 50
+                    LIMIT 80
+                ),
+                candidate_rows AS (
+                    SELECT
+                        dc.id,
+                        dc.content,
+                        dc.metadata,
+                        dc.document_id,
+                        dc.document_type,
+                        COALESCE(v.sim_score, 0) AS sim_score,
+                        COALESCE(f.fts_score, 0) AS fts_score,
+                        CASE
+                            WHEN lower(dc.content) LIKE '%### rows %'
+                              OR lower(dc.content) LIKE '%### row %'
+                              OR lower(dc.content) LIKE '%columns:%'
+                            THEN 0.12
+                            ELSE 0
+                        END AS structure_boost
+                    FROM document_chunks dc
+                    LEFT JOIN vector_matches v ON dc.id = v.id
+                    LEFT JOIN fts_matches f ON dc.id = f.id
+                    WHERE (v.id IS NOT NULL OR f.id IS NOT NULL)
                 )
-                SELECT v.content, v.metadata, v.document_id, v.document_type,
-                       (v.sim_score + COALESCE(f.fts_score, 0)) as hybrid_score
-                FROM vector_matches v
-                LEFT JOIN fts_matches f ON v.id = f.id
+                SELECT
+                    content,
+                    metadata,
+                    document_id,
+                    document_type,
+                    sim_score,
+                    fts_score,
+                    structure_boost,
+                    (sim_score + (fts_score * 1.8) + structure_boost) as hybrid_score
+                FROM candidate_rows
                 ORDER BY hybrid_score DESC
-                LIMIT 50
+                LIMIT 80
             """
             
-            result = await db.execute(text(hybrid_query), {"vector": vector_str, "query": effective_query})
+            result = await db.execute(
+                text(hybrid_query),
+                {
+                    "vector": vector_str,
+                    "fts_query": fts_query,
+                },
+            )
             rows = result.mappings().all()
             
             if not rows:
@@ -256,7 +241,7 @@ async def search_knowledge_base(
             chunks = [dict(row) for row in rows]
             flashrank_applied = False
             if settings.enable_reranking:
-                top_chunks = _rerank_results(effective_query, chunks)
+                top_chunks = _rerank_results(flashrank_query, chunks)
                 flashrank_applied = top_chunks != chunks[:10]
             else:
                 top_chunks = chunks[:10]
