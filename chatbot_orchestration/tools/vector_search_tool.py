@@ -1,13 +1,11 @@
 import json
 import os
-import hashlib
 from typing import List, Dict, Any, Optional, Annotated
 from pydantic_ai import RunContext
 
 from shared.otel_logger import get_otel_logger
 from shared.sqlalchemy_db import get_db_session
 from sqlalchemy import text
-import redis.asyncio as redis
 
 # Import our dependencies
 from ..core.dependencies import ChatSessionDeps
@@ -15,21 +13,6 @@ from ..core.ai import get_genai_client
 from ..core.config import settings
 
 logger = get_otel_logger("vector_search_tool", "chatbot-orchestration")
-
-# --- Redis Semantic Cache Setup ---
-_semantic_cache_client: Optional[redis.Redis] = None
-
-async def _get_cache_client() -> redis.Redis:
-    global _semantic_cache_client
-    if _semantic_cache_client:
-        return _semantic_cache_client
-    
-    url = os.getenv('AGENT_CACHE_REDIS_URL') or os.getenv('CHAT_STORE_REDIS_URL')
-    if not url:
-        raise RuntimeError("Redis URL not configured for semantic caching")
-    
-    _semantic_cache_client = redis.from_url(url, decode_responses=True)
-    return _semantic_cache_client
 
 from shared.embeddings import generate_embedding
 
@@ -194,45 +177,8 @@ async def search_knowledge_base(
             "Respond briefly, warmly, and directly to the user without citations."
         )
 
-    # --- STEP 0: Semantic Caching (Redis) ---
-    cache = None
     import time
     rag_start = time.time()
-    
-    if settings.enable_semantic_caching:
-        query_hash = hashlib.sha256(query.encode()).hexdigest()
-        cache_key = f"rag:cache:{query_hash}"
-        try:
-            cache = await _get_cache_client()
-            cache_start = time.time()
-            cached_result = await cache.get(cache_key)
-            if cached_result:
-                duration = (time.time() - cache_start) * 1000
-                cached_response = cached_result
-                cached_citation_urls: List[str] = []
-                try:
-                    cached_payload = json.loads(cached_result)
-                    if isinstance(cached_payload, dict):
-                        cached_response = str(cached_payload.get("response") or "")
-                        urls = cached_payload.get("citation_urls") or []
-                        if isinstance(urls, list):
-                            cached_citation_urls = [str(url) for url in urls if isinstance(url, str)]
-                except Exception:
-                    # Backward compatibility for legacy string-only cache entries.
-                    cached_response = cached_result
-                logger.info(f"⚡ [Redis] Semantic Cache HIT (Latency: {duration:.1f}ms) for query: '{query}'")
-                logger.info(
-                    f"🧭 [RAG_STATE_WRITE] path=semantic_cache_hit session_id={ctx.deps.session_id or 'none'} "
-                    f"citation_count={len(cached_citation_urls)} tool_used=yes"
-                )
-                if ctx.deps.session_id:
-                    from ..service.session_manager import session_state_manager
-                    session_state_manager.set_tool_used(ctx.deps.session_id, "search_knowledge_base")
-                    session_state_manager.set_last_citation_urls(ctx.deps.session_id, cached_citation_urls)
-                return cached_response
-            logger.info(f"❄️ [Redis] Semantic Cache MISS")
-        except Exception as e:
-            logger.warning(f"⚠️ Cache lookup failed: {e}")
 
     logger.info(f"🔍 Starting advanced retrieval for: '{query}'")
     
@@ -463,17 +409,7 @@ async def search_knowledge_base(
                 f"citations={len(citation_urls)}"
             )
             
-            # --- STEP 4: Update Cache & Session State ---
-            if cache and settings.enable_semantic_caching:
-                cache_payload = json.dumps(
-                    {
-                        "response": response,
-                        "citation_urls": citation_urls,
-                    },
-                    ensure_ascii=False,
-                )
-                await cache.set(cache_key, cache_payload, ex=3600) # Cache for 1 hour
-
+            # --- STEP 4: Update Session State ---
             if ctx.deps.session_id:
                 from ..service.session_manager import session_state_manager
                 session_state_manager.set_tool_used(ctx.deps.session_id, "search_knowledge_base")
