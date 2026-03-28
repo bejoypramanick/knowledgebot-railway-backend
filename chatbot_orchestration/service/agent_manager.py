@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic_ai import Agent
+from pydantic_ai.output import PromptedOutput
 from shared.otel_logger import get_otel_logger
 
 from ..core.ai import get_genai_client
@@ -18,6 +19,13 @@ from .session_manager import session_state_manager
 from ..tools.vector_search_tool import search_knowledge_base
 
 logger = get_otel_logger("agent_manager", "chatbot-orchestration")
+
+STRUCTURED_OUTPUT_TEMPLATE = """Return only a valid JSON object that matches this schema exactly.
+Do not return prose, markdown, code fences, explanations, or any text before or after the JSON.
+
+JSON schema:
+{schema}
+"""
 
 class AgentManager:
     """Manages Pydantic AI agent creation and configuration with instance caching."""
@@ -310,7 +318,12 @@ class AgentManager:
 
             agent = Agent(
                 model,
-                output_type=StructuredChatbotResponse,
+                output_type=PromptedOutput(
+                    StructuredChatbotResponse,
+                    name="structured_chatbot_response",
+                    description="Return the final chatbot response as JSON with message_type, answer_html, and citation_ids.",
+                    template=STRUCTURED_OUTPUT_TEMPLATE,
+                ),
                 system_prompt=system_prompt,
                 retries=0,
                 output_retries=0,
