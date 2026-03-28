@@ -5,8 +5,9 @@ use aws_sdk_s3::{config::Region, primitives::ByteStream, Client as S3Client};
 use chrono::Utc;
 use kreuzberg::{
     detect_mime_type_from_bytes, extract_bytes, validate_mime_type, ChunkingConfig, ChunkerType,
-    ExtractionConfig, ImageExtractionConfig, LanguageDetectionConfig, OcrConfig,
-    OutputFormat as ContentOutputFormat, PageConfig, PdfConfig, Table, TesseractConfig,
+    ExtractionConfig, ImageExtractionConfig, LanguageDetectionConfig, LayoutDetectionConfig,
+    OcrConfig, OutputFormat as ContentOutputFormat, PageConfig, PdfConfig, Table,
+    TesseractConfig,
 };
 use redis::Commands;
 use reqwest::Client as HttpClient;
@@ -525,6 +526,7 @@ fn build_extraction_config() -> ExtractionConfig {
     let force_ocr = parse_env_bool("KREUZBERG_FORCE_OCR", false);
     let detect_languages = parse_env_bool("KREUZBERG_LANGUAGE_DETECTION_ENABLED", false);
     let extract_images = parse_env_bool("KREUZBERG_IMAGE_EXTRACTION_ENABLED", false);
+    let enable_layout_detection = parse_env_bool("KREUZBERG_LAYOUT_DETECTION_ENABLED", true);
     let extract_pages = parse_env_bool("KREUZBERG_PAGE_EXTRACT_PAGES", true);
     let insert_page_markers = parse_env_bool("KREUZBERG_PAGE_INSERT_MARKERS", false);
 
@@ -568,6 +570,19 @@ fn build_extraction_config() -> ExtractionConfig {
         None
     };
 
+    let layout = if enable_layout_detection {
+        Some(LayoutDetectionConfig {
+            preset: env::var("KREUZBERG_LAYOUT_DETECTION_PRESET")
+                .unwrap_or_else(|_| "fast".to_string()),
+            confidence_threshold: env::var("KREUZBERG_LAYOUT_DETECTION_CONFIDENCE_THRESHOLD")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok()),
+            apply_heuristics: parse_env_bool("KREUZBERG_LAYOUT_DETECTION_APPLY_HEURISTICS", true),
+        })
+    } else {
+        None
+    };
+
     let pdf_passwords = env::var("KREUZBERG_PDF_PASSWORDS")
         .ok()
         .map(|value| {
@@ -602,6 +617,7 @@ fn build_extraction_config() -> ExtractionConfig {
         images,
         include_document_structure: parse_env_bool("KREUZBERG_INCLUDE_DOCUMENT_STRUCTURE", true),
         language_detection,
+        layout,
         max_concurrent_extractions: env::var("KREUZBERG_MAX_CONCURRENT_EXTRACTIONS")
             .ok()
             .and_then(|value| value.parse::<usize>().ok()),
