@@ -776,7 +776,13 @@ fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usi
 
     for (idx, row) in rows.iter().enumerate() {
         let row_number = idx + 1;
-        let row_blocks = render_row_blocks(headers, row, row_number, max_characters);
+        let row_blocks = render_row_blocks(
+            table_heading.as_deref(),
+            headers,
+            row,
+            row_number,
+            max_characters,
+        );
 
         for row_block in row_blocks {
             let candidate = if buffer.is_empty() {
@@ -871,6 +877,7 @@ fn derive_table_heading(markdown: &str) -> Option<String> {
 }
 
 fn render_row_blocks(
+    table_heading: Option<&str>,
     headers: &[String],
     row: &[String],
     row_number: usize,
@@ -879,7 +886,7 @@ fn render_row_blocks(
     let mut blocks = Vec::new();
     let mut part_index = 1usize;
     let mut current = String::new();
-    let row_summary = build_row_summary(headers, row, row_number);
+    let row_summary = build_row_summary(table_heading, headers, row, row_number);
 
     for (cell_index, cell) in row.iter().enumerate() {
         let header = headers
@@ -940,7 +947,12 @@ fn render_row_blocks(
     blocks
 }
 
-fn build_row_summary(headers: &[String], row: &[String], row_number: usize) -> String {
+fn build_row_summary(
+    table_heading: Option<&str>,
+    headers: &[String],
+    row: &[String],
+    row_number: usize,
+) -> String {
     let parts = row
         .iter()
         .enumerate()
@@ -960,7 +972,15 @@ fn build_row_summary(headers: &[String], row: &[String], row_number: usize) -> S
     if parts.is_empty() {
         String::new()
     } else {
-        format!("Row {}: {}", row_number, parts.join(" | "))
+        let mut summary_parts = Vec::new();
+        if let Some(table_heading) = table_heading {
+            if !table_heading.trim().is_empty() {
+                summary_parts.push(table_heading.trim().to_string());
+            }
+        }
+        summary_parts.push(format!("Row {}", row_number));
+        summary_parts.extend(parts);
+        summary_parts.join(" | ")
     }
 }
 
