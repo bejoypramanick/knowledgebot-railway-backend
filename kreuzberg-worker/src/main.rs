@@ -730,11 +730,16 @@ fn build_table_kv_markdown(
     table_index: usize,
 ) -> String {
     let mut out = String::new();
+    let table_heading = derive_table_heading(&table.markdown);
     out.push_str(&format!(
         "## Table {} (Page {})\n\n",
         table_index + 1,
         table.page_number
     ));
+
+    if let Some(heading) = table_heading.as_deref() {
+        out.push_str(&format!("### {}\n\n", heading));
+    }
 
     if !headers.is_empty() {
         out.push_str("### Columns\n");
@@ -757,6 +762,7 @@ fn build_table_kv_markdown(
 }
 
 fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usize) -> Vec<TableRowChunk> {
+    let table_heading = derive_table_heading(&table.markdown);
     let rows = if table.cells.len() > 1 {
         &table.cells[1..]
     } else {
@@ -780,7 +786,13 @@ fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usi
             };
 
             if !buffer.is_empty() && candidate.chars().count() > max_characters {
-                sections.push(wrap_table_row_section(headers, chunk_start_row, chunk_end_row, &buffer));
+                sections.push(wrap_table_row_section(
+                    table_heading.as_deref(),
+                    headers,
+                    chunk_start_row,
+                    chunk_end_row,
+                    &buffer,
+                ));
                 buffer = row_block;
                 chunk_start_row = row_number;
                 chunk_end_row = row_number;
@@ -792,13 +804,25 @@ fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usi
     }
 
     if !buffer.is_empty() {
-        sections.push(wrap_table_row_section(headers, chunk_start_row, chunk_end_row, &buffer));
+        sections.push(wrap_table_row_section(
+            table_heading.as_deref(),
+            headers,
+            chunk_start_row,
+            chunk_end_row,
+            &buffer,
+        ));
     }
 
     sections
 }
 
-fn wrap_table_row_section(headers: &[String], start_row: usize, end_row: usize, body: &str) -> TableRowChunk {
+fn wrap_table_row_section(
+    table_heading: Option<&str>,
+    headers: &[String],
+    start_row: usize,
+    end_row: usize,
+    body: &str,
+) -> TableRowChunk {
     let heading = if start_row == end_row {
         format!("### Row {}", start_row)
     } else {
@@ -815,6 +839,10 @@ fn wrap_table_row_section(headers: &[String], start_row: usize, end_row: usize, 
     let mut text = String::new();
     text.push_str(&heading);
     text.push_str("\n\n");
+    if let Some(table_heading) = table_heading {
+        text.push_str(table_heading);
+        text.push_str("\n\n");
+    }
     if !columns_line.is_empty() {
         text.push_str(&columns_line);
         text.push_str("\n\n");
@@ -828,6 +856,20 @@ fn wrap_table_row_section(headers: &[String], start_row: usize, end_row: usize, 
     }
 }
 
+fn derive_table_heading(markdown: &str) -> Option<String> {
+    markdown
+        .lines()
+        .map(str::trim)
+        .find(|line| {
+            !line.is_empty()
+                && !line.starts_with('|')
+                && !line.starts_with(":-")
+                && !line.starts_with("---")
+        })
+        .map(normalize_cell)
+        .filter(|line| !line.is_empty())
+}
+
 fn render_row_blocks(
     headers: &[String],
     row: &[String],
@@ -837,6 +879,7 @@ fn render_row_blocks(
     let mut blocks = Vec::new();
     let mut part_index = 1usize;
     let mut current = String::new();
+    let row_summary = build_row_summary(headers, row, row_number);
 
     for (cell_index, cell) in row.iter().enumerate() {
         let header = headers
@@ -856,9 +899,14 @@ fn render_row_blocks(
         } else {
             format!("#### Row {} (Part {})", row_number, part_index)
         };
+        let prefix = if part_index == 1 && !row_summary.is_empty() {
+            format!("{row_summary}\n")
+        } else {
+            String::new()
+        };
 
-        if !current.is_empty() && (heading.len() + 2 + candidate.len()) > max_characters {
-            blocks.push(format!("{heading}\n{current}"));
+        if !current.is_empty() && (heading.len() + 1 + prefix.len() + candidate.len()) > max_characters {
+            blocks.push(format!("{heading}\n{prefix}{current}"));
             current = entry;
             part_index += 1;
         } else {
@@ -872,14 +920,48 @@ fn render_row_blocks(
         } else {
             format!("#### Row {} (Part {})", row_number, part_index)
         };
-        blocks.push(format!("{heading}\n{current}"));
+        let prefix = if part_index == 1 && !row_summary.is_empty() {
+            format!("{row_summary}\n")
+        } else {
+            String::new()
+        };
+        blocks.push(format!("{heading}\n{prefix}{current}"));
     }
 
     if blocks.is_empty() {
-        blocks.push(format!("#### Row {}\n- Value: ", row_number));
+        let prefix = if !row_summary.is_empty() {
+            format!("{row_summary}\n")
+        } else {
+            String::new()
+        };
+        blocks.push(format!("#### Row {}\n{}- Value: ", row_number, prefix));
     }
 
     blocks
+}
+
+fn build_row_summary(headers: &[String], row: &[String], row_number: usize) -> String {
+    let parts = row
+        .iter()
+        .enumerate()
+        .filter_map(|(cell_index, cell)| {
+            let normalized = normalize_cell(cell);
+            if normalized.is_empty() {
+                return None;
+            }
+            let header = headers
+                .get(cell_index)
+                .cloned()
+                .unwrap_or_else(|| format!("Column {}", cell_index + 1));
+            Some(format!("{} {}", header, normalized))
+        })
+        .collect::<Vec<_>>();
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("Row {}: {}", row_number, parts.join(" | "))
+    }
 }
 
 fn normalize_cell(value: &str) -> String {
