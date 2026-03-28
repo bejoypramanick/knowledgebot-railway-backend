@@ -785,11 +785,38 @@ class StreamingService:
                         except Exception as summarize_error:
                             return f"{type(event).__name__} summary_error={summarize_error}"
 
+                    def _summarize_message_history(messages: List[Any]) -> List[str]:
+                        summaries: List[str] = []
+                        try:
+                            for msg in (messages or [])[-4:]:
+                                msg_summary_parts: List[str] = [type(msg).__name__]
+                                finish_reason = getattr(msg, "finish_reason", None)
+                                if finish_reason is not None:
+                                    msg_summary_parts.append(f"finish={finish_reason}")
+                                parts = getattr(msg, "parts", None) or []
+                                msg_summary_parts.append(f"parts={len(parts)}")
+                                for idx, part in enumerate(parts[:4]):
+                                    msg_summary_parts.append(f"p{idx}={type(part).__name__}")
+                                    tool_name = getattr(part, "tool_name", None)
+                                    if tool_name:
+                                        msg_summary_parts.append(f"tool={tool_name}")
+                                    content = getattr(part, "content", None)
+                                    if isinstance(content, str) and content:
+                                        msg_summary_parts.append(f"text='{content.replace(chr(10), ' ')[:120]}'")
+                                    args = getattr(part, "args", None)
+                                    if args is not None:
+                                        msg_summary_parts.append(f"args={str(args)[:180]}")
+                                summaries.append(" ".join(msg_summary_parts))
+                        except Exception as history_error:
+                            summaries.append(f"message_history_summary_error={history_error}")
+                        return summaries
+
                     try:
                         active_message = override_message or message
                         active_history = override_history if override_history is not None else pydantic_messages
                         use_message_history = active_model_settings.get('google_cached_content') is not None or bool(active_history)
                         recent_event_summaries: List[str] = []
+                        last_message_history_summary: List[str] = []
 
                         if use_message_history:
                             async with agent.iter(
@@ -802,6 +829,14 @@ class StreamingService:
                                     logger.debug(f"Event: {type(event).__name__}")
                                     recent_event_summaries.append(_summarize_event(event))
                                     recent_event_summaries = recent_event_summaries[-8:]
+                                    try:
+                                        run_ctx = getattr(active_run, "_graph_run", None)
+                                        state = getattr(run_ctx, "state", None)
+                                        message_history = getattr(state, "message_history", None)
+                                        if message_history:
+                                            last_message_history_summary = _summarize_message_history(message_history)
+                                    except Exception:
+                                        pass
                                 return active_run
                         else:
                             async with agent.iter(
@@ -813,6 +848,14 @@ class StreamingService:
                                     logger.debug(f"Event: {type(event).__name__}")
                                     recent_event_summaries.append(_summarize_event(event))
                                     recent_event_summaries = recent_event_summaries[-8:]
+                                    try:
+                                        run_ctx = getattr(active_run, "_graph_run", None)
+                                        state = getattr(run_ctx, "state", None)
+                                        message_history = getattr(state, "message_history", None)
+                                        if message_history:
+                                            last_message_history_summary = _summarize_message_history(message_history)
+                                    except Exception:
+                                        pass
                                 return active_run
 
                     except Exception as e:
@@ -823,7 +866,8 @@ class StreamingService:
                         logger.error(
                             f"❌ Agent.iter() inner setup exception type={type(e).__name__} repr={repr(e)} "
                             f"cause={repr(getattr(e, '__cause__', None))} "
-                            f"recent_events={recent_event_summaries if 'recent_event_summaries' in locals() else []}",
+                            f"recent_events={recent_event_summaries if 'recent_event_summaries' in locals() else []} "
+                            f"message_history_tail={last_message_history_summary if 'last_message_history_summary' in locals() else []}",
                             exc_info=True,
                         )
                         raise RuntimeError(f"AGENT_SETUP_ERROR::{str(e)}")
