@@ -38,6 +38,37 @@ REDIS_CACHE_METADATA_KEY = "gemini:explicit_cache:metadata"
 REDIS_CACHE_SESSIONS_KEY = "gemini:explicit_cache:active_sessions"
 
 
+def _count_tokens_with_sdk(client, model_name: str, content: str) -> Optional[int]:
+    if not content:
+        return 0
+    try:
+        response = client.models.count_tokens(model=model_name, contents=content)
+        total_tokens = getattr(response, "total_tokens", None)
+        return int(total_tokens) if total_tokens is not None else None
+    except Exception as e:
+        logger.warning(f"Could not count tokens with Google SDK for model={model_name}: {e}")
+        return None
+
+
+def _serialize_gemini_tools(gemini_tools: list) -> str:
+    serialized_tools: list[dict] = []
+    for tool in gemini_tools or []:
+        function_declarations = []
+        declarations = getattr(tool, "function_declarations", None) or []
+        for decl in declarations:
+            function_declarations.append(
+                {
+                    "name": getattr(decl, "name", None),
+                    "description": getattr(decl, "description", None),
+                    "parameters": getattr(decl, "parameters", None).model_dump(exclude_none=True)
+                    if getattr(decl, "parameters", None) is not None and hasattr(getattr(decl, "parameters", None), "model_dump")
+                    else getattr(decl, "parameters", None),
+                }
+            )
+        serialized_tools.append({"function_declarations": function_declarations})
+    return json.dumps(serialized_tools, ensure_ascii=False, sort_keys=True)
+
+
 class GeminiCacheManager:
     """Manages Gemini cached content lifecycle with hash-based invalidation."""
 
@@ -199,6 +230,10 @@ class GeminiCacheManager:
                 # Convert tool functions to Gemini format
                 gemini_tools = convert_tools_to_gemini_format(tool_functions)
                 logger.info(f"Converted {len(tool_functions)} tool functions to {len(gemini_tools)} Gemini tools for caching")
+                serialized_tool_schema = _serialize_gemini_tools(gemini_tools)
+                tool_schema_chars = len(serialized_tool_schema)
+                tool_schema_tokens = _count_tokens_with_sdk(client, model_name, serialized_tool_schema)
+                system_prompt_tokens = _count_tokens_with_sdk(client, model_name, system_prompt)
                 
                 if len(tool_functions) > 0 and len(gemini_tools) == 0:
                     logger.error("🚨 CRITICAL: All tool conversions failed! Cache will be created without tools!")
@@ -231,7 +266,10 @@ class GeminiCacheManager:
                 self._last_ensure_stats["create_attempts"] += 1
                 logger.info(f"Cache config includes:")
                 logger.info(f"  - System instruction: {len(system_prompt)} chars")
+                logger.info(f"  - System instruction tokens (sdk): {system_prompt_tokens if system_prompt_tokens is not None else 'unavailable'}")
                 logger.info(f"  - Tools: {len(gemini_tools) if gemini_tools else 0} tool(s)")
+                logger.info(f"  - Tool schema chars: {tool_schema_chars}")
+                logger.info(f"  - Tool schema tokens (sdk): {tool_schema_tokens if tool_schema_tokens is not None else 'unavailable'}")
                 logger.info(f"  - Tool calling mode: {'AUTO' if gemini_tools else 'none'}")
                 if gemini_tools:
                     for tool in gemini_tools:
@@ -260,6 +298,11 @@ class GeminiCacheManager:
                 logger.info(f"Created Gemini cache: {self._cache_name}")
                 if cached_content.usage_metadata:
                     logger.info(f"Cached tokens: {cached_content.usage_metadata.total_token_count}")
+                    logger.info(
+                        f"🧭 [CACHE_TOKEN_BREAKDOWN] system_prompt_tokens_sdk={system_prompt_tokens if system_prompt_tokens is not None else 'unavailable'} "
+                        f"tool_schema_tokens_sdk={tool_schema_tokens if tool_schema_tokens is not None else 'unavailable'} "
+                        f"cached_total_tokens={cached_content.usage_metadata.total_token_count}"
+                    )
                 
                 return self._cache_name
 
