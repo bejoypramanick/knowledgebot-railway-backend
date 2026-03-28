@@ -14,6 +14,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, Te
 from shared.otel_logger import get_otel_logger, set_session_id
 from shared.log_sanitizer import hash_pii
 
+from ..agent.output_model import StructuredChatbotResponse, NO_ANSWER_RESPONSE
 from ..core.dependencies import ChatSessionDeps
 from ..core.ai import get_genai_client
 from ..core.config import settings
@@ -152,6 +153,18 @@ class StreamingService:
         if not self._has_citation_markers(response_text):
             return no_answer
         return response_text
+
+    def _render_structured_answer(self, answer_html: str, citation_ids: List[int]) -> str:
+        """Render validated citation ids into visible inline markers if not already present."""
+        rendered = (answer_html or "").strip()
+        if not rendered or not citation_ids:
+            return rendered
+        if self._has_citation_markers(rendered):
+            return rendered
+        markers = "".join(f"[{citation_id}]" for citation_id in citation_ids)
+        if rendered.endswith("</p>"):
+            return rendered[:-4] + markers + "</p>"
+        return f"{rendered} {markers}".strip()
 
     def _convert_db_messages_to_pydantic_ai(self, db_messages: List[Dict[str, Any]]) -> List[Any]:
         """Convert database messages to Pydantic AI message format."""
@@ -661,6 +674,7 @@ class StreamingService:
             tool_return_count = 0
             agent_s3_download_url = None  # Initialize for S3 upload
             run_messages = []
+            structured_output: StructuredChatbotResponse | None = None
             
             # Import Redis pubsub manager for posting responses to channels
             from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_all_agents, broadcast_event_to_agent
@@ -730,64 +744,48 @@ class StreamingService:
                     return
 
                 async def _run_agent_once(active_model_settings, override_message=None, override_history=None):
-                    max_retries = 3
-                    retry_attempt = 0
-                    active_run = None
+                    try:
+                        active_message = override_message or message
+                        active_history = override_history if override_history is not None else pydantic_messages
+                        use_message_history = active_model_settings.get('google_cached_content') is not None or bool(active_history)
 
-                    while retry_attempt < max_retries:
-                        try:
-                            active_message = override_message or message
-                            active_history = override_history if override_history is not None else pydantic_messages
-                            use_message_history = active_model_settings.get('google_cached_content') is not None or bool(active_history)
+                        if use_message_history:
+                            async with agent.iter(
+                                active_message,
+                                message_history=active_history,
+                                deps=session_deps,
+                                model_settings=active_model_settings
+                            ) as active_run:
+                                async for event in active_run:
+                                    logger.debug(f"Event: {type(event).__name__}")
+                                return active_run
+                        else:
+                            async with agent.iter(
+                                active_message,
+                                deps=session_deps,
+                                model_settings=active_model_settings
+                            ) as active_run:
+                                async for event in active_run:
+                                    logger.debug(f"Event: {type(event).__name__}")
+                                return active_run
 
-                            if use_message_history:
-                                async with agent.iter(
-                                    active_message,
-                                    message_history=active_history,
-                                    deps=session_deps,
-                                    model_settings=active_model_settings
-                                ) as active_run:
-                                    async for event in active_run:
-                                        logger.debug(f"Event: {type(event).__name__}")
-                                    return active_run
-                            else:
-                                async with agent.iter(
-                                    active_message,
-                                    deps=session_deps,
-                                    model_settings=active_model_settings
-                                ) as active_run:
-                                    async for event in active_run:
-                                        logger.debug(f"Event: {type(event).__name__}")
-                                    return active_run
+                    except Exception as e:
+                        error_str = str(e)
+                        if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or 'quota' in error_str.lower():
+                            raise RuntimeError("RATE_LIMIT_EXCEEDED")
 
-                        except Exception as e:
-                            error_str = str(e)
-                            if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or 'quota' in error_str.lower():
-                                retry_attempt += 1
-                                if retry_attempt < max_retries:
-                                    retry_delay = 10
-                                    if 'retry' in error_str.lower():
-                                        match = re.search(r'(\d+\.?\d*)\s*s', error_str)
-                                        if match:
-                                            retry_delay = float(match.group(1))
-                                    logger.warning(f"⚠️ Rate limit hit (429) - Attempt {retry_attempt}/{max_retries}")
-                                    logger.warning(f"⏳ Retrying in {retry_delay:.1f} seconds...")
-                                    await asyncio.sleep(retry_delay)
-                                    continue
-                                raise RuntimeError("RATE_LIMIT_EXCEEDED")
-
-                            logger.error(
-                                f"❌ Agent.iter() inner setup exception type={type(e).__name__} repr={repr(e)} "
-                                f"cause={repr(getattr(e, '__cause__', None))}",
-                                exc_info=True,
-                            )
-                            raise RuntimeError(f"AGENT_SETUP_ERROR::{str(e)}")
+                        logger.error(
+                            f"❌ Agent.iter() inner setup exception type={type(e).__name__} repr={repr(e)} "
+                            f"cause={repr(getattr(e, '__cause__', None))}",
+                            exc_info=True,
+                        )
+                        raise RuntimeError(f"AGENT_SETUP_ERROR::{str(e)}")
 
                 try:
                     run = await _run_agent_once(model_settings)
                 except RuntimeError as e:
                     if str(e) == "RATE_LIMIT_EXCEEDED":
-                        logger.error(f"❌ Rate limit exceeded after retries")
+                        logger.error(f"❌ Rate limit exceeded")
                         error_data = {
                             "type": "error",
                             "error_code": "RATE_LIMIT_EXCEEDED",
@@ -816,7 +814,7 @@ class StreamingService:
 
                 # Check if we successfully got a run object
                 if run is None:
-                    logger.error("❌ Failed to create agent run after all retries")
+                    logger.error("❌ Failed to create agent run")
                     error_data = {
                         "type": "error",
                         "error_code": "AGENT_INITIALIZATION_FAILED",
@@ -834,7 +832,11 @@ class StreamingService:
                 logger.info("🔍 Agent iteration completed, extracting response from all_messages()...")
                 try:
                     # Get all messages from the run (this is the correct API for agent.iter())
-                    all_messages = run.all_messages()
+                    run_result = run.result
+                    if run_result is None:
+                        raise RuntimeError("Agent run completed without a final result")
+                    structured_output = run_result.output
+                    all_messages = run_result.all_messages()
                     run_messages = all_messages
                     logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
 
@@ -904,7 +906,8 @@ class StreamingService:
                         logger.warning("⚠️ Follow-up message but no tools were called (expected KB search)")
 
 
-                    # Extract assistant response from all_messages
+                    # Extract tool diagnostics from all_messages, but use the validated
+                    # structured result as the final answer payload.
                     if True:
                         logger.debug("Extracting TextPart content from model messages")
                         for i, msg in enumerate(all_messages):
@@ -951,29 +954,6 @@ class StreamingService:
                                         if thinking_attr:
                                             logger.info("🧠 ALTERNATIVE THINKING CONTENT present (suppressed)")
 
-                                    # Extract text from TextPart
-                                    if isinstance(part, TextPart):
-                                        text_content = getattr(part, 'content', '')
-                                        text_part_index = [p for p in msg.parts[:j+1] if isinstance(p, TextPart)].__len__()
-                                        is_last_text_part = text_part_index == len(text_parts)
-
-                                        logger.debug(f"     TextPart {text_part_index}/{len(text_parts)}: chars={len(text_content)}")
-
-                                        if text_content:
-                                            if full_response == "":
-                                                logger.debug("     Setting first TextPart as full_response")
-                                                chunk_count = 1
-                                                full_response = text_content
-                                            else:
-                                                # CRITICAL FIX: Use LAST TextPart, not first
-                                                # If agent generates multiple responses (e.g., cached then correct),
-                                                # the last one is most likely the correct/intended response
-                                                logger.debug(
-                                                    f"     Multiple TextParts: replacing with latest (idx={text_part_index} last={is_last_text_part})"
-                                                )
-                                                full_response = text_content  # ← KEY FIX: Use the latest response
-                                                chunk_count += 1
-
                                     # Track only actual tool call parts; returns are counted separately.
                                     if isinstance(part, (BuiltinToolCallPart, ToolCallPart)):
                                         tool_name = getattr(part, 'tool_name', 'unknown')
@@ -989,6 +969,12 @@ class StreamingService:
                     logger.info(
                         f"Agent completed with {tool_call_count} tool calls and {tool_return_count} tool returns"
                     )
+                    if structured_output:
+                        full_response = self._render_structured_answer(
+                            structured_output.answer_html,
+                            structured_output.citation_ids,
+                        )
+                        chunk_count = 1 if full_response else 0
 
                     # Monitor tool call compliance
                     if tool_call_count == 0 and message.strip():
@@ -1043,7 +1029,9 @@ class StreamingService:
 
             pipeline_timer.mark("response_extraction")
 
-            model_message_type, full_response = self._extract_model_message_type(full_response)
+            model_message_type = structured_output.message_type if structured_output else None
+            if not structured_output:
+                model_message_type, full_response = self._extract_model_message_type(full_response)
 
             # Hard requirement: non-greeting queries must use retrieval tools.
             # If the model omitted MESSAGE_TYPE, treat it conservatively as NON_GREETING.
@@ -1056,7 +1044,11 @@ class StreamingService:
 
                 retry_run = await _run_agent_once(forced_model_settings)
                 if retry_run is not None:
-                    retry_messages = retry_run.all_messages()
+                    retry_result = retry_run.result
+                    if retry_result is None:
+                        raise RuntimeError("Forced tool retry completed without a final result")
+                    structured_output = retry_result.output
+                    retry_messages = retry_result.all_messages()
                     full_response = ""
                     chunk_count = 0
                     tool_call_count = 0
@@ -1076,7 +1068,14 @@ class StreamingService:
                             elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)):
                                 tool_return_count += 1
 
-                    model_message_type, full_response = self._extract_model_message_type(full_response)
+                    if structured_output:
+                        model_message_type = structured_output.message_type
+                        full_response = self._render_structured_answer(
+                            structured_output.answer_html,
+                            structured_output.citation_ids,
+                        )
+                    else:
+                        model_message_type, full_response = self._extract_model_message_type(full_response)
                     effective_message_type = model_message_type or "NON_GREETING"
                     logger.info(
                         f"🔁 [FORCED_TOOL_RETRY] message_type={model_message_type or 'UNKNOWN'} "
@@ -1155,64 +1154,24 @@ class StreamingService:
                     grounding_received_from_rag = bool(rag_source_urls)
                     session_tools_used = session_state_manager.get_tools_used(session_id)
                     rag_tool_used = "search_knowledge_base" in session_tools_used
+                    structured_citation_ids = structured_output.citation_ids if structured_output else []
+                    invalid_structured_citation_ids = [
+                        cid for cid in structured_citation_ids if cid < 1 or cid > rag_sources_count
+                    ]
 
-                    should_attempt_citation_repair = (
-                        effective_message_type == "NON_GREETING"
-                        and tool_call_count >= 1
-                        and not had_citations_before
-                        and before_enforcement.strip() != "I don't have any information on this topic."
-                    )
-
-                    if should_attempt_citation_repair:
-                        logger.warning("🔁 [CITATION_REPAIR] Non-greeting answer missing both citations and RAG grounding; retrying once with stronger citation-only instruction")
-                        repair_message = (
-                            "Your previous answer was missing required inline citations. "
-                            "Rewrite the answer using only the already retrieved sources from this conversation. "
-                            "Do not call any tools. "
-                            "Do not add new facts. "
-                            "Keep the answer concise. "
-                            "Start with exactly one metadata line: MESSAGE_TYPE: NON_GREETING "
-                            "and ensure every factual sentence ends with citation markers like [1] or [1][2]. "
-                            "If you cannot produce a fully grounded cited answer, return exactly: "
-                            "I don't have any information on this topic."
+                    if rag_tool_used and rag_sources_count == 0:
+                        logger.warning(
+                            "🛑 [RAG_EMPTY_GROUNDING] search_knowledge_base was called but returned no grounding sources; "
+                            "returning standard no-answer response"
                         )
-                        repair_settings = dict(model_settings_kwargs)
-                        repair_settings.pop('google_cached_content', None)
-                        repair_settings['disable_tool_calling'] = True
-
-                        repair_run = await _run_agent_once(
-                            repair_settings,
-                            override_message=repair_message,
-                            override_history=run_messages,
+                        full_response = "I don't have any information on this topic."
+                    elif invalid_structured_citation_ids:
+                        logger.warning(
+                            f"🛑 [CITATION_ID_VALIDATION] Invalid citation ids {invalid_structured_citation_ids} "
+                            f"for rag_sources_count={rag_sources_count}; returning standard no-answer response"
                         )
-                        if repair_run is not None:
-                            repair_messages = repair_run.all_messages()
-                            repaired_response = ""
-                            repair_tool_calls = 0
-                            repair_tool_returns = 0
-                            for msg in repair_messages:
-                                if not hasattr(msg, 'parts'):
-                                    continue
-                                for part in msg.parts:
-                                    if isinstance(part, TextPart):
-                                        text_content = getattr(part, 'content', '')
-                                        if text_content:
-                                            repaired_response = text_content
-                                    if isinstance(part, (BuiltinToolCallPart, ToolCallPart)):
-                                        repair_tool_calls += 1
-                                    elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)):
-                                        repair_tool_returns += 1
-                            if repaired_response:
-                                model_message_type, repaired_response = self._extract_model_message_type(repaired_response)
-                                effective_message_type = model_message_type or "NON_GREETING"
-                                full_response = repaired_response
-                                had_citations_before = self._has_citation_markers(full_response or "")
-                                logger.info(
-                                    f"🔁 [CITATION_REPAIR] message_type={model_message_type or 'UNKNOWN'} "
-                                    f"effective_message_type={effective_message_type} tool_calls={repair_tool_calls} "
-                                    f"tool_returns={repair_tool_returns} "
-                                    f"citations_after={'yes' if had_citations_before else 'no'}"
-                                )
+                        full_response = "I don't have any information on this topic."
+
                     # Normalize combined citations like [1, 2] so enforcement/linking work.
                     full_response = self._normalize_citation_markers(full_response)
                     full_response = self._enforce_grounded_citation_policy(
@@ -1237,6 +1196,7 @@ class StreamingService:
                         f"tool_calls={tool_call_count} tool_returns={tool_return_count} "
                         f"tool_names_called={','.join(sorted(set(tool_calls_made))) if tool_calls_made else 'none'} "
                         f"tool_names_returned={','.join(sorted(set(tool_returns_seen))) if tool_returns_seen else 'none'} "
+                        f"output_citation_ids={','.join(str(cid) for cid in structured_citation_ids) if structured_citation_ids else 'none'} "
                         f"citations_before={'yes' if had_citations_before else 'no'} "
                         f"grounding_from_rag={'yes' if grounding_received_from_rag else 'no'} "
                         f"rag_tool_used={'yes' if rag_tool_used else 'no'} "

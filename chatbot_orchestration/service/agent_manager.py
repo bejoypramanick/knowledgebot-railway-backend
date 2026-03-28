@@ -13,6 +13,7 @@ from shared.otel_logger import get_otel_logger
 
 from ..core.ai import get_genai_client
 from ..core.dependencies import ChatSessionDeps
+from ..agent.output_model import StructuredChatbotResponse
 from .session_manager import session_state_manager
 from ..tools.vector_search_tool import search_knowledge_base
 
@@ -270,10 +271,10 @@ class AgentManager:
 
             agent = Agent(
                 model,
-                output_type=str,
+                output_type=StructuredChatbotResponse,
                 system_prompt=system_prompt,
-                retries=3,
-                output_retries=3,
+                retries=0,
+                output_retries=0,
                 tools=[search_knowledge_base],
                 deps_type=ChatSessionDeps,
                 end_strategy='exhaustive'

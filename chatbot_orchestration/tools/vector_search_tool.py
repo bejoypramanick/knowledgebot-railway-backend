@@ -326,10 +326,11 @@ async def search_knowledge_base(
             # table + narrative contexts. Some models will ignore citations unless the
             # "cite as [N]" mapping is extremely explicit.
             citation_urls: List[str] = []
+            citation_index_by_source: Dict[str, int] = {}
             table_chunks: List[str] = []
             narrative_chunks: List[str] = []
 
-            for i, chunk in enumerate(top_chunks):
+            for chunk in top_chunks:
                 doc_id, doc_type = str(chunk["document_id"]), chunk["document_type"]
                 content = chunk["content"]
                 score = f"{float(chunk['hybrid_score']):.3f}"
@@ -344,11 +345,15 @@ async def search_knowledge_base(
                     url = None
                 if not url:
                     url = f"kb://{doc_type}/{doc_id}"
-                citation_urls.append(url)
+                citation_number = citation_index_by_source.get(url)
+                if citation_number is None:
+                    citation_urls.append(url)
+                    citation_number = len(citation_urls)
+                    citation_index_by_source[url] = citation_number
 
                 chunk_str = (
-                    f"Source {i+1} (type={doc_type} id={doc_id} score={score} url={url})\n"
-                    f"Cite this source as: [{i+1}]\n"
+                    f"Source {citation_number} (type={doc_type} id={doc_id} score={score} url={url})\n"
+                    f"Cite this source as: [{citation_number}]\n"
                     f"{content}\n"
                 )
 
