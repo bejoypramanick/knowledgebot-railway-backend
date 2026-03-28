@@ -6,11 +6,11 @@ per Gemini API: "CachedContent can not be used with GenerateContent request sett
 """
 
 import inspect
-import logging
 from shared.otel_logger import get_otel_logger
 from shared.otel_logger import get_otel_logger
-from typing import Any, Annotated, Callable, List, get_args, get_origin, get_type_hints
+from typing import Any, Annotated, Callable, List, Union, get_args, get_origin, get_type_hints
 from google.genai import types
+from pydantic_ai.tools import ToolDefinition
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
@@ -130,7 +130,7 @@ def extract_tool_metadata(func: Callable) -> dict:
     }
 
 
-def convert_pydantic_ai_tool_to_gemini(func: Callable) -> types.FunctionDeclaration:
+def convert_pydantic_ai_tool_to_gemini(func: Union[Callable, ToolDefinition]) -> types.FunctionDeclaration:
     """
     Convert a Pydantic AI tool (Python function) to Gemini FunctionDeclaration.
 
@@ -141,6 +141,13 @@ def convert_pydantic_ai_tool_to_gemini(func: Callable) -> types.FunctionDeclarat
         types.FunctionDeclaration for use in Gemini API
     """
     try:
+        if isinstance(func, ToolDefinition):
+            return types.FunctionDeclaration(
+                name=func.name,
+                description=func.description or f"Tool {func.name}",
+                parameters=func.parameters_json_schema or {"type": "object", "properties": {}},
+            )
+
         metadata = extract_tool_metadata(func)
 
         return types.FunctionDeclaration(
@@ -149,11 +156,12 @@ def convert_pydantic_ai_tool_to_gemini(func: Callable) -> types.FunctionDeclarat
             parameters=metadata["parameters"]
         )
     except Exception as e:
-        logger.error(f"Failed to convert tool {func.__name__} to Gemini format: {e}")
+        tool_name = getattr(func, "__name__", None) or getattr(func, "name", "unknown_tool")
+        logger.error(f"Failed to convert tool {tool_name} to Gemini format: {e}")
         raise
 
 
-def convert_tools_to_gemini_format(tools: List[Callable]) -> List[types.Tool]:
+def convert_tools_to_gemini_format(tools: List[Union[Callable, ToolDefinition]]) -> List[types.Tool]:
     """
     Convert a list of Pydantic AI tools to Gemini Tool format.
 
@@ -174,7 +182,8 @@ def convert_tools_to_gemini_format(tools: List[Callable]) -> List[types.Tool]:
             function_declarations.append(func_decl)
             logger.info(f"✅ Converted tool: {func_decl.name}")
         except Exception as e:
-            logger.error(f"❌ Failed to convert tool {tool.__name__}: {e}")
+            tool_name = getattr(tool, "__name__", None) or getattr(tool, "name", "unknown_tool")
+            logger.error(f"❌ Failed to convert tool {tool_name}: {e}")
             # Continue with other tools
             continue
 

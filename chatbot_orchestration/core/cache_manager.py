@@ -23,9 +23,10 @@ import hashlib
 import json
 import os
 import time
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Union
 
 import redis.asyncio as redis
+from pydantic_ai.tools import ToolDefinition
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
@@ -48,7 +49,7 @@ class GeminiCacheManager:
         self._lock = asyncio.Lock()
         # Store the system prompt and tools for reuse in fallback caches
         self._cached_system_prompt: Optional[str] = None
-        self._cached_tool_functions: Optional[List[Callable]] = None
+        self._cached_tool_functions: Optional[List[Union[Callable, ToolDefinition]]] = None
         self._redis_client: Optional[redis.Redis] = None
         self._last_ensure_stats: dict = {
             "create_attempts": 0,
@@ -123,9 +124,12 @@ class GeminiCacheManager:
         except Exception as e:
             logger.warning(f"Could not delete Gemini cache {cache_name}: {e}")
 
-    def _compute_hash(self, system_prompt: str, tool_functions: List[Callable]) -> str:
+    def _compute_hash(self, system_prompt: str, tool_functions: List[Union[Callable, ToolDefinition]]) -> str:
         """Compute hash of system prompt + tool names to detect changes."""
-        tool_names = sorted(f.__name__ for f in tool_functions)
+        tool_names = sorted(
+            getattr(f, "__name__", None) or getattr(f, "name", "unknown_tool")
+            for f in tool_functions
+        )
         content = f"{system_prompt}|{'|'.join(tool_names)}"
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
@@ -145,7 +149,7 @@ class GeminiCacheManager:
     async def ensure_cache(
         self,
         system_prompt: str,
-        tool_functions: List[Callable],
+        tool_functions: List[Union[Callable, ToolDefinition]],
         model_name: str,
     ) -> Optional[str]:
         """Create or reuse Gemini cached content.

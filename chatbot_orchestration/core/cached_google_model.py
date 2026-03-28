@@ -212,8 +212,48 @@ class CachedGoogleModel(GoogleModel):
         model_settings: GoogleModelSettings,
         model_request_parameters: ModelRequestParameters,
     ) -> GenerateContentResponse | Awaitable[AsyncIterator[GenerateContentResponse]]:
-        """Fail-fast Gemini call path with no retries or fallback."""
-        return await super()._generate_content(messages, stream, model_settings, model_request_parameters)
+        """Fail-fast Gemini call path, except for one stale-cache rebuild attempt."""
+        try:
+            return await super()._generate_content(messages, stream, model_settings, model_request_parameters)
+        except Exception as e:
+            if not _is_cache_error(e):
+                raise
+
+            cache_ref = model_settings.get('google_cached_content')
+            logger.warning(f"Gemini cached content rejected: {cache_ref} error={e}")
+
+            from .cache_manager import REDIS_CACHE_METADATA_KEY, gemini_cache_manager
+
+            cached_system_prompt, cached_tool_functions = gemini_cache_manager.get_cached_content()
+            if not cached_system_prompt or not cached_tool_functions:
+                raise RuntimeError(
+                    "Gemini cached content failed and no cached prompt/tools were available to rebuild it"
+                ) from e
+
+            gemini_cache_manager.invalidate(keep_cached_content=True)
+            try:
+                client = await gemini_cache_manager._get_redis_client()
+                await client.delete(REDIS_CACHE_METADATA_KEY)
+            except Exception as redis_error:
+                logger.warning(f"Failed to clear stale Gemini cache metadata from Redis: {redis_error}")
+
+            rebuilt_cache_name = await gemini_cache_manager.ensure_cache(
+                system_prompt=cached_system_prompt,
+                tool_functions=cached_tool_functions,
+                model_name=self.model_name or "gemini-2.5-flash-lite",
+            )
+            if not rebuilt_cache_name:
+                raise RuntimeError("Gemini cached content failed and remote cache rebuild returned no cache id") from e
+
+            retry_settings = cast(dict[str, Any], dict(model_settings))
+            retry_settings['google_cached_content'] = rebuilt_cache_name
+            logger.info(f"Rebuilt Gemini cache after stale cache error: old={cache_ref} new={rebuilt_cache_name}")
+            return await super()._generate_content(
+                messages,
+                stream,
+                cast(GoogleModelSettings, retry_settings),
+                model_request_parameters,
+            )
     
     async def _try_fallback_model(
         self,

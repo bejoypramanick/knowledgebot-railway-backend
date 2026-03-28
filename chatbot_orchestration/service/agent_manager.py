@@ -9,7 +9,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic_ai import Agent
-from pydantic_ai.output import PromptedOutput
+from pydantic_ai.output import ToolOutput
+from pydantic_ai.tools import ToolDefinition
 from shared.otel_logger import get_otel_logger
 
 from ..core.ai import get_genai_client
@@ -19,13 +20,6 @@ from .session_manager import session_state_manager
 from ..tools.vector_search_tool import search_knowledge_base
 
 logger = get_otel_logger("agent_manager", "chatbot-orchestration")
-
-STRUCTURED_OUTPUT_TEMPLATE = """Return only a valid JSON object that matches this schema exactly.
-Do not return prose, markdown, code fences, explanations, or any text before or after the JSON.
-
-JSON schema:
-{schema}
-"""
 
 class AgentManager:
     """Manages Pydantic AI agent creation and configuration with instance caching."""
@@ -156,6 +150,14 @@ class AgentManager:
             self.cache_diag_cache = {}
         return dict(self.cache_diag_cache.get(session_id) or {})
 
+    def _build_final_result_tool_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="final_result",
+            description="The final response which ends this conversation",
+            parameters_json_schema=StructuredChatbotResponse.model_json_schema(),
+            kind="output",
+        )
+
     async def ensure_session_cache(self, session_id: str) -> Optional[str]:
         """Ensure an explicit Gemini cache exists for this session's current system prompt and tools."""
         if not hasattr(self, 'cache_diag_cache'):
@@ -177,9 +179,10 @@ class AgentManager:
             from ..core.cache_manager import gemini_cache_manager
 
             model_name = os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite")
+            final_result_tool = self._build_final_result_tool_definition()
             cache_name = await gemini_cache_manager.ensure_cache(
                 system_prompt=system_prompt,
-                tool_functions=[search_knowledge_base],
+                tool_functions=[search_knowledge_base, final_result_tool],
                 model_name=model_name,
             )
             self.cache_diag_cache[session_id] = gemini_cache_manager.get_last_ensure_stats()
@@ -292,10 +295,11 @@ class AgentManager:
             
             # Extract standard model name from get_model or env
             model_name = os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite")
+            final_result_tool = self._build_final_result_tool_definition()
             
             cache_name = await gemini_cache_manager.ensure_cache(
                 system_prompt=system_prompt,
-                tool_functions=[search_knowledge_base],
+                tool_functions=[search_knowledge_base, final_result_tool],
                 model_name=model_name,
             )
             if cache_name:
@@ -318,12 +322,7 @@ class AgentManager:
 
             agent = Agent(
                 model,
-                output_type=PromptedOutput(
-                    StructuredChatbotResponse,
-                    name="structured_chatbot_response",
-                    description="Return the final chatbot response as JSON with message_type, answer_html, and citation_ids.",
-                    template=STRUCTURED_OUTPUT_TEMPLATE,
-                ),
+                output_type=ToolOutput(StructuredChatbotResponse),
                 system_prompt=system_prompt,
                 retries=0,
                 output_retries=0,

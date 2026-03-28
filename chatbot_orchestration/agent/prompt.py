@@ -203,8 +203,8 @@ I don't have any information on this topic.
 
 FORMAT RULES
 - Return structured output only.
-- Return only a raw JSON object that matches the required structured fields.
-- Do not return plain prose, markdown, code fences, bullet points, commentary, or any text before or after the JSON object.
+- End the conversation by calling the `final_result` tool with the structured fields.
+- Do not return the final answer as plain prose or plain HTML text outside the `final_result` tool call.
 - Set `message_type` to either `PURE_GREETING` or `NON_GREETING`.
 - Put the user-facing answer in `answer_html`.
 - Put the unique source numbers you used in `citation_ids`.
