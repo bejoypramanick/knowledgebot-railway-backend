@@ -745,10 +745,51 @@ class StreamingService:
                     return
 
                 async def _run_agent_once(active_model_settings, override_message=None, override_history=None):
+                    def _summarize_event(event: Any) -> str:
+                        try:
+                            summary_parts: List[str] = [type(event).__name__]
+
+                            part = getattr(event, "part", None)
+                            if part is not None:
+                                summary_parts.append(f"part={type(part).__name__}")
+                                tool_name = getattr(part, "tool_name", None)
+                                if tool_name:
+                                    summary_parts.append(f"tool={tool_name}")
+                                content = getattr(part, "content", None)
+                                if isinstance(content, str) and content:
+                                    snippet = content.replace("\n", " ")[:160]
+                                    summary_parts.append(f"text='{snippet}'")
+                                args = getattr(part, "args", None)
+                                if args is not None:
+                                    summary_parts.append(f"args={str(args)[:200]}")
+
+                            response = getattr(event, "response", None)
+                            if response is not None:
+                                summary_parts.append(f"response_finish={getattr(response, 'finish_reason', None)}")
+                                parts = getattr(response, "parts", None) or []
+                                summary_parts.append(f"response_parts={len(parts)}")
+                                for idx, resp_part in enumerate(parts[:3]):
+                                    summary_parts.append(f"resp_part_{idx}={type(resp_part).__name__}")
+                                    tool_name = getattr(resp_part, "tool_name", None)
+                                    if tool_name:
+                                        summary_parts.append(f"resp_tool_{idx}={tool_name}")
+                                    content = getattr(resp_part, "content", None)
+                                    if isinstance(content, str) and content:
+                                        snippet = content.replace("\n", " ")[:120]
+                                        summary_parts.append(f"resp_text_{idx}='{snippet}'")
+                                    args = getattr(resp_part, "args", None)
+                                    if args is not None:
+                                        summary_parts.append(f"resp_args_{idx}={str(args)[:160]}")
+
+                            return " ".join(summary_parts)
+                        except Exception as summarize_error:
+                            return f"{type(event).__name__} summary_error={summarize_error}"
+
                     try:
                         active_message = override_message or message
                         active_history = override_history if override_history is not None else pydantic_messages
                         use_message_history = active_model_settings.get('google_cached_content') is not None or bool(active_history)
+                        recent_event_summaries: List[str] = []
 
                         if use_message_history:
                             async with agent.iter(
@@ -759,6 +800,8 @@ class StreamingService:
                             ) as active_run:
                                 async for event in active_run:
                                     logger.debug(f"Event: {type(event).__name__}")
+                                    recent_event_summaries.append(_summarize_event(event))
+                                    recent_event_summaries = recent_event_summaries[-8:]
                                 return active_run
                         else:
                             async with agent.iter(
@@ -768,6 +811,8 @@ class StreamingService:
                             ) as active_run:
                                 async for event in active_run:
                                     logger.debug(f"Event: {type(event).__name__}")
+                                    recent_event_summaries.append(_summarize_event(event))
+                                    recent_event_summaries = recent_event_summaries[-8:]
                                 return active_run
 
                     except Exception as e:
@@ -777,7 +822,8 @@ class StreamingService:
 
                         logger.error(
                             f"❌ Agent.iter() inner setup exception type={type(e).__name__} repr={repr(e)} "
-                            f"cause={repr(getattr(e, '__cause__', None))}",
+                            f"cause={repr(getattr(e, '__cause__', None))} "
+                            f"recent_events={recent_event_summaries if 'recent_event_summaries' in locals() else []}",
                             exc_info=True,
                         )
                         raise RuntimeError(f"AGENT_SETUP_ERROR::{str(e)}")
