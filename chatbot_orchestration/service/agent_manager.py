@@ -143,12 +143,26 @@ class AgentManager:
         """Get cached system prompt for a session if it exists."""
         return self.system_prompt_cache.get(session_id)
 
+    def get_cache_diag(self, session_id: str) -> Dict[str, Any]:
+        if not hasattr(self, 'cache_diag_cache'):
+            self.cache_diag_cache = {}
+        return dict(self.cache_diag_cache.get(session_id) or {})
+
     async def ensure_session_cache(self, session_id: str) -> Optional[str]:
         """Ensure an explicit Gemini cache exists for this session's current system prompt and tools."""
+        if not hasattr(self, 'cache_diag_cache'):
+            self.cache_diag_cache = {}
         system_prompt = self.get_cached_system_prompt(session_id)
         if not system_prompt:
             logger.warning(f"No cached system prompt available to rebuild Gemini cache for session: {session_id}")
             self.set_cached_cache_name(session_id, None)
+            self.cache_diag_cache[session_id] = {
+                "create_attempts": 0,
+                "create_failures": 1,
+                "reused_existing": False,
+                "recreated_remote": False,
+                "last_error": "missing_cached_system_prompt",
+            }
             return None
 
         try:
@@ -160,6 +174,7 @@ class AgentManager:
                 tool_functions=[search_knowledge_base],
                 model_name=model_name,
             )
+            self.cache_diag_cache[session_id] = gemini_cache_manager.get_last_ensure_stats()
             self.set_cached_cache_name(session_id, cache_name)
             if cache_name:
                 await gemini_cache_manager.register_session(session_id)
@@ -170,6 +185,13 @@ class AgentManager:
         except Exception as cache_error:
             logger.warning(f"Failed to ensure Gemini cache for session {session_id}: {cache_error}")
             self.set_cached_cache_name(session_id, None)
+            self.cache_diag_cache[session_id] = {
+                "create_attempts": 0,
+                "create_failures": 1,
+                "reused_existing": False,
+                "recreated_remote": False,
+                "last_error": str(cache_error)[:240],
+            }
             return None
 
     async def clear_agent_cache(self, session_id: str = None):
@@ -185,6 +207,8 @@ class AgentManager:
                 logger.info(f"Cleared cached agent for session: {session_id}")
             if session_id in self.system_prompt_cache:
                 del self.system_prompt_cache[session_id]
+            if hasattr(self, 'cache_diag_cache') and session_id in self.cache_diag_cache:
+                del self.cache_diag_cache[session_id]
             if hasattr(self, 'cache_name_cache') and session_id in self.cache_name_cache:
                 del self.cache_name_cache[session_id]
             remaining_sessions = await gemini_cache_manager.unregister_session(session_id)
@@ -196,6 +220,8 @@ class AgentManager:
             cache_size = len(self.agent_cache)
             self.agent_cache.clear()
             self.system_prompt_cache.clear()
+            if hasattr(self, 'cache_diag_cache'):
+                self.cache_diag_cache.clear()
             if hasattr(self, 'cache_name_cache'):
                 self.cache_name_cache.clear()
             await gemini_cache_manager.clear_session_registry()

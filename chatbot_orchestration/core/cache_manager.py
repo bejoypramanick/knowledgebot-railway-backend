@@ -50,6 +50,16 @@ class GeminiCacheManager:
         self._cached_system_prompt: Optional[str] = None
         self._cached_tool_functions: Optional[List[Callable]] = None
         self._redis_client: Optional[redis.Redis] = None
+        self._last_ensure_stats: dict = {
+            "create_attempts": 0,
+            "create_failures": 0,
+            "reused_existing": False,
+            "recreated_remote": False,
+            "last_error": None,
+        }
+
+    def get_last_ensure_stats(self) -> dict:
+        return dict(self._last_ensure_stats)
 
     async def _get_redis_client(self) -> redis.Redis:
         if self._redis_client is not None:
@@ -149,6 +159,13 @@ class GeminiCacheManager:
             Cache name (e.g. "cachedContents/abc123") or None on failure
         """
         async with self._lock:
+            self._last_ensure_stats = {
+                "create_attempts": 0,
+                "create_failures": 0,
+                "reused_existing": False,
+                "recreated_remote": False,
+                "last_error": None,
+            }
             content_hash = self._compute_hash(system_prompt, tool_functions)
             metadata = await self._load_metadata()
             if metadata:
@@ -161,6 +178,7 @@ class GeminiCacheManager:
                     self._cache_created_at = float(metadata.get("created_at") or time.time())
                     self._cached_system_prompt = system_prompt
                     self._cached_tool_functions = tool_functions
+                    self._last_ensure_stats["reused_existing"] = True
                     logger.info(f"Reusing Redis-registered Gemini cache: {cached_name} (hash: {content_hash})")
                     return cached_name
 
@@ -206,6 +224,7 @@ class GeminiCacheManager:
                 )
 
                 logger.info(f"Creating Gemini cache (model: {model_name}, TTL: {self._cache_ttl}s, hash: {content_hash})")
+                self._last_ensure_stats["create_attempts"] += 1
                 logger.info(f"Cache config includes:")
                 logger.info(f"  - System instruction: {len(system_prompt)} chars")
                 logger.info(f"  - Tools: {len(gemini_tools) if gemini_tools else 0} tool(s)")
@@ -222,6 +241,7 @@ class GeminiCacheManager:
 
                 old_cache_name = metadata.get("cache_name") if metadata else None
                 if old_cache_name and old_cache_name != cached_content.name:
+                    self._last_ensure_stats["recreated_remote"] = True
                     logger.info(f"Deleting superseded Gemini cache before switching active cache: {old_cache_name}")
                     await self._delete_remote_cache_by_name(old_cache_name)
 
@@ -241,6 +261,8 @@ class GeminiCacheManager:
 
             except Exception as e:
                 error_str = str(e)
+                self._last_ensure_stats["create_failures"] += 1
+                self._last_ensure_stats["last_error"] = error_str[:240]
                 if "too small" in error_str.lower() or "min_total_token_count" in error_str:
                     logger.info(f"Gemini cache skipped: content below minimum token threshold ({error_str}). Agent works fine without cache.")
                 else:

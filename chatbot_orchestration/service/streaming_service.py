@@ -358,6 +358,7 @@ class StreamingService:
 
             # System Prompt Strategy: explicit Gemini cache is required.
             cache_name = await agent_manager.ensure_session_cache(session_id)
+            cache_diag = agent_manager.get_cache_diag(session_id)
 
             logger.info(f"System prompt strategy: cache={'active: ' + cache_name if cache_name else 'none'}, "
                         f"history={len(pydantic_messages)} messages")
@@ -1193,6 +1194,11 @@ class StreamingService:
                         f"user_query={message[:120]!r} "
                         f"explicit_cache_used={'yes' if cache_name else 'no'} "
                         f"cache_name={cache_name or 'none'} "
+                        f"cache_create_attempts={int(cache_diag.get('create_attempts') or 0)} "
+                        f"cache_create_failures={int(cache_diag.get('create_failures') or 0)} "
+                        f"cache_reused_existing={'yes' if cache_diag.get('reused_existing') else 'no'} "
+                        f"cache_recreated_remote={'yes' if cache_diag.get('recreated_remote') else 'no'} "
+                        f"cache_last_error={repr(cache_diag.get('last_error') or 'none')} "
                         f"tool_calls={tool_call_count} tool_returns={tool_return_count} "
                         f"tool_names_called={','.join(sorted(set(tool_calls_made))) if tool_calls_made else 'none'} "
                         f"tool_names_returned={','.join(sorted(set(tool_returns_seen))) if tool_returns_seen else 'none'} "
