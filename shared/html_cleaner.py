@@ -9,6 +9,30 @@ from shared.otel_logger import get_otel_logger
 logger = get_otel_logger("html_cleaner", "shared")
 
 
+def _promote_table_captions(html_content: str) -> str:
+    """Promote <caption> text into ordinary visible HTML before Trafilatura extraction."""
+    def _replace_caption(match: re.Match) -> str:
+        attrs = match.group(1) or ""
+        caption_html = match.group(2) or ""
+        caption_text = re.sub(r"<[^>]+>", " ", caption_html)
+        caption_text = re.sub(r"\s+", " ", caption_text).strip()
+        if not caption_text:
+            return ""
+        return (
+            f'<p data-promoted-table-caption="true"{attrs}>'
+            f"{caption_text}"
+            f"</p>\n"
+            f'<caption{attrs}>{caption_html}</caption>'
+        )
+
+    return re.sub(
+        r"<caption([^>]*)>(.*?)</caption>",
+        _replace_caption,
+        html_content,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+
 def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) -> str:
     """
     Extract the main content from HTML while removing boilerplate (headers, footers, ads).
@@ -35,6 +59,7 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
             for caption in raw_caption_texts[:3]
             if caption and re.sub(r"\s+", " ", caption).strip()
         )
+        promoted_html = _promote_table_captions(html_content)
 
         # Deterministic configuration (no "try a bunch of kwargs" fallback logic).
         # Goal:
@@ -46,7 +71,7 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
         # If these kwargs aren't supported by the deployed Trafilatura version, we
         # *fail loudly* so the deployment can be fixed (no silent degradation).
         cleaned = trafilatura.extract(
-            html_content,
+            promoted_html,
             favor_precision=True,
             include_comments=False,
             include_tables=True,
@@ -66,6 +91,7 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
         cleaned_contains_raw_caption_text = bool(
             raw_caption_preview and raw_caption_preview[:80].lower() in cleaned.lower()
         )
+        promoted_caption_blocks = promoted_html.count('data-promoted-table-caption="true"')
 
         logger.info(f"✨ [HTML_CLEAN] Trafilatura extracted ({len(html_content)} -> {len(cleaned)} chars)")
         logger.info(
@@ -73,7 +99,8 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
             f"raw_caption_present={'yes' if raw_caption_present else 'no'} "
             f"cleaned_caption_present={'yes' if cleaned_caption_present else 'no'} "
             f"cleaned_contains_caption_text={'yes' if cleaned_contains_raw_caption_text else 'no'} "
-            f"raw_caption_preview='{raw_caption_preview or 'none'}'"
+            f"raw_caption_preview='{raw_caption_preview or 'none'}' "
+            f"promoted_caption_blocks={promoted_caption_blocks}"
         )
         return cleaned
     except Exception as e:
