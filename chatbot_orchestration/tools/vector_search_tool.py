@@ -179,11 +179,15 @@ async def search_knowledge_base(
 
     import time
     rag_start = time.time()
+    table_rows_hint = "Remember to check in all table rows"
+    effective_query = query
+    if greeting_flag is not True and table_rows_hint not in query:
+        effective_query = f"{query} {table_rows_hint}".strip()
 
-    logger.info(f"🔍 Starting advanced retrieval for: '{query}'")
+    logger.info(f"🔍 Starting advanced retrieval for: '{effective_query}'")
     
     try:
-        query_embedding = await generate_embedding(query)
+        query_embedding = await generate_embedding(effective_query)
         if not query_embedding:
             return "Knowledge base search failed: Could not generate search vector."
             
@@ -239,12 +243,12 @@ async def search_knowledge_base(
                 LIMIT 50
             """
             
-            result = await db.execute(text(hybrid_query), {"vector": vector_str, "query": query})
+            result = await db.execute(text(hybrid_query), {"vector": vector_str, "query": effective_query})
             rows = result.mappings().all()
             
             if not rows:
                 logger.info(
-                    f"🧭 [RAG_EARLY_RETURN] reason=no_rows session_id={ctx.deps.session_id or 'none'} query='{query[:120]}'"
+                    f"🧭 [RAG_EARLY_RETURN] reason=no_rows session_id={ctx.deps.session_id or 'none'} query='{effective_query[:120]}'"
                 )
                 return "I don't have any information on this topic."
             
@@ -252,29 +256,17 @@ async def search_knowledge_base(
             chunks = [dict(row) for row in rows]
             flashrank_applied = False
             if settings.enable_reranking:
-                top_chunks = _rerank_results(query, chunks)
+                top_chunks = _rerank_results(effective_query, chunks)
                 flashrank_applied = top_chunks != chunks[:10]
             else:
                 top_chunks = chunks[:10]
 
-            # Guardrail: ensure table chunks survive reranking so we can answer with table + narrative.
-            min_table_chunks = int(os.getenv("RAG_MIN_TABLE_CHUNKS", "2"))
-            max_total_chunks = int(os.getenv("RAG_MAX_TOP_CHUNKS", "10"))
-            top_chunks = _ensure_table_coverage(
-                top_chunks,
-                chunks,
-                min_tables=min_table_chunks,
-                max_total=max_total_chunks,
-            )
-                
             # --- STEP 3: Format & Compression ---
-            # Build a single, citation-friendly source header format and reuse it for both
-            # table + narrative contexts. Some models will ignore citations unless the
-            # "cite as [N]" mapping is extremely explicit.
+            # Build a single citation-friendly grounding stream and preserve the
+            # retrieval/reranking order without splitting tables from narrative text.
             citation_urls: List[str] = []
             citation_index_by_source: Dict[str, int] = {}
-            table_chunks: List[str] = []
-            narrative_chunks: List[str] = []
+            grounding_chunks: List[str] = []
 
             for chunk in top_chunks:
                 doc_id, doc_type = str(chunk["document_id"]), chunk["document_type"]
@@ -303,35 +295,28 @@ async def search_knowledge_base(
                     f"{content}\n"
                 )
 
-                if _is_table_chunk(chunk):
-                    table_chunks.append(chunk_str)
-                else:
-                    narrative_chunks.append(chunk_str)
+                grounding_chunks.append(chunk_str)
 
-            table_context = "\n".join(table_chunks).strip()
-            narrative_context = "\n".join(narrative_chunks).strip()
-            narrative_before_chars = len(narrative_context)
-            narrative_before_tokens = _estimate_text_tokens(narrative_context)
+            grounding_context = "\n".join(grounding_chunks).strip()
+            grounding_before_chars = len(grounding_context)
+            grounding_before_tokens = _estimate_text_tokens(grounding_context)
 
             llmlingua_applied = False
             llmlingua_reason = "disabled"
-            if settings.enable_context_compression and narrative_context:
-                compressed_narrative = _compress_context(narrative_context)
-                llmlingua_applied = compressed_narrative != narrative_context
+            if settings.enable_context_compression and grounding_context:
+                compressed_context = _compress_context(grounding_context)
+                llmlingua_applied = compressed_context != grounding_context
                 llmlingua_reason = "compressed" if llmlingua_applied else "no_change"
             else:
-                compressed_narrative = narrative_context
+                compressed_context = grounding_context
                 if not settings.enable_context_compression:
                     llmlingua_reason = "disabled"
-                elif not narrative_context:
-                    llmlingua_reason = "no_narrative"
-            narrative_after_chars = len(compressed_narrative)
-            narrative_after_tokens = _estimate_text_tokens(compressed_narrative)
+                elif not grounding_context:
+                    llmlingua_reason = "no_context"
+            grounding_after_chars = len(compressed_context)
+            grounding_after_tokens = _estimate_text_tokens(compressed_context)
 
-            if table_context and compressed_narrative:
-                final_context = table_context + "\n\n" + compressed_narrative
-            else:
-                final_context = table_context or compressed_narrative
+            final_context = compressed_context
 
             total_duration = (time.time() - rag_start) * 1000
             
@@ -340,7 +325,7 @@ async def search_knowledge_base(
             logger.info(f"✅ [RAG_COMPLETE] Total Retrieval Pipeline: {total_duration:.1f}ms")
             logger.info(f"📊 [HALFVEC_STATS] Using halfp-float storage: 50% byte savings per index row (1.5KB vs 3.0KB)")
             if settings.enable_context_compression:
-                logger.info(f"📉 [LLMLingua-2] Compression applied to narrative only (tables_kept={len(table_chunks)})")
+                logger.info(f"📉 [LLMLingua-2] Compression applied to final grounding stream (chunks_kept={len(grounding_chunks)})")
                 
             # Tool output is internal context for the brain model.
             # Provide a minimal instruction for how to cite without leaking URLs to the user.
@@ -388,24 +373,24 @@ async def search_knowledge_base(
                         "query_chars": len(query or ""),
                         "sources": sources_summary,
                         "final_context_chars": len(final_context or ""),
-                        "tables_kept": len(table_chunks),
-                        "narrative_kept": len(narrative_chunks),
+                        "tables_kept": 0,
+                        "narrative_kept": len(grounding_chunks),
                     },
                 )
             except Exception:
                 pass
 
             logger.info(
-                f"🧭 [RAG_DIAG] query='{query[:120]}' hit=yes rows={len(rows)} top={len(top_chunks)} "
-                f"tables={len(table_chunks)} narrative={len(narrative_chunks)} "
+                f"🧭 [RAG_DIAG] query='{effective_query[:120]}' hit=yes rows={len(rows)} top={len(top_chunks)} "
+                f"tables=0 narrative={len(grounding_chunks)} "
                 f"flashrank={'on' if settings.enable_reranking else 'off'} "
                 f"flashrank_applied={'yes' if flashrank_applied else 'no'} "
                 f"flashrank_knn_before={len(chunks)} flashrank_after={len(top_chunks)} "
                 f"llmlingua={'on' if settings.enable_context_compression else 'off'} "
                 f"llmlingua_applied={'yes' if llmlingua_applied else 'no'} "
                 f"llmlingua_reason={llmlingua_reason} "
-                f"llmlingua_before_chars={narrative_before_chars} llmlingua_after_chars={narrative_after_chars} "
-                f"llmlingua_before_tokens={narrative_before_tokens} llmlingua_after_tokens={narrative_after_tokens} "
+                f"llmlingua_before_chars={grounding_before_chars} llmlingua_after_chars={grounding_after_chars} "
+                f"llmlingua_before_tokens={grounding_before_tokens} llmlingua_after_tokens={grounding_after_tokens} "
                 f"citations={len(citation_urls)}"
             )
             
