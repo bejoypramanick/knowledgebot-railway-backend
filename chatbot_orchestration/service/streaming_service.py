@@ -14,7 +14,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, Te
 from shared.otel_logger import get_otel_logger, set_session_id
 from shared.log_sanitizer import hash_pii
 
-from ..agent.output_model import StructuredChatbotResponse, NO_ANSWER_RESPONSE
+from ..agent.output_model import NO_ANSWER_RESPONSE
 from ..core.dependencies import ChatSessionDeps
 from ..core.ai import get_genai_client
 from ..core.config import settings
@@ -122,10 +122,7 @@ class StreamingService:
         """
         Product requirement:
         - Non-greeting answers must be grounded.
-        - For factual non-greeting answers, inline citations are required.
-        - RAG grounding alone is not enough to trust an uncited final answer, because
-          retrieval may have happened without the model actually using the retrieved facts.
-        - If the answer is not the exact no-answer response and lacks citations, return
+        - If grounding was not obtained for a factual non-greeting answer, return
           the exact no-answer string.
         """
         no_answer = "I don't have any information on this topic."
@@ -150,21 +147,9 @@ class StreamingService:
             pass
         if message_type == "PURE_GREETING":
             return response_text
-        if not self._has_citation_markers(response_text):
+        if not grounding_received_from_rag:
             return no_answer
         return response_text
-
-    def _render_structured_answer(self, answer_html: str, citation_ids: List[int]) -> str:
-        """Render validated citation ids into visible inline markers if not already present."""
-        rendered = (answer_html or "").strip()
-        if not rendered or not citation_ids:
-            return rendered
-        if self._has_citation_markers(rendered):
-            return rendered
-        markers = "".join(f"[{citation_id}]" for citation_id in citation_ids)
-        if rendered.endswith("</p>"):
-            return rendered[:-4] + markers + "</p>"
-        return f"{rendered} {markers}".strip()
 
     def _convert_db_messages_to_pydantic_ai(self, db_messages: List[Dict[str, Any]]) -> List[Any]:
         """Convert database messages to Pydantic AI message format."""
@@ -675,8 +660,6 @@ class StreamingService:
             tool_return_count = 0
             agent_s3_download_url = None  # Initialize for S3 upload
             run_messages = []
-            structured_output: StructuredChatbotResponse | None = None
-            
             # Import Redis pubsub manager for posting responses to channels
             from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_all_agents, broadcast_event_to_agent
             from shared.redis_agent_cache import get_assigned_agent
@@ -927,7 +910,7 @@ class StreamingService:
                     run_result = run.result
                     if run_result is None:
                         raise RuntimeError("Agent run completed without a final result")
-                    structured_output = run_result.output
+                    full_response = (run_result.output or "").strip()
                     all_messages = run_result.all_messages()
                     run_messages = all_messages
                     logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
@@ -1061,12 +1044,8 @@ class StreamingService:
                     logger.info(
                         f"Agent completed with {tool_call_count} tool calls and {tool_return_count} tool returns"
                     )
-                    if structured_output:
-                        full_response = self._render_structured_answer(
-                            structured_output.answer_html,
-                            structured_output.citation_ids,
-                        )
-                        chunk_count = 1 if full_response else 0
+                    if full_response:
+                        chunk_count = 1
 
                     # Monitor tool call compliance
                     if tool_call_count == 0 and message.strip():
@@ -1121,9 +1100,7 @@ class StreamingService:
 
             pipeline_timer.mark("response_extraction")
 
-            model_message_type = structured_output.message_type if structured_output else None
-            if not structured_output:
-                model_message_type, full_response = self._extract_model_message_type(full_response)
+            model_message_type, full_response = self._extract_model_message_type(full_response)
 
             # Hard requirement: non-greeting queries must use retrieval tools.
             # If the model omitted MESSAGE_TYPE, treat it conservatively as NON_GREETING.
@@ -1139,9 +1116,8 @@ class StreamingService:
                     retry_result = retry_run.result
                     if retry_result is None:
                         raise RuntimeError("Forced tool retry completed without a final result")
-                    structured_output = retry_result.output
+                    full_response = (retry_result.output or "").strip()
                     retry_messages = retry_result.all_messages()
-                    full_response = ""
                     chunk_count = 0
                     tool_call_count = 0
                     tool_return_count = 0
@@ -1160,14 +1136,7 @@ class StreamingService:
                             elif isinstance(part, (BuiltinToolReturnPart, ToolReturnPart)):
                                 tool_return_count += 1
 
-                    if structured_output:
-                        model_message_type = structured_output.message_type
-                        full_response = self._render_structured_answer(
-                            structured_output.answer_html,
-                            structured_output.citation_ids,
-                        )
-                    else:
-                        model_message_type, full_response = self._extract_model_message_type(full_response)
+                    model_message_type, full_response = self._extract_model_message_type(full_response)
                     effective_message_type = model_message_type or "NON_GREETING"
                     logger.info(
                         f"🔁 [FORCED_TOOL_RETRY] message_type={model_message_type or 'UNKNOWN'} "
@@ -1246,21 +1215,10 @@ class StreamingService:
                     grounding_received_from_rag = bool(rag_source_urls)
                     session_tools_used = session_state_manager.get_tools_used(session_id)
                     rag_tool_used = "search_knowledge_base" in session_tools_used
-                    structured_citation_ids = structured_output.citation_ids if structured_output else []
-                    invalid_structured_citation_ids = [
-                        cid for cid in structured_citation_ids if cid < 1 or cid > rag_sources_count
-                    ]
-
                     if rag_tool_used and rag_sources_count == 0:
                         logger.warning(
                             "🛑 [RAG_EMPTY_GROUNDING] search_knowledge_base was called but returned no grounding sources; "
                             "returning standard no-answer response"
-                        )
-                        full_response = "I don't have any information on this topic."
-                    elif invalid_structured_citation_ids:
-                        logger.warning(
-                            f"🛑 [CITATION_ID_VALIDATION] Invalid citation ids {invalid_structured_citation_ids} "
-                            f"for rag_sources_count={rag_sources_count}; returning standard no-answer response"
                         )
                         full_response = "I don't have any information on this topic."
 
@@ -1276,7 +1234,7 @@ class StreamingService:
                         # WARNING: This logs model output (may include user/KB content). Keep brief.
                         prev = (before_enforcement or "").replace("\n", " ")[:240]
                         logger.warning(
-                            f"🛑 [CITATION_ENFORCEMENT] Missing/invalid citations; replaced model output with no-answer. "
+                            f"🛑 [GROUNDING_ENFORCEMENT] Replaced model output with no-answer because it was not grounded. "
                             f"model_preview='{prev}'"
                         )
                     logger.info(
@@ -1293,13 +1251,12 @@ class StreamingService:
                         f"tool_calls={tool_call_count} tool_returns={tool_return_count} "
                         f"tool_names_called={','.join(sorted(set(tool_calls_made))) if tool_calls_made else 'none'} "
                         f"tool_names_returned={','.join(sorted(set(tool_returns_seen))) if tool_returns_seen else 'none'} "
-                        f"output_citation_ids={','.join(str(cid) for cid in structured_citation_ids) if structured_citation_ids else 'none'} "
                         f"citations_before={'yes' if had_citations_before else 'no'} "
                         f"grounding_from_rag={'yes' if grounding_received_from_rag else 'no'} "
                         f"rag_tool_used={'yes' if rag_tool_used else 'no'} "
                         f"rag_sources_count={rag_sources_count} "
                         f"session_tools={','.join(session_tools_used) if session_tools_used else 'none'} "
-                        f"final_reason={'citation_enforcement' if full_response != before_enforcement else 'ok'}"
+                        f"final_reason={'grounding_enforcement' if full_response != before_enforcement else 'ok'}"
                     )
                 except Exception:
                     full_response = self._enforce_grounded_citation_policy(
