@@ -96,6 +96,9 @@ class SessionPersistenceDAO:
                 )
                 await db.commit()
 
+            from chatbot_orchestration.service.agent_manager import agent_manager
+            await agent_manager.clear_agent_cache(session_id)
+
             logger.info(f"Session closed: {session_id}")
             return True
 

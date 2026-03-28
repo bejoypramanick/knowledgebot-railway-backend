@@ -162,6 +162,7 @@ class AgentManager:
             )
             self.set_cached_cache_name(session_id, cache_name)
             if cache_name:
+                await gemini_cache_manager.register_session(session_id)
                 logger.info(f"Ensured Gemini cache for session {session_id}: {cache_name}")
             else:
                 logger.warning(f"Gemini cache unavailable after ensure for session {session_id}")
@@ -178,15 +179,27 @@ class AgentManager:
             session_id: If provided, clear only this session's cache. If None, clear all caches.
         """
         if session_id:
+            from ..core.cache_manager import gemini_cache_manager
             if session_id in self.agent_cache:
                 del self.agent_cache[session_id]
                 logger.info(f"Cleared cached agent for session: {session_id}")
             if session_id in self.system_prompt_cache:
                 del self.system_prompt_cache[session_id]
+            if hasattr(self, 'cache_name_cache') and session_id in self.cache_name_cache:
+                del self.cache_name_cache[session_id]
+            remaining_sessions = await gemini_cache_manager.unregister_session(session_id)
+            if remaining_sessions == 0:
+                logger.info("Last tracked session cleared; deleting active Gemini cache")
+                await gemini_cache_manager.delete_cache()
         else:
+            from ..core.cache_manager import gemini_cache_manager
             cache_size = len(self.agent_cache)
             self.agent_cache.clear()
             self.system_prompt_cache.clear()
+            if hasattr(self, 'cache_name_cache'):
+                self.cache_name_cache.clear()
+            await gemini_cache_manager.clear_session_registry()
+            await gemini_cache_manager.delete_cache()
             logger.info(f"Cleared all caches ({cache_size} sessions)")
 
     async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com", force_new: bool = False) -> Agent:
