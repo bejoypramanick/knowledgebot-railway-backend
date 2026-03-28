@@ -179,7 +179,7 @@ async def search_knowledge_base(
 
     import time
     rag_start = time.time()
-    table_rows_hint = "Remember to check in all table rows"
+    table_rows_hint = "Remember to check in all Columns and Row"
     effective_query = query
     if greeting_flag is not True and table_rows_hint not in query:
         effective_query = f"{query} {table_rows_hint}".strip()
