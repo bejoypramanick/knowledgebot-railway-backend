@@ -876,7 +876,14 @@ fn build_table_artifacts(tables: &[Table], max_characters: usize) -> Vec<TableAr
             let headers = derive_headers(table);
             let row_chunks = build_table_row_chunks(table, &headers, max_characters);
             let kv_markdown = build_table_kv_markdown(table, &headers, &row_chunks, table_index);
-            let row_count = table.cells.len().saturating_sub(1);
+            let row_count = if table.cells.len() > 1 {
+                table.cells[1..]
+                    .iter()
+                    .filter(|row| !is_non_data_row(row))
+                    .count()
+            } else {
+                0
+            };
             let column_count = headers.len();
 
             TableArtifact {
@@ -990,12 +997,33 @@ fn build_table_kv_markdown(
     out.trim().to_string()
 }
 
+fn is_non_data_row(row: &[String]) -> bool {
+    if row.is_empty() {
+        return true;
+    }
+    // All cells empty / whitespace-only
+    let all_empty = row.iter().all(|cell| normalize_cell(cell).is_empty());
+    if all_empty {
+        return true;
+    }
+    // Markdown separator row (e.g. | --- | :---: | ---: |)
+    let all_separator = row.iter().all(|cell| {
+        let normalized = normalize_cell(cell);
+        normalized.is_empty() || normalized.chars().all(|c| c == '-' || c == ':')
+    });
+    all_separator
+}
+
 fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usize) -> Vec<TableRowChunk> {
     let table_heading = derive_table_heading(&table.markdown);
-    let rows = if table.cells.len() > 1 {
-        &table.cells[1..]
+    // Filter out separator / empty rows so row numbers match actual data rows.
+    let data_rows: Vec<&Vec<String>> = if table.cells.len() > 1 {
+        table.cells[1..]
+            .iter()
+            .filter(|row| !is_non_data_row(row))
+            .collect()
     } else {
-        &[][..]
+        vec![]
     };
 
     let mut sections = Vec::new();
@@ -1003,7 +1031,7 @@ fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usi
     let mut chunk_start_row = 1usize;
     let mut chunk_end_row = 0usize;
 
-    for (idx, row) in rows.iter().enumerate() {
+    for (idx, row) in data_rows.into_iter().enumerate() {
         let row_number = idx + 1;
         let row_blocks = render_row_blocks(
             table_heading.as_deref(),
