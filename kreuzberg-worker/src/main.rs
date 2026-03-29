@@ -334,6 +334,11 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "running kreuzberg extract_bytes"
     );
     let extraction_config = build_extraction_config();
+    let chunk_size = extraction_config
+        .chunking
+        .as_ref()
+        .map(|cfg| cfg.max_characters)
+        .unwrap_or(1200);
     let result = extract_bytes(file_bytes, &mime_type, &extraction_config)
         .await
         .context("kreuzberg extract_bytes failed")?;
@@ -355,40 +360,71 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "prepared markdown artifacts"
     );
     let page_count = result.pages.as_ref().map(|pages| pages.len()).unwrap_or(0);
+    let table_artifacts = build_table_artifacts(&result.tables, chunk_size);
 
-    let chunks = result
+    let mut chunks = result
         .chunks
         .clone()
         .map(|result_chunks| {
             result_chunks
                 .into_iter()
                 .enumerate()
-                .map(|(idx, chunk)| ExtractedChunk {
-                    text: chunk.content.clone(),
-                    metadata: json!({
-                        "chunk_index": idx,
-                        "byte_start": chunk.metadata.byte_start,
-                        "byte_end": chunk.metadata.byte_end,
-                        "char_count": chunk.content.chars().count(),
-                        "token_count": chunk.metadata.token_count,
-                        "first_page": chunk.metadata.first_page,
-                        "last_page": chunk.metadata.last_page,
-                        "strategy": "kreuzberg_native_markdown",
-                    }),
+                .filter_map(|(idx, chunk)| {
+                    let cleaned = strip_table_markdown_sections(&chunk.content, &table_artifacts);
+                    if cleaned.trim().is_empty() {
+                        return None;
+                    }
+
+                    Some(ExtractedChunk {
+                        text: cleaned.clone(),
+                        metadata: json!({
+                            "chunk_index": idx,
+                            "byte_start": chunk.metadata.byte_start,
+                            "byte_end": chunk.metadata.byte_end,
+                            "char_count": cleaned.chars().count(),
+                            "token_count": chunk.metadata.token_count,
+                            "first_page": chunk.metadata.first_page,
+                            "last_page": chunk.metadata.last_page,
+                            "strategy": "kreuzberg_native_markdown_prose",
+                        }),
+                    })
                 })
                 .collect::<Vec<_>>()
         })
         .filter(|items| !items.is_empty())
         .unwrap_or_else(|| {
+            let cleaned_markdown = strip_table_markdown_sections(&markdown, &table_artifacts);
             vec![ExtractedChunk {
-                text: markdown.clone(),
+                text: cleaned_markdown.clone(),
                 metadata: json!({
                     "chunk_index": 0,
-                    "char_count": markdown.chars().count(),
-                    "strategy": "kreuzberg_native_markdown",
+                    "char_count": cleaned_markdown.chars().count(),
+                    "strategy": "kreuzberg_native_markdown_prose",
                 }),
             }]
         });
+
+    let prose_chunk_count = chunks.len();
+    for table in &table_artifacts {
+        let table_heading = derive_table_heading(&table.original_markdown);
+        for row_chunk in &table.row_chunks {
+            chunks.push(ExtractedChunk {
+                text: row_chunk.text.clone(),
+                metadata: json!({
+                    "chunk_index": chunks.len(),
+                    "strategy": "kreuzberg_table_rows",
+                    "table_index": table.table_index,
+                    "page_number": table.page_number,
+                    "row_count": table.row_count,
+                    "column_count": table.column_count,
+                    "start_row": row_chunk.start_row,
+                    "end_row": row_chunk.end_row,
+                    "headers": table.headers.clone(),
+                    "table_heading": table_heading.clone(),
+                }),
+            });
+        }
+    }
 
     let tables = serde_json::Value::Array(
         result
@@ -414,13 +450,15 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "checksum_sha256": checksum,
         "content_length": markdown.len(),
         "chunk_count": chunks.len(),
+        "prose_chunk_count": prose_chunk_count,
+        "table_chunk_count": chunks.len().saturating_sub(prose_chunk_count),
         "table_count": tables.as_array().map(|items| items.len()).unwrap_or(0),
         "page_count": page_count,
         "detected_languages": result.detected_languages,
         "document_structure_included": result.document.is_some(),
-        "table_kv_enabled": false,
+        "table_kv_enabled": true,
         "table_aware_chunking_enabled": true,
-        "table_row_chunks_enabled": false,
+        "table_row_chunks_enabled": true,
     });
 
     Ok(ExtractionArtifacts { markdown, chunks, tables, metadata })
