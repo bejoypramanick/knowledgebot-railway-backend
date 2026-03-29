@@ -28,36 +28,43 @@ def _estimate_text_tokens(text: str) -> int:
     except Exception:
         return max(1, len(text) // 4)
 
+
 def _compress_context(context_text: str) -> str:
     """Implement LLMLingua-2 quantized compression with telemetry."""
     try:
         from llmlingua import PromptCompressor
         import time
+
         start = time.time()
-        
+
         # Using the smaller, quantized-native bert-base model for 2026 performance
         compressor = PromptCompressor(
-            model_name="microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank", 
+            model_name="microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
             use_llmlingua2=True,
-            device_map="cpu" # Explicitly use CPU for quantization-friendly execution
+            device_map="cpu",  # Explicitly use CPU for quantization-friendly execution
         )
-        
+
         orig_len = len(context_text)
         # Target 2x compression ratio
-        compressed = compressor.compress_prompt(context_text, rate=0.5, force_tokens=['\n', 'Snippet', 'Source'])
-        compressed_text = compressed.get('compressed_prompt', context_text)
+        compressed = compressor.compress_prompt(
+            context_text, rate=0.5, force_tokens=["\n", "Snippet", "Source"]
+        )
+        compressed_text = compressed.get("compressed_prompt", context_text)
         comp_len = len(compressed_text)
-        
+
         duration = (time.time() - start) * 1000
         savings = (1 - (comp_len / orig_len)) * 100 if orig_len > 0 else 0
-        
-        logger.info(f"📉 [LLMLingua-2] Compressed context in {duration:.1f}ms: "
-                    f"{orig_len} -> {comp_len} chars ({savings:.1f}% saved)")
-        
+
+        logger.info(
+            f"📉 [LLMLingua-2] Compressed context in {duration:.1f}ms: "
+            f"{orig_len} -> {comp_len} chars ({savings:.1f}% saved)"
+        )
+
         return compressed_text
     except Exception as e:
         logger.warning(f"⚠️ LLMLingua-2 quantized compression failed: {e}")
         return context_text
+
 
 def _is_table_chunk(chunk: Dict[str, Any]) -> bool:
     """Heuristic: table-aware Kreuzberg chunks are structured row/table chunks."""
@@ -67,43 +74,61 @@ def _is_table_chunk(chunk: Dict[str, Any]) -> bool:
         if strategy and "table" in str(strategy).lower():
             return True
         content = (chunk.get("content") or "").lstrip()
-        if content.startswith("## Table") or content.startswith("|") or content.startswith("### Row"):
+        if (
+            content.startswith("## Table")
+            or content.startswith("|")
+            or content.startswith("### Row")
+        ):
             return True
     except Exception:
         return False
     return False
+
 
 def _rerank_results(query: str, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Implement FlashRank Stage-2 reranking with telemetry."""
     try:
         from flashrank import Ranker, RerankRequest
         import time
+
         start = time.time()
-        
+
         ranker = Ranker()
-        passages = [{"id": i, "text": c["content"], "meta": c["metadata"]} for i, c in enumerate(chunks)]
+        passages = [
+            {"id": i, "text": c["content"], "meta": c["metadata"]}
+            for i, c in enumerate(chunks)
+        ]
         rerank_request = RerankRequest(query=query, passages=passages)
         results = ranker.rerank(rerank_request)
-        
+
         # Map back to original chunks
         ranked_chunks = []
         for r in results:
             idx = r["id"]
             ranked_chunks.append(chunks[idx])
-            
+
         duration = (time.time() - start) * 1000
-        logger.info(f"🎯 [FlashRank] Reranked {len(passages)} candidates in {duration:.1f}ms. "
-                    f"Top score: {results[0]['score'] if results else 'N/A'}")
-        
+        logger.info(
+            f"🎯 [FlashRank] Reranked {len(passages)} candidates in {duration:.1f}ms. "
+            f"Top score: {results[0]['score'] if results else 'N/A'}"
+        )
+
         return ranked_chunks[:10]
     except Exception as e:
         logger.warning(f"⚠️ FlashRank reranking failed: {e}")
         return chunks[:10]
 
+
 async def search_knowledge_base(
     ctx: RunContext[ChatSessionDeps],
-    query: Annotated[str, "The user's normalized information request or greeting text. For a non-greeting message, one search call is usually enough, but additional calls are allowed when they search for distinct new information needed to answer a genuinely multi-part question."],
-    greeting_flag: Annotated[Optional[bool], "Set to true only when the latest user message is a pure greeting with no information request. Set to false for all other messages. For non-greeting messages, avoid repeating the same search again for the same user message unless the query meaning materially changes."] = None,
+    query: Annotated[
+        str,
+        "The user's normalized information request or greeting text. For a non-greeting message, one search call is usually enough, but additional calls are allowed when they search for distinct new information needed to answer a genuinely multi-part question.",
+    ],
+    greeting_flag: Annotated[
+        Optional[bool],
+        "Set to true only when the latest user message is a pure greeting with no information request. Set to false for all other messages. For non-greeting messages, avoid repeating the same search again for the same user message unless the query meaning materially changes.",
+    ] = None,
 ) -> str:
     """
     Advanced Knowledge Base Search with Hybrid Search, Reranking, Compression, and Caching.
@@ -114,7 +139,9 @@ async def search_knowledge_base(
     Repeating the same search for the same user message is unnecessary.
     """
     if ctx.deps.search_tool_calls >= 1:
-        logger.warning("🛑 [TOOL_CALL_LIMIT] search_knowledge_base already called once in this request; skipping repeated retrieval")
+        logger.warning(
+            "🛑 [TOOL_CALL_LIMIT] search_knowledge_base already called once in this request; skipping repeated retrieval"
+        )
         return (
             "Search already completed for this user message. "
             "Use the previous search result to answer now. "
@@ -124,30 +151,33 @@ async def search_knowledge_base(
     ctx.deps.search_tool_calls += 1
 
     if greeting_flag is True:
-        logger.info("👋 [GREETING_BYPASS] Greeting flag=true, skipping pgvector retrieval")
+        logger.info(
+            "👋 [GREETING_BYPASS] Greeting flag=true, skipping pgvector retrieval"
+        )
         return (
             "Greeting-only message detected. Do not use knowledge base facts. "
             "Respond briefly, warmly, and directly to the user without citations."
         )
 
     import time
+
     rag_start = time.time()
     effective_query = query
     fts_query = effective_query
     flashrank_query = effective_query
 
     logger.info(f"🔍 Starting advanced retrieval for: '{effective_query}'")
-    
+
     try:
         query_embedding = await generate_embedding(effective_query)
         if not query_embedding:
             return "Knowledge base search failed: Could not generate search vector."
-            
+
         vector_str = "[" + ",".join(str(f) for f in query_embedding) + "]"
-        
+
         async with get_db_session() as db:
             await db.execute(text("SET LOCAL hnsw.ef_search = 100"))
-            
+
             # --- STEP 1: Hybrid Search (Vector + FTS) ---
             hybrid_query = """
                 WITH vector_matches AS (
@@ -219,14 +249,14 @@ async def search_knowledge_base(
                     (sim_score + (fts_score * 1.8) + structure_boost) as hybrid_score,
                     COALESCE(
                         (SELECT f.display_name FROM file_uploads f WHERE f.id = candidate_rows.document_id AND candidate_rows.document_type = 'file'),
-                        (SELECT w.url FROM scraped_websites w WHERE w.id = candidate_rows.document_id AND candidate_rows.document_type = 'website'),
+                        (SELECT w.original_url FROM scraped_websites w WHERE w.id = candidate_rows.document_id AND candidate_rows.document_type = 'website'),
                         ''
                     ) as source_name
                 FROM candidate_rows
                 ORDER BY hybrid_score DESC
                 LIMIT 80
             """
-            
+
             result = await db.execute(
                 text(hybrid_query),
                 {
@@ -235,13 +265,13 @@ async def search_knowledge_base(
                 },
             )
             rows = result.mappings().all()
-            
+
             if not rows:
                 logger.info(
                     f"🧭 [RAG_EARLY_RETURN] reason=no_rows session_id={ctx.deps.session_id or 'none'} query='{effective_query[:120]}'"
                 )
                 return "I don't have any information on this topic."
-            
+
             # --- STEP 2: Reranking ---
             chunks = [dict(row) for row in rows]
             flashrank_applied = False
@@ -312,14 +342,20 @@ async def search_knowledge_base(
             final_context = compressed_context
 
             total_duration = (time.time() - rag_start) * 1000
-            
+
             # Theoretical storage savings per chunk (standard vector 3072B -> halfvec 1536B for 768d)
             # This is constant but helpful to see in telemetry for business value justification
-            logger.info(f"✅ [RAG_COMPLETE] Total Retrieval Pipeline: {total_duration:.1f}ms")
-            logger.info(f"📊 [HALFVEC_STATS] Using halfp-float storage: 50% byte savings per index row (1.5KB vs 3.0KB)")
+            logger.info(
+                f"✅ [RAG_COMPLETE] Total Retrieval Pipeline: {total_duration:.1f}ms"
+            )
+            logger.info(
+                f"📊 [HALFVEC_STATS] Using halfp-float storage: 50% byte savings per index row (1.5KB vs 3.0KB)"
+            )
             if settings.enable_context_compression:
-                logger.info(f"📉 [LLMLingua-2] Compression applied to final grounding stream (chunks_kept={len(grounding_chunks)})")
-                
+                logger.info(
+                    f"📉 [LLMLingua-2] Compression applied to final grounding stream (chunks_kept={len(grounding_chunks)})"
+                )
+
             # Tool output is internal context for the brain model.
             # Provide a minimal instruction for how to cite without leaking URLs to the user.
             response = (
@@ -336,7 +372,9 @@ async def search_knowledge_base(
             try:
                 preview_limit = 12000
                 preview = response[:preview_limit]
-                logger.info(f"📦 [RAG_GROUNDING_FULL] tool_return_chars={len(response)} preview_chars={len(preview)}\n{preview}")
+                logger.info(
+                    f"📦 [RAG_GROUNDING_FULL] tool_return_chars={len(response)} preview_chars={len(preview)}\n{preview}"
+                )
             except Exception:
                 pass
 
@@ -386,21 +424,28 @@ async def search_knowledge_base(
                 f"llmlingua_before_tokens={grounding_before_tokens} llmlingua_after_tokens={grounding_after_tokens} "
                 f"citations={len(citation_urls)}"
             )
-            
+
             # --- STEP 4: Update Session State ---
             if ctx.deps.session_id:
                 from ..service.session_manager import session_state_manager
-                session_state_manager.set_tool_used(ctx.deps.session_id, "search_knowledge_base")
-                session_state_manager.set_last_citation_urls(ctx.deps.session_id, citation_urls)
+
+                session_state_manager.set_tool_used(
+                    ctx.deps.session_id, "search_knowledge_base"
+                )
+                session_state_manager.set_last_citation_urls(
+                    ctx.deps.session_id, citation_urls
+                )
                 logger.info(
                     f"🧭 [RAG_STATE_WRITE] path=live_retrieval session_id={ctx.deps.session_id} "
                     f"citation_count={len(citation_urls)} tool_used=yes"
                 )
             else:
-                logger.warning("🧭 [RAG_STATE_WRITE] skipped: missing session_id on tool context")
-                
+                logger.warning(
+                    "🧭 [RAG_STATE_WRITE] skipped: missing session_id on tool context"
+                )
+
             return response
-            
+
     except Exception as e:
         logger.error(f"❌ Advanced RAG error: {e}", exc_info=True)
         return f"An error occurred during search: {str(e)}"
