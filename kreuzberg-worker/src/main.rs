@@ -334,6 +334,11 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "running kreuzberg extract_bytes"
     );
     let extraction_config = build_extraction_config();
+    let chunk_size = extraction_config
+        .chunking
+        .as_ref()
+        .map(|cfg| cfg.max_characters)
+        .unwrap_or(1200);
     let result = extract_bytes(file_bytes, &mime_type, &extraction_config)
         .await
         .context("kreuzberg extract_bytes failed")?;
@@ -347,9 +352,6 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "kreuzberg extraction completed"
     );
 
-    // Let Kreuzberg own table-aware chunking for now. We keep the custom table
-    // rewriting helpers below in place, but do not run them so native table
-    // structure and headings remain available to the chunker.
     let markdown = result.content.clone();
     info!(
         job_id = %job.job_id,
@@ -359,39 +361,47 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     );
     let page_count = result.pages.as_ref().map(|pages| pages.len()).unwrap_or(0);
 
-    let chunks = result
-        .chunks
-        .clone()
-        .map(|result_chunks| {
-            result_chunks
-                .into_iter()
-                .enumerate()
-                .map(|(idx, chunk)| ExtractedChunk {
-                    text: chunk.content.clone(),
+    let element_chunks = result
+        .elements
+        .as_ref()
+        .and_then(|elements| serde_json::to_value(elements).ok())
+        .and_then(|value| build_element_based_chunks(&value, chunk_size));
+
+    let chunks = element_chunks.unwrap_or_else(|| {
+        result
+            .chunks
+            .clone()
+            .map(|result_chunks| {
+                result_chunks
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, chunk)| ExtractedChunk {
+                        text: chunk.content.clone(),
+                        metadata: json!({
+                            "chunk_index": idx,
+                            "byte_start": chunk.metadata.byte_start,
+                            "byte_end": chunk.metadata.byte_end,
+                            "char_count": chunk.content.chars().count(),
+                            "token_count": chunk.metadata.token_count,
+                            "first_page": chunk.metadata.first_page,
+                            "last_page": chunk.metadata.last_page,
+                            "strategy": "kreuzberg_native_fallback",
+                        }),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|items| !items.is_empty())
+            .unwrap_or_else(|| {
+                vec![ExtractedChunk {
+                    text: markdown.clone(),
                     metadata: json!({
-                        "chunk_index": idx,
-                        "byte_start": chunk.metadata.byte_start,
-                        "byte_end": chunk.metadata.byte_end,
-                        "char_count": chunk.content.chars().count(),
-                        "token_count": chunk.metadata.token_count,
-                        "first_page": chunk.metadata.first_page,
-                        "last_page": chunk.metadata.last_page,
-                        "strategy": "kreuzberg_native",
+                        "chunk_index": 0,
+                        "char_count": markdown.chars().count(),
+                        "strategy": "kreuzberg_native_fallback",
                     }),
-                })
-                .collect::<Vec<_>>()
-        })
-        .filter(|items| !items.is_empty())
-        .unwrap_or_else(|| {
-            vec![ExtractedChunk {
-                text: markdown.clone(),
-                metadata: json!({
-                    "chunk_index": 0,
-                    "char_count": markdown.chars().count(),
-                    "strategy": "kreuzberg_native_fallback",
-                }),
-            }]
-        });
+                }]
+            })
+    });
 
     let tables = serde_json::Value::Array(
         result
@@ -421,6 +431,7 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "page_count": page_count,
         "detected_languages": result.detected_languages,
         "document_structure_included": result.document.is_some(),
+        "element_based_output_enabled": result.elements.is_some(),
         "table_kv_enabled": false,
         "table_aware_chunking_enabled": true,
         "table_row_chunks_enabled": false,
@@ -588,7 +599,7 @@ fn build_extraction_config() -> ExtractionConfig {
             .ok()
             .and_then(|value| value.parse::<usize>().ok()),
         ocr,
-        output_format: ContentOutputFormat::Markdown,
+        output_format: ContentOutputFormat::ElementBased,
         pages: Some(PageConfig {
             extract_pages,
             insert_page_markers,
@@ -599,6 +610,218 @@ fn build_extraction_config() -> ExtractionConfig {
         use_cache: parse_env_bool("KREUZBERG_USE_CACHE", true),
         ..Default::default()
     }
+}
+
+fn build_element_based_chunks(elements_value: &serde_json::Value, max_characters: usize) -> Option<Vec<ExtractedChunk>> {
+    let elements = elements_value.as_array()?;
+    if elements.is_empty() {
+        return None;
+    }
+
+    let mut chunks = Vec::new();
+    let mut heading_context: Vec<String> = Vec::new();
+    let mut buffer = String::new();
+    let mut buffer_start_page: Option<u64> = None;
+    let mut buffer_end_page: Option<u64> = None;
+    let mut buffer_element_start: Option<u64> = None;
+    let mut buffer_element_end: Option<u64> = None;
+
+    for element in elements {
+        let element_type = element
+            .get("element_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        let text = element
+            .get("text")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .unwrap_or("");
+        if text.is_empty() {
+            continue;
+        }
+
+        let metadata = element.get("metadata");
+        let page_number = metadata
+            .and_then(|value| value.get("page_number"))
+            .and_then(|value| value.as_u64());
+        let element_index = metadata
+            .and_then(|value| value.get("element_index"))
+            .and_then(|value| value.as_u64());
+
+        if matches!(element_type, "title" | "heading") {
+            heading_context.push(text.to_string());
+            if heading_context.len() > 3 {
+                heading_context.remove(0);
+            }
+        }
+
+        if element_type == "table" {
+            flush_element_buffer(
+                &mut chunks,
+                &mut buffer,
+                &mut buffer_start_page,
+                &mut buffer_end_page,
+                &mut buffer_element_start,
+                &mut buffer_element_end,
+                heading_context.as_slice(),
+            );
+
+            chunks.push(ExtractedChunk {
+                text: format_table_element_chunk(element, &heading_context),
+                metadata: json!({
+                    "chunk_index": chunks.len(),
+                    "strategy": "kreuzberg_element_based",
+                    "element_type": element_type,
+                    "page_number": page_number,
+                    "element_index": element_index,
+                    "heading_context": heading_context,
+                    "table_metadata": metadata.and_then(|value| value.get("additional")).cloned(),
+                }),
+            });
+            continue;
+        }
+
+        if matches!(element_type, "page_break" | "image" | "footer" | "header") {
+            continue;
+        }
+
+        let candidate = if buffer.is_empty() {
+            text.to_string()
+        } else {
+            format!("{buffer}\n\n{text}")
+        };
+
+        if !buffer.is_empty() && candidate.chars().count() > max_characters {
+            flush_element_buffer(
+                &mut chunks,
+                &mut buffer,
+                &mut buffer_start_page,
+                &mut buffer_end_page,
+                &mut buffer_element_start,
+                &mut buffer_element_end,
+                heading_context.as_slice(),
+            );
+        }
+
+        if buffer.is_empty() {
+            buffer_start_page = page_number;
+            buffer_element_start = element_index;
+            buffer = text.to_string();
+        } else {
+            buffer.push_str("\n\n");
+            buffer.push_str(text);
+        }
+        buffer_end_page = page_number.or(buffer_end_page);
+        buffer_element_end = element_index.or(buffer_element_end);
+    }
+
+    flush_element_buffer(
+        &mut chunks,
+        &mut buffer,
+        &mut buffer_start_page,
+        &mut buffer_end_page,
+        &mut buffer_element_start,
+        &mut buffer_element_end,
+        heading_context.as_slice(),
+    );
+
+    if chunks.is_empty() {
+        None
+    } else {
+        for (idx, chunk) in chunks.iter_mut().enumerate() {
+            if let Some(metadata) = chunk.metadata.as_object_mut() {
+                metadata.insert("chunk_index".to_string(), json!(idx));
+            }
+        }
+        Some(chunks)
+    }
+}
+
+fn flush_element_buffer(
+    chunks: &mut Vec<ExtractedChunk>,
+    buffer: &mut String,
+    start_page: &mut Option<u64>,
+    end_page: &mut Option<u64>,
+    start_element: &mut Option<u64>,
+    end_element: &mut Option<u64>,
+    heading_context: &[String],
+) {
+    if buffer.trim().is_empty() {
+        *buffer = String::new();
+        *start_page = None;
+        *end_page = None;
+        *start_element = None;
+        *end_element = None;
+        return;
+    }
+
+    let mut text = String::new();
+    if !heading_context.is_empty() {
+        text.push_str(&format!("Context: {}\n\n", heading_context.join(" > ")));
+    }
+    text.push_str(buffer.trim());
+
+    chunks.push(ExtractedChunk {
+        text,
+        metadata: json!({
+            "strategy": "kreuzberg_element_based",
+            "element_type": "composite_text",
+            "first_page": *start_page,
+            "last_page": *end_page,
+            "first_element_index": *start_element,
+            "last_element_index": *end_element,
+            "heading_context": heading_context,
+        }),
+    });
+
+    *buffer = String::new();
+    *start_page = None;
+    *end_page = None;
+    *start_element = None;
+    *end_element = None;
+}
+
+fn format_table_element_chunk(element: &serde_json::Value, heading_context: &[String]) -> String {
+    let text = element
+        .get("text")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    let metadata = element.get("metadata");
+    let page_number = metadata
+        .and_then(|value| value.get("page_number"))
+        .and_then(|value| value.as_u64());
+    let additional = metadata.and_then(|value| value.get("additional"));
+    let row_count = additional
+        .and_then(|value| value.get("row_count"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let column_count = additional
+        .and_then(|value| value.get("column_count"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let format_name = additional
+        .and_then(|value| value.get("format"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+
+    let mut out = String::new();
+    if !heading_context.is_empty() {
+        out.push_str(&format!("Context: {}\n", heading_context.join(" > ")));
+    }
+    if let Some(page) = page_number {
+        out.push_str(&format!(
+            "Table metadata: page {}, rows {}, columns {}, format {}\n\n",
+            page, row_count, column_count, format_name
+        ));
+    } else {
+        out.push_str(&format!(
+            "Table metadata: rows {}, columns {}, format {}\n\n",
+            row_count, column_count, format_name
+        ));
+    }
+    out.push_str(text);
+    out
 }
 
 #[derive(Clone)]
