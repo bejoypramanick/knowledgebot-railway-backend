@@ -5,10 +5,9 @@ use aws_sdk_s3::{config::Region, primitives::ByteStream, Client as S3Client};
 use chrono::Utc;
 use kreuzberg::{
     detect_mime_type_from_bytes, extract_bytes, validate_mime_type, ChunkingConfig, ChunkerType,
-    ExtractionConfig, HierarchyConfig, ImageExtractionConfig, LanguageDetectionConfig,
-    LayoutDetectionConfig, OcrConfig, OutputFormat as ContentOutputFormat, PageConfig, PdfConfig,
-    Table,
-    TesseractConfig,
+    DocumentStructure, ExtractionConfig, GridCell, HierarchyConfig, ImageExtractionConfig,
+    LanguageDetectionConfig, LayoutDetectionConfig, NodeContent, OcrConfig,
+    OutputFormat as ContentOutputFormat, PageConfig, PdfConfig, Table, TableGrid, TesseractConfig,
 };
 use redis::Commands;
 use reqwest::Client as HttpClient;
@@ -360,7 +359,25 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "prepared markdown artifacts"
     );
     let page_count = result.pages.as_ref().map(|pages| pages.len()).unwrap_or(0);
-    let table_artifacts = build_table_artifacts(&result.tables, chunk_size);
+
+    // Prefer GridCell-based table extraction (handles merged cells, multi-row
+    // headers, captions) when DocumentStructure is available; fall back to the
+    // flat Table.cells grid otherwise.
+    let table_artifacts = if let Some(ref doc) = result.document {
+        let grid_artifacts = build_table_artifacts_from_grids(doc, &result.tables, chunk_size);
+        if !grid_artifacts.is_empty() {
+            info!(
+                job_id = %job.job_id,
+                tables = grid_artifacts.len(),
+                "using GridCell-based table chunking from DocumentStructure"
+            );
+            grid_artifacts
+        } else {
+            build_table_artifacts(&result.tables, chunk_size)
+        }
+    } else {
+        build_table_artifacts(&result.tables, chunk_size)
+    };
 
     let mut chunks = result
         .chunks
@@ -863,6 +880,287 @@ struct TableArtifact {
 
 #[derive(Clone)]
 struct TableRowChunk {
+    start_row: usize,
+    end_row: usize,
+    text: String,
+}
+
+// ---------------------------------------------------------------------------
+// GridCell-based table extraction (preferred path)
+// Uses kreuzberg's DocumentStructure → TableGrid → GridCell which provides
+// is_header, col_span, row_span — handles merged cells and multi-row headers.
+// ---------------------------------------------------------------------------
+
+/// Resolved table sourced from DocumentStructure GridCells.
+struct ResolvedTable {
+    headers: Vec<String>,
+    /// Each inner Vec is one data row; columns are expanded for col_span.
+    data_rows: Vec<Vec<String>>,
+    page_number: usize,
+    table_heading: Option<String>,
+}
+
+fn resolve_table_from_grid(grid: &TableGrid, page_number: usize) -> ResolvedTable {
+    let cols = grid.cols as usize;
+
+    // --- Build a dense cols-wide grid expanding spans ---
+    // dense[row][col] = cell content (empty string if not filled)
+    let total_rows = grid.rows as usize;
+    let mut dense: Vec<Vec<String>> = vec![vec![String::new(); cols]; total_rows];
+    let mut header_rows: Vec<bool> = vec![false; total_rows];
+
+    for cell in &grid.cells {
+        let r = cell.row as usize;
+        let c = cell.col as usize;
+        let rs = (cell.row_span as usize).max(1);
+        let cs = (cell.col_span as usize).max(1);
+        let content = normalize_cell(&cell.content);
+
+        if cell.is_header {
+            for dr in 0..rs {
+                if r + dr < total_rows {
+                    header_rows[r + dr] = true;
+                }
+            }
+        }
+
+        // Fill every spanned position with the same content so column alignment
+        // is always correct regardless of spans.
+        for dr in 0..rs {
+            for dc in 0..cs {
+                let tr = r + dr;
+                let tc = c + dc;
+                if tr < total_rows && tc < cols {
+                    // Only write if target cell is still empty (avoid overwriting
+                    // when two spans overlap — shouldn't happen in valid tables).
+                    if dense[tr][tc].is_empty() {
+                        dense[tr][tc] = content.clone();
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Separate header rows from data rows ---
+    // If no cell has is_header, fall back: pick the first row with ≥50% fill.
+    let has_any_header = header_rows.iter().any(|&h| h);
+    if !has_any_header && total_rows > 0 {
+        // Fallback: first well-populated row becomes the header
+        for (idx, row) in dense.iter().enumerate() {
+            let non_empty = row.iter().filter(|c| !c.is_empty()).count();
+            if cols > 0 && non_empty as f64 / cols as f64 >= 0.5 {
+                header_rows[idx] = true;
+                break;
+            }
+        }
+    }
+
+    // Merge all header rows into a single header vector. When there are
+    // multi-level headers (e.g. row 0 = category spanning columns, row 1 =
+    // individual column names), concatenate non-empty values per column.
+    let mut merged_headers: Vec<String> = vec![String::new(); cols];
+    let mut table_heading: Option<String> = None;
+
+    for (row_idx, is_hdr) in header_rows.iter().enumerate() {
+        if !*is_hdr {
+            continue;
+        }
+        let row = &dense[row_idx];
+        // Detect caption rows: only 1 distinct non-empty value repeated across
+        // most columns (from a single cell with col_span == cols).
+        let distinct: std::collections::HashSet<&str> = row
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if distinct.len() == 1 && table_heading.is_none() {
+            table_heading = distinct.into_iter().next().map(String::from);
+            continue; // don't merge caption into column headers
+        }
+        for (col_idx, value) in row.iter().enumerate() {
+            if value.is_empty() {
+                continue;
+            }
+            if merged_headers[col_idx].is_empty() {
+                merged_headers[col_idx] = value.clone();
+            } else if merged_headers[col_idx] != *value {
+                // Multi-level: "Temperature" + "Min" → "Temperature — Min"
+                merged_headers[col_idx] =
+                    format!("{} — {}", merged_headers[col_idx], value);
+            }
+        }
+    }
+
+    // Fill any still-empty header slots with "Column N"
+    for (idx, h) in merged_headers.iter_mut().enumerate() {
+        if h.is_empty() {
+            *h = format!("Column {}", idx + 1);
+        }
+    }
+
+    // Collect data rows (non-header, non-empty, non-separator)
+    let data_rows: Vec<Vec<String>> = dense
+        .into_iter()
+        .enumerate()
+        .filter(|(idx, _)| !header_rows[*idx])
+        .map(|(_, row)| row)
+        .filter(|row| !is_non_data_row(row))
+        .collect();
+
+    ResolvedTable {
+        headers: merged_headers,
+        data_rows,
+        page_number,
+        table_heading,
+    }
+}
+
+fn build_table_artifacts_from_grids(
+    doc: &DocumentStructure,
+    fallback_tables: &[Table],
+    max_characters: usize,
+) -> Vec<TableArtifact> {
+    let mut artifacts = Vec::new();
+
+    for (table_index, node) in doc.nodes.iter().enumerate().filter_map(|(i, n)| {
+        if let NodeContent::Table { .. } = &n.content {
+            Some((i, n))
+        } else {
+            None
+        }
+    }) {
+        let NodeContent::Table { grid } = &node.content else {
+            continue;
+        };
+
+        let page = node.page.unwrap_or(0) as usize;
+        let resolved = resolve_table_from_grid(grid, page);
+
+        // Build row chunks using the resolved headers + data rows
+        let row_chunks = build_grid_row_chunks(
+            &resolved,
+            max_characters,
+        );
+
+        // Build the KV markdown (same output format as before)
+        let kv_markdown = build_grid_kv_markdown(&resolved, &row_chunks, artifacts.len());
+
+        // Try to find matching original markdown from Table.cells for stripping
+        let original_markdown = fallback_tables
+            .iter()
+            .find(|t| t.page_number == page)
+            .map(|t| t.markdown.clone())
+            .unwrap_or_default();
+
+        let row_count = resolved.data_rows.len();
+        let column_count = resolved.headers.len();
+
+        artifacts.push(TableArtifact {
+            table_index: artifacts.len(),
+            page_number: page,
+            headers: resolved.headers,
+            cells: vec![], // not needed when using grid path
+            original_markdown,
+            kv_markdown,
+            row_chunks,
+            row_count,
+            column_count,
+        });
+    }
+
+    artifacts
+}
+
+fn build_grid_row_chunks(resolved: &ResolvedTable, max_characters: usize) -> Vec<TableRowChunk> {
+    let headers = &resolved.headers;
+    let table_heading = resolved.table_heading.as_deref();
+
+    let mut sections = Vec::new();
+    let mut buffer = String::new();
+    let mut chunk_start_row = 1usize;
+    let mut chunk_end_row = 0usize;
+
+    for (idx, row) in resolved.data_rows.iter().enumerate() {
+        let row_number = idx + 1;
+        let row_blocks = render_grid_row_blocks(table_heading, headers, row, row_number, max_characters);
+
+        for row_block in row_blocks {
+            let candidate = if buffer.is_empty() {
+                row_block.clone()
+            } else {
+                format!("{buffer}\n\n{row_block}")
+            };
+
+            if !buffer.is_empty() && candidate.chars().count() > max_characters {
+                sections.push(wrap_table_row_section(table_heading, headers, chunk_start_row, chunk_end_row, &buffer));
+                buffer = row_block;
+                chunk_start_row = row_number;
+                chunk_end_row = row_number;
+            } else {
+                buffer = candidate;
+                chunk_end_row = row_number;
+            }
+        }
+    }
+
+    if !buffer.is_empty() {
+        sections.push(wrap_table_row_section(table_heading, headers, chunk_start_row, chunk_end_row, &buffer));
+    }
+
+    sections
+}
+
+fn render_grid_row_blocks(
+    table_heading: Option<&str>,
+    headers: &[String],
+    row: &[String],
+    row_number: usize,
+    max_characters: usize,
+) -> Vec<String> {
+    // Reuse the same render logic — it already handles per-cell KV formatting
+    render_row_blocks(table_heading, headers, row, row_number, max_characters)
+}
+
+fn build_grid_kv_markdown(
+    resolved: &ResolvedTable,
+    row_chunks: &[TableRowChunk],
+    table_index: usize,
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("## Table {} (Page {})\n\n", table_index + 1, resolved.page_number));
+
+    if let Some(heading) = resolved.table_heading.as_deref() {
+        out.push_str(&format!("### {}\n\n", heading));
+    }
+
+    if !resolved.headers.is_empty() {
+        out.push_str("### Columns\n");
+        for header in &resolved.headers {
+            out.push_str(&format!("- {}\n", header));
+        }
+        out.push('\n');
+    }
+
+    if row_chunks.is_empty() {
+        out.push_str("### Rows\n\nNo data rows extracted.\n");
+    } else {
+        for chunk in row_chunks {
+            out.push_str(&chunk.text);
+            out.push_str("\n\n");
+        }
+    }
+
+    out.trim().to_string()
+}
+
+// ---------------------------------------------------------------------------
+// End of GridCell-based table extraction
+// ---------------------------------------------------------------------------
+
+// Legacy Table.cells-based extraction (fallback when DocumentStructure is unavailable)
+
+#[derive(Clone)]
+struct _LegacyTableRowChunk {
     start_row: usize,
     end_row: usize,
     text: String,
