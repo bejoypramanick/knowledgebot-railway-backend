@@ -139,7 +139,14 @@ async def search_knowledge_base(
     - Example: 'population of France and Germany' → 'population France | population Germany'
     - Example: 'weather NYC | weather Tokyo' → combined in one call
 
-    The search returns relevant documents ranked by relevance. Use the results to answer the user's question.
+    GATHER ALL CONTEXTUAL ANSWERS:
+    - One question can have multiple valid answers from different sources/contexts
+    - Example: 'average precipitation in August' → gather data from ALL available cities/countries
+    - Example: 'GDP of Asian countries' → return data from multiple Asian countries
+    - Example: 'best restaurants in NYC' → gather from all available sources
+    - DO NOT limit to just one result; aggregate ALL relevant information found
+
+    The search returns relevant documents ranked by relevance. Use the results to answer the user's question comprehensively.
     """
     # Tool call limit removed
     ctx.deps.search_tool_calls += 1
