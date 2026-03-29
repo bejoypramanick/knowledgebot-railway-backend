@@ -123,20 +123,23 @@ async def search_knowledge_base(
     ctx: RunContext[ChatSessionDeps],
     query: Annotated[
         str,
-        "The user's normalized information request or greeting text. For a non-greeting message, one search call is usually enough, but additional calls are allowed when they search for distinct new information needed to answer a genuinely multi-part question.",
+        "The search query. IMPORTANT: For complex/multi-part questions, SPLIT the query into multiple search terms joined by ' | '. Example: 'weather in NYC | population of Tokyo | GDP of USA'. Try to find all answers in ONE tool call by combining multiple search concepts with ' | ' separator.",
     ],
     greeting_flag: Annotated[
         Optional[bool],
-        "Set to true only when the latest user message is a pure greeting with no information request. Set to false for all other messages. For non-greeting messages, avoid repeating the same search again for the same user message unless the query meaning materially changes.",
+        "Set to true only when the latest user message is a pure greeting with no information request. Set to false for all other messages.",
     ] = None,
 ) -> str:
     """
     Advanced Knowledge Base Search with Hybrid Search, Reranking, Compression, and Caching.
 
-    For non-greeting turns, one call is the default.
-    Multiple calls are acceptable only when each call has a distinct purpose and retrieves
-    new information needed to answer a complex or multi-part question.
-    Repeating the same search for the same user message is unnecessary.
+    STRATEGY: Always try to get all information in ONE search call.
+    - For simple questions: use the query directly
+    - For complex/multi-part questions: split into multiple search terms joined by ' | '
+    - Example: 'population of France and Germany' → 'population France | population Germany'
+    - Example: 'weather NYC | weather Tokyo' → combined in one call
+
+    The search returns relevant documents ranked by relevance. Use the results to answer the user's question.
     """
     # Tool call limit removed
     ctx.deps.search_tool_calls += 1
