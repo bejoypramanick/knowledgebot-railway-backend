@@ -134,7 +134,7 @@ async def search_knowledge_base(
     Advanced Knowledge Base Search with Hybrid Search, Reranking, Compression, and Caching.
 
     BE GREEDY - FETCH ALL POSSIBLE INFORMATION:
-    - This search returns UP TO 200 chunks to ensure comprehensive coverage
+    - No limit on chunks returned - fetches ALL matching documents
     - One question often has MULTIPLE contextual answers (different cities, countries, sources)
     - Example: 'average precipitation in August' → gather data from ALL available cities/countries
     - Example: 'GDP of Asian countries' → return data from multiple Asian countries
@@ -145,7 +145,7 @@ async def search_knowledge_base(
     - For complex/multi-part questions: split into multiple search terms joined by ' | '
     - Example: 'population of France and Germany' → 'population France | population Germany'
 
-    The search returns relevant documents ranked by relevance. Use ALL results to answer the user's question comprehensively.
+    The search returns ALL relevant documents ranked by relevance. Use ALL results to answer the user's question comprehensively.
     """
     # Tool call limit removed
     ctx.deps.search_tool_calls += 1
@@ -197,7 +197,6 @@ async def search_knowledge_base(
                           AND w.processing_status = 'deleted'
                     )
                     ORDER BY embedding <=> cast(:vector as halfvec)
-                    LIMIT 200
                 ),
                 fts_matches AS (
                     SELECT id, ts_rank_cd(to_tsvector('english', content), websearch_to_tsquery('english', :fts_query)) as fts_score
@@ -215,7 +214,6 @@ async def search_knowledge_base(
                             AND document_chunks.document_type = 'website'
                             AND w.processing_status = 'deleted'
                       )
-                    LIMIT 200
                 ),
                 candidate_rows AS (
                     SELECT
@@ -254,7 +252,6 @@ async def search_knowledge_base(
                     ) as source_name
                 FROM candidate_rows
                 ORDER BY hybrid_score DESC
-                LIMIT 200
             """
 
             result = await db.execute(
