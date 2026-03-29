@@ -216,7 +216,12 @@ async def search_knowledge_base(
                     sim_score,
                     fts_score,
                     structure_boost,
-                    (sim_score + (fts_score * 1.8) + structure_boost) as hybrid_score
+                    (sim_score + (fts_score * 1.8) + structure_boost) as hybrid_score,
+                    COALESCE(
+                        (SELECT f.display_name FROM file_uploads f WHERE f.id = candidate_rows.document_id AND candidate_rows.document_type = 'file'),
+                        (SELECT w.url FROM scraped_websites w WHERE w.id = candidate_rows.document_id AND candidate_rows.document_type = 'website'),
+                        ''
+                    ) as source_name
                 FROM candidate_rows
                 ORDER BY hybrid_score DESC
                 LIMIT 80
@@ -274,8 +279,11 @@ async def search_knowledge_base(
                     citation_number = len(citation_urls)
                     citation_index_by_source[url] = citation_number
 
+                source_name = chunk.get("source_name") or ""
+                source_line = f"Document: {source_name}\n" if source_name else ""
                 chunk_str = (
                     f"Source {citation_number} (type={doc_type} id={doc_id} score={score} url={url})\n"
+                    f"{source_line}"
                     f"Cite this source as: [{citation_number}]\n"
                     f"{content}\n"
                 )
