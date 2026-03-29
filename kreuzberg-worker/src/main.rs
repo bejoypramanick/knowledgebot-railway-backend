@@ -522,7 +522,7 @@ fn build_extraction_config() -> ExtractionConfig {
     let layout = if enable_layout_detection {
         Some(LayoutDetectionConfig {
             preset: env::var("KREUZBERG_LAYOUT_DETECTION_PRESET")
-                .unwrap_or_else(|_| "fast".to_string()),
+                .unwrap_or_else(|_| "accurate".to_string()),
             table_model: Some(
                 env::var("KREUZBERG_LAYOUT_DETECTION_TABLE_MODEL")
                     .unwrap_or_else(|_| "slanet".to_string()),
