@@ -574,8 +574,10 @@ fn build_extraction_config() -> ExtractionConfig {
         Some(LayoutDetectionConfig {
             preset: env::var("KREUZBERG_LAYOUT_DETECTION_PRESET")
                 .unwrap_or_else(|_| "fast".to_string()),
-            table_model: env::var("KREUZBERG_LAYOUT_DETECTION_TABLE_MODEL")
-                .unwrap_or_else(|_| "slanet".to_string()),
+            table_model: Some(
+                env::var("KREUZBERG_LAYOUT_DETECTION_TABLE_MODEL")
+                    .unwrap_or_else(|_| "slanet".to_string()),
+            ),
             confidence_threshold: env::var("KREUZBERG_LAYOUT_DETECTION_CONFIDENCE_THRESHOLD")
                 .ok()
                 .and_then(|value| value.parse::<f32>().ok()),
