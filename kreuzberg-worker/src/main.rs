@@ -333,17 +333,6 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "running kreuzberg extract_bytes"
     );
     let extraction_config = build_extraction_config();
-    let chunk_size = extraction_config
-        .chunking
-        .as_ref()
-        .map(|cfg| cfg.max_characters)
-        .unwrap_or(1200);
-    let chunk_overlap = extraction_config
-        .chunking
-        .as_ref()
-        .map(|cfg| cfg.overlap)
-        .unwrap_or(150);
-
     let result = extract_bytes(file_bytes, &mime_type, &extraction_config)
         .await
         .context("kreuzberg extract_bytes failed")?;
@@ -357,8 +346,10 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "kreuzberg extraction completed"
     );
 
-    let enriched_tables = build_table_artifacts(&result.tables, chunk_size);
-    let markdown = strip_table_markdown_sections(&result.content, &enriched_tables);
+    // Let Kreuzberg own table-aware chunking for now. We keep the custom table
+    // rewriting helpers below in place, but do not run them so native table
+    // structure and headings remain available to the chunker.
+    let markdown = result.content.clone();
     info!(
         job_id = %job.job_id,
         document_id = %job.document_id,
@@ -367,21 +358,9 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     );
     let page_count = result.pages.as_ref().map(|pages| pages.len()).unwrap_or(0);
 
-    let mut chunking_config = extraction_config.clone();
-    chunking_config.chunking = Some(ChunkingConfig {
-        max_characters: chunk_size,
-        overlap: chunk_overlap,
-        chunker_type: ChunkerType::Markdown,
-        ..Default::default()
-    });
-    chunking_config.output_format = ContentOutputFormat::Markdown;
-
-    let chunked_markdown = extract_bytes(markdown.as_bytes(), "text/markdown", &chunking_config)
-        .await
-        .context("kreuzberg markdown chunking failed")?;
-
-    let mut chunks = chunked_markdown
+    let chunks = result
         .chunks
+        .clone()
         .map(|result_chunks| {
             result_chunks
                 .into_iter()
@@ -396,7 +375,7 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
                         "token_count": chunk.metadata.token_count,
                         "first_page": chunk.metadata.first_page,
                         "last_page": chunk.metadata.last_page,
-                        "strategy": "kreuzberg_markdown_table_aware",
+                        "strategy": "kreuzberg_native",
                     }),
                 })
                 .collect::<Vec<_>>()
@@ -408,55 +387,24 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
                 metadata: json!({
                     "chunk_index": 0,
                     "char_count": markdown.chars().count(),
-                    "strategy": "kreuzberg_markdown_table_aware",
+                    "strategy": "kreuzberg_native_fallback",
                 }),
             }]
         });
 
-    // Use dedicated row-group table chunks for retrieval instead of also rewriting tables into
-    // the main markdown stream. This keeps RAG recall strong while avoiding duplicate table hits.
-    let base_chunk_index = chunks.len();
-    let mut next_chunk_index = base_chunk_index;
-    for table in &enriched_tables {
-        for row_chunk in &table.row_chunks {
-            chunks.push(ExtractedChunk {
-                text: row_chunk.text.clone(),
-                metadata: json!({
-                    "chunk_index": next_chunk_index,
-                    "strategy": "kreuzberg_table_rows",
-                    "table_index": table.table_index,
-                    "table_page_number": table.page_number,
-                    "row_start": row_chunk.start_row,
-                    "row_end": row_chunk.end_row,
-                    "headers": table.headers,
-                }),
-            });
-            next_chunk_index += 1;
-        }
-    }
-
     let tables = serde_json::Value::Array(
-        enriched_tables
+        result
+            .tables
             .iter()
-            .map(|table| {
+            .enumerate()
+            .map(|(table_index, table)| {
                 json!({
-                    "table_index": table.table_index,
+                    "table_index": table_index,
                     "page_number": table.page_number,
-                    "markdown": table.original_markdown,
-                    "kv_markdown": table.kv_markdown,
-                    "row_chunks": table
-                        .row_chunks
-                        .iter()
-                        .map(|chunk| json!({
-                            "row_start": chunk.start_row,
-                            "row_end": chunk.end_row,
-                            "text": chunk.text,
-                        }))
-                        .collect::<Vec<_>>(),
-                    "headers": table.headers,
+                    "markdown": table.markdown,
                     "cells": table.cells,
-                    "row_count": table.row_count,
-                    "column_count": table.column_count,
+                    "row_count": table.cells.len().saturating_sub(1),
+                    "column_count": table.cells.first().map(|row| row.len()).unwrap_or(0),
                 })
             })
             .collect::<Vec<_>>(),
@@ -473,8 +421,8 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "detected_languages": result.detected_languages,
         "document_structure_included": result.document.is_some(),
         "table_kv_enabled": false,
-        "table_aware_chunking_enabled": false,
-        "table_row_chunks_enabled": true,
+        "table_aware_chunking_enabled": true,
+        "table_row_chunks_enabled": false,
     });
 
     Ok(ExtractionArtifacts { markdown, chunks, tables, metadata })
