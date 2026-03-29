@@ -138,14 +138,14 @@ async def search_knowledge_base(
     new information needed to answer a complex or multi-part question.
     Repeating the same search for the same user message is unnecessary.
     """
-    if ctx.deps.search_tool_calls >= 1:
+    # Tool call limit temporarily disabled for testing (was: >= 1)
+    if ctx.deps.search_tool_calls >= 10:
         logger.warning(
-            "🛑 [TOOL_CALL_LIMIT] search_knowledge_base already called once in this request; skipping repeated retrieval"
+            "🛑 [TOOL_CALL_LIMIT] search_knowledge_base called 10+ times in this request; skipping"
         )
         return (
-            "Search already completed for this user message. "
-            "Use the previous search result to answer now. "
-            "Do not call search_knowledge_base again."
+            "Search limit reached for this user message. "
+            "Use the previous search result to answer now."
         )
 
     ctx.deps.search_tool_calls += 1
