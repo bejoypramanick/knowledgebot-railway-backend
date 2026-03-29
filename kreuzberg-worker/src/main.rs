@@ -334,11 +334,6 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "running kreuzberg extract_bytes"
     );
     let extraction_config = build_extraction_config();
-    let chunk_size = extraction_config
-        .chunking
-        .as_ref()
-        .map(|cfg| cfg.max_characters)
-        .unwrap_or(1200);
     let result = extract_bytes(file_bytes, &mime_type, &extraction_config)
         .await
         .context("kreuzberg extract_bytes failed")?;
@@ -361,47 +356,39 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
     );
     let page_count = result.pages.as_ref().map(|pages| pages.len()).unwrap_or(0);
 
-    let element_chunks = result
-        .elements
-        .as_ref()
-        .and_then(|elements| serde_json::to_value(elements).ok())
-        .and_then(|value| build_element_based_chunks(&value, chunk_size));
-
-    let chunks = element_chunks.unwrap_or_else(|| {
-        result
-            .chunks
-            .clone()
-            .map(|result_chunks| {
-                result_chunks
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, chunk)| ExtractedChunk {
-                        text: chunk.content.clone(),
-                        metadata: json!({
-                            "chunk_index": idx,
-                            "byte_start": chunk.metadata.byte_start,
-                            "byte_end": chunk.metadata.byte_end,
-                            "char_count": chunk.content.chars().count(),
-                            "token_count": chunk.metadata.token_count,
-                            "first_page": chunk.metadata.first_page,
-                            "last_page": chunk.metadata.last_page,
-                            "strategy": "kreuzberg_native_fallback",
-                        }),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .filter(|items| !items.is_empty())
-            .unwrap_or_else(|| {
-                vec![ExtractedChunk {
-                    text: markdown.clone(),
+    let chunks = result
+        .chunks
+        .clone()
+        .map(|result_chunks| {
+            result_chunks
+                .into_iter()
+                .enumerate()
+                .map(|(idx, chunk)| ExtractedChunk {
+                    text: chunk.content.clone(),
                     metadata: json!({
-                        "chunk_index": 0,
-                        "char_count": markdown.chars().count(),
-                        "strategy": "kreuzberg_native_fallback",
+                        "chunk_index": idx,
+                        "byte_start": chunk.metadata.byte_start,
+                        "byte_end": chunk.metadata.byte_end,
+                        "char_count": chunk.content.chars().count(),
+                        "token_count": chunk.metadata.token_count,
+                        "first_page": chunk.metadata.first_page,
+                        "last_page": chunk.metadata.last_page,
+                        "strategy": "kreuzberg_native_markdown",
                     }),
-                }]
-            })
-    });
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty())
+        .unwrap_or_else(|| {
+            vec![ExtractedChunk {
+                text: markdown.clone(),
+                metadata: json!({
+                    "chunk_index": 0,
+                    "char_count": markdown.chars().count(),
+                    "strategy": "kreuzberg_native_markdown",
+                }),
+            }]
+        });
 
     let tables = serde_json::Value::Array(
         result
@@ -431,7 +418,6 @@ async fn extract_and_chunk(job: &ExtractionJob, file_bytes: &[u8]) -> Result<Ext
         "page_count": page_count,
         "detected_languages": result.detected_languages,
         "document_structure_included": result.document.is_some(),
-        "element_based_output_enabled": result.elements.is_some(),
         "table_kv_enabled": false,
         "table_aware_chunking_enabled": true,
         "table_row_chunks_enabled": false,
@@ -599,7 +585,7 @@ fn build_extraction_config() -> ExtractionConfig {
             .ok()
             .and_then(|value| value.parse::<usize>().ok()),
         ocr,
-        output_format: ContentOutputFormat::ElementBased,
+        output_format: ContentOutputFormat::Markdown,
         pages: Some(PageConfig {
             extract_pages,
             insert_page_markers,
