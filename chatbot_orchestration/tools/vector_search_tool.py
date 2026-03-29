@@ -278,9 +278,10 @@ async def search_knowledge_base(
             flashrank_applied = False
             if settings.enable_reranking:
                 top_chunks = _rerank_results(flashrank_query, chunks)
-                flashrank_applied = top_chunks != chunks[:10]
+                flashrank_applied = top_chunks != chunks[:40]
             else:
-                top_chunks = chunks[:10]
+                # Return up to 40 chunks to gather ALL contextual answers (not just top 10)
+                top_chunks = chunks[:40]
 
             # --- STEP 3: Format & Compression ---
             # Build a single citation-friendly grounding stream and preserve the
