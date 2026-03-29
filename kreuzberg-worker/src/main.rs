@@ -876,8 +876,10 @@ fn build_table_artifacts(tables: &[Table], max_characters: usize) -> Vec<TableAr
             let headers = derive_headers(table);
             let row_chunks = build_table_row_chunks(table, &headers, max_characters);
             let kv_markdown = build_table_kv_markdown(table, &headers, &row_chunks, table_index);
-            let row_count = if table.cells.len() > 1 {
-                table.cells[1..]
+            let header_idx = find_header_row_index(&table.cells);
+            let data_start = header_idx + 1;
+            let row_count = if table.cells.len() > data_start {
+                table.cells[data_start..]
                     .iter()
                     .filter(|row| !is_non_data_row(row))
                     .count()
@@ -940,9 +942,38 @@ fn normalize_spacing_after_table_removal(content: &str) -> String {
     normalized.trim().to_string()
 }
 
+/// Return the index of the first row that looks like a real header (most cells
+/// non-empty) rather than a caption/title row (one cell filled, rest blank).
+/// Falls back to 0 if no better candidate is found.
+fn find_header_row_index(cells: &[Vec<String>]) -> usize {
+    if cells.is_empty() {
+        return 0;
+    }
+    let total_columns = cells.iter().map(|r| r.len()).max().unwrap_or(0);
+    if total_columns <= 1 {
+        return 0;
+    }
+
+    for (idx, row) in cells.iter().enumerate() {
+        // Skip separator / empty rows
+        if is_non_data_row(row) {
+            continue;
+        }
+        let non_empty_count = row.iter().filter(|c| !normalize_cell(c).is_empty()).count();
+        let fill_ratio = non_empty_count as f64 / total_columns.max(1) as f64;
+        // A real header row has values in most columns (≥50%).
+        // Caption rows typically have 1 cell filled out of many.
+        if fill_ratio >= 0.5 {
+            return idx;
+        }
+    }
+    0
+}
+
 fn derive_headers(table: &Table) -> Vec<String> {
-    if let Some(first_row) = table.cells.first() {
-        first_row
+    let header_idx = find_header_row_index(&table.cells);
+    if let Some(header_row) = table.cells.get(header_idx) {
+        header_row
             .iter()
             .enumerate()
             .map(|(idx, header)| {
@@ -1016,9 +1047,11 @@ fn is_non_data_row(row: &[String]) -> bool {
 
 fn build_table_row_chunks(table: &Table, headers: &[String], max_characters: usize) -> Vec<TableRowChunk> {
     let table_heading = derive_table_heading(&table.markdown);
-    // Filter out separator / empty rows so row numbers match actual data rows.
-    let data_rows: Vec<&Vec<String>> = if table.cells.len() > 1 {
-        table.cells[1..]
+    // Data rows start AFTER the detected header row, skipping caption/separator rows.
+    let header_idx = find_header_row_index(&table.cells);
+    let data_start = header_idx + 1;
+    let data_rows: Vec<&Vec<String>> = if table.cells.len() > data_start {
+        table.cells[data_start..]
             .iter()
             .filter(|row| !is_non_data_row(row))
             .collect()
