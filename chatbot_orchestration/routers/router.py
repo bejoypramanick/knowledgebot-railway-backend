@@ -6,6 +6,7 @@ All chatbot orchestration endpoints in one file for easier debugging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
+import json
 import logging
 from shared.otel_logger import get_otel_logger
 
@@ -32,8 +33,7 @@ agent_service = PydanticAIGatewayService()
 async def chat_with_agent_stream(request: Request):
     """Chat with AI agent with streaming response using Pydantic AI.
 
-    Session must be pre-created via /validate-chat on page load.
-    Focused purely on getting the chat response — no session setup.
+    Creates a new session lazily on the first message if one is not supplied.
     """
     try:
         body = await request.json()
@@ -46,24 +46,29 @@ async def chat_with_agent_stream(request: Request):
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
 
+        session_created = False
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required. Call /validate-chat on page load first.")
+            from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
+            session_dao = SessionPersistenceDAO()
+            session_id = await session_dao.create_session()
+            session_created = True
 
-        # Validate session exists in Redis or PG — no fallback creation
-        from shared.redis_chat_store import get_chat_store
-        store = get_chat_store()
-        redis_session = await store.get_session(session_id)
+        if not session_created:
+            # Validate session exists in Redis or PG
+            from shared.redis_chat_store import get_chat_store
+            store = get_chat_store()
+            redis_session = await store.get_session(session_id)
 
-        if not redis_session:
-            # Check PG as last resort (Redis may have expired after 24h)
-            from chatbot_orchestration.dao.chat_dao import ChatDAO
-            chat_dao = ChatDAO()
-            pg_exists = await chat_dao.ensure_session_exists(session_id)
-            if not pg_exists:
-                raise HTTPException(status_code=404, detail="Session not found. Please refresh the page to start a new session.")
-            # Re-create Redis session from PG (session was valid but Redis TTL expired)
-            await store.get_or_create_session(session_uuid=session_id)
-            logger.info(f"♻️ Redis session re-created from PG for session={session_id[:16]}")
+            if not redis_session:
+                # Check PG as last resort (Redis may have expired after 24h)
+                from chatbot_orchestration.dao.chat_dao import ChatDAO
+                chat_dao = ChatDAO()
+                pg_exists = await chat_dao.ensure_session_exists(session_id)
+                if not pg_exists:
+                    raise HTTPException(status_code=404, detail="Session not found. Please start a new chat.")
+                # Re-create Redis session from PG (session was valid but Redis TTL expired)
+                await store.get_or_create_session(session_uuid=session_id)
+                logger.info(f"♻️ Redis session re-created from PG for session={session_id[:16]}")
 
         # Build response headers
         response_headers = {
@@ -77,6 +82,8 @@ async def chat_with_agent_stream(request: Request):
             set_workflow("chat_stream")
             set_session_id(session_id)
             logger.info(f"💬 [CHAT_STREAM_START] session={session_id[:16]} user_hash={hash_pii(user_email)} msg_chars={len(message)}")
+            if session_created:
+                yield f"data: {json.dumps({'type': 'session_created', 'session_id': session_id})}\n\n"
             async for chunk in agent_service.stream_agent_response(message, session_id, user_email):
                 yield chunk
             logger.info(f"💬 [CHAT_STREAM_END] session={session_id[:16]}")
