@@ -5,8 +5,9 @@ use aws_sdk_s3::{config::Region, primitives::ByteStream, Client as S3Client};
 use chrono::Utc;
 use kreuzberg::{
     detect_mime_type_from_bytes, extract_bytes, validate_mime_type, ChunkingConfig, ChunkerType,
-    ExtractionConfig, ImageExtractionConfig, LanguageDetectionConfig, LayoutDetectionConfig,
-    OcrConfig, OutputFormat as ContentOutputFormat, PageConfig, PdfConfig, Table,
+    ExtractionConfig, HierarchyConfig, ImageExtractionConfig, LanguageDetectionConfig,
+    LayoutDetectionConfig, OcrConfig, OutputFormat as ContentOutputFormat, PageConfig, PdfConfig,
+    Table,
     TesseractConfig,
 };
 use redis::Commands;
@@ -546,6 +547,19 @@ fn build_extraction_config() -> ExtractionConfig {
         })
         .filter(|items| !items.is_empty());
 
+    let pdf_hierarchy = if parse_env_bool("KREUZBERG_PDF_HIERARCHY_ENABLED", true) {
+        Some(HierarchyConfig {
+            enabled: true,
+            k_clusters: parse_env_usize("KREUZBERG_PDF_HIERARCHY_K_CLUSTERS", 6),
+            include_bbox: parse_env_bool("KREUZBERG_PDF_HIERARCHY_INCLUDE_BBOX", true),
+            ocr_coverage_threshold: env::var("KREUZBERG_PDF_HIERARCHY_OCR_COVERAGE_THRESHOLD")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok()),
+        })
+    } else {
+        None
+    };
+
     let pdf_options = Some(PdfConfig {
         allow_single_column_tables: parse_env_bool("KREUZBERG_PDF_ALLOW_SINGLE_COLUMN_TABLES", false),
         extract_annotations: parse_env_bool("KREUZBERG_PDF_EXTRACT_ANNOTATIONS", false),
@@ -554,7 +568,7 @@ fn build_extraction_config() -> ExtractionConfig {
         top_margin_fraction: Some(parse_env_f32("KREUZBERG_PDF_TOP_MARGIN_FRACTION", 0.0)),
         bottom_margin_fraction: Some(parse_env_f32("KREUZBERG_PDF_BOTTOM_MARGIN_FRACTION", 0.0)),
         passwords: pdf_passwords,
-        hierarchy: None,
+        hierarchy: pdf_hierarchy,
     });
 
     ExtractionConfig {
