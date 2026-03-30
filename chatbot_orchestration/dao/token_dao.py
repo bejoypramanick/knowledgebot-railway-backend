@@ -2,6 +2,7 @@
 Token Data Access Object for Chatbot Orchestration
 Handles database operations for token usage tracking
 """
+
 from typing import List, Dict, Any, Optional
 
 from sqlalchemy import text
@@ -10,13 +11,16 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("token_dao", "chatbot-orchestration")
 
+
 class TokenDAO:
     """Data access object for token operations"""
-    
+
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def update_llm_usage(self, provider: str, total_tokens: int, default_limit: int = 20000):
+    async def update_llm_usage(
+        self, provider: str, total_tokens: int, default_limit: int = 20000
+    ):
         """
         Update LLM token usage for a provider using PG17+ MERGE with RETURNING.
 
@@ -29,7 +33,9 @@ class TokenDAO:
         - "Provider gpt-4: first use (INSERT)"
         - "Provider gpt-4: +150 tokens (UPDATE)"
         """
-        logger.info(f"🔍 update_llm_usage called - provider: {provider}, total_tokens: {total_tokens}")
+        logger.info(
+            f"🔍 update_llm_usage called - provider: {provider}, total_tokens: {total_tokens}"
+        )
         query = """
             MERGE INTO llm_providers AS target
             USING (VALUES (CAST(:provider AS VARCHAR), CAST(:total_tokens AS BIGINT), CAST(:default_limit AS BIGINT)))
@@ -42,7 +48,11 @@ class TokenDAO:
                 VALUES (source.provider_name, source.token_used, source.token_limit, true)
             RETURNING merge_action() AS action, target.provider_name, target.token_used
         """
-        params = {"provider": provider, "total_tokens": total_tokens, "default_limit": default_limit}
+        params = {
+            "provider": provider,
+            "total_tokens": total_tokens,
+            "default_limit": default_limit,
+        }
         try:
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
@@ -54,37 +64,65 @@ class TokenDAO:
                 if row:
                     action = row.action
                     logger.log_db_query(query, params, f"MERGE {action}")
-                    logger.info(f"✅ update_llm_usage completed - provider: {provider}, "
-                               f"action: {action}, tokens: {row.token_used}")
+                    logger.info(
+                        f"✅ update_llm_usage completed - provider: {provider}, "
+                        f"action: {action}, tokens: {row.token_used}"
+                    )
                 else:
                     logger.log_db_query(query, params, "MERGE")
-                    logger.info(f"✅ update_llm_usage completed - provider: {provider}, total_tokens: {total_tokens}")
+                    logger.info(
+                        f"✅ update_llm_usage completed - provider: {provider}, total_tokens: {total_tokens}"
+                    )
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def save_token_usage(self, session_id: str, message_id: str, provider: str, model: str,
-                               prompt_tokens: int, completion_tokens: int, total_tokens: int,
-                               api_call_type: str = None, request_metadata: dict = None) -> bool:
+    async def save_token_usage(
+        self,
+        session_id: str,
+        message_id: str,
+        provider: str,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        api_call_type: str = None,
+        request_metadata: dict = None,
+    ) -> bool:
         """Save token usage record and update llm_providers table"""
         import json
-        logger.info(f"🔍 save_token_usage called - session: {session_id}, total_tokens: {total_tokens}")
-        logger.info(f"[PARAM] request_metadata type: {type(request_metadata)}, value: {request_metadata}")
-        
+
+        logger.info(
+            f"🔍 save_token_usage called - session: {session_id}, total_tokens: {total_tokens}"
+        )
+        logger.info(
+            f"[PARAM] request_metadata type: {type(request_metadata)}, value: {request_metadata}"
+        )
+
         # PG18: id IS the UUIDv7 PK — verify session exists
-        session_query = "SELECT id FROM chat_sessions WHERE id = CAST(:session_id AS UUID)"
+        session_query = (
+            "SELECT id FROM chat_sessions WHERE id = CAST(:session_id AS UUID)"
+        )
         try:
             async with get_db_session() as session:
                 logger.log_db_operation(session_query, session_id)
-                session_record = (await session.execute(text(session_query), {"session_id": session_id})).fetchone()
-                logger.log_db_query(session_query, {"session_id": session_id}, session_record)
+                session_record = (
+                    await session.execute(
+                        text(session_query), {"session_id": session_id}
+                    )
+                ).fetchone()
+                logger.log_db_query(
+                    session_query, {"session_id": session_id}, session_record
+                )
 
                 uuid_session_id = str(session_record.id) if session_record else None
                 # PG18: session_id/message_id are UUIDs — use the passed message_id
                 # and ensure it's a string if not None
                 uuid_message_id = str(message_id) if message_id else None
 
-                logger.info(f"🔍 Updating llm_providers - provider: {provider}, total_tokens: {total_tokens}")
+                logger.info(
+                    f"🔍 Updating llm_providers - provider: {provider}, total_tokens: {total_tokens}"
+                )
                 # First, update the llm_providers table with total tokens
                 await self.update_llm_usage(provider, total_tokens)
 
@@ -94,18 +132,18 @@ class TokenDAO:
                 cache_read = 0
                 cache_write = 0
                 if request_metadata:
-                    cache_read = request_metadata.get('cache_read_tokens', 0)
-                    cache_write = request_metadata.get('cache_write_tokens', 0)
-                
+                    cache_read = request_metadata.get("cache_read_tokens", 0)
+                    cache_write = request_metadata.get("cache_write_tokens", 0)
+
                 # prompt_tokens includes cache_read
-                standard_input = max(0, prompt_tokens - cache_read)
+                standard_input = max(0, (prompt_tokens or 0) - (cache_read or 0))
                 cost_usd = (
-                    (standard_input * 0.10) + 
-                    (cache_read * 0.01) + 
-                    (completion_tokens * 0.40) + 
-                    (cache_write * 0.10)
+                    (standard_input * 0.10)
+                    + (cache_read * 0.01)
+                    + (completion_tokens * 0.40)
+                    + (cache_write * 0.10)
                 ) / 1_000_000.0
-                
+
                 # Store in cents. We use high precision (float) in Python, but DB int4 will truncate.
                 # In the future, we might want to store in millicents or use NUMERIC.
                 cost_cents = round(cost_usd * 100.0)
@@ -120,11 +158,15 @@ class TokenDAO:
                         :completion_tokens, :total_tokens, :cost_cents, :api_call_type, :request_metadata
                     )
                 """
-                
+
                 # Convert request_metadata dict to JSON string for PostgreSQL
-                metadata_json = json.dumps(request_metadata) if request_metadata else None
-                logger.info(f"[TRANSFORM] request_metadata converted to JSON: {metadata_json}")
-                
+                metadata_json = (
+                    json.dumps(request_metadata) if request_metadata else None
+                )
+                logger.info(
+                    f"[TRANSFORM] request_metadata converted to JSON: {metadata_json}"
+                )
+
                 params = {
                     "session_id": uuid_session_id,
                     "message_id": uuid_message_id,
@@ -135,14 +177,16 @@ class TokenDAO:
                     "total_tokens": total_tokens,
                     "cost_cents": cost_cents,
                     "api_call_type": api_call_type,
-                    "request_metadata": metadata_json
+                    "request_metadata": metadata_json,
                 }
 
                 logger.log_db_operation(query, params)
                 await session.execute(text(query), params)
                 await session.commit()
                 logger.log_db_query(query, params, "INSERT 1")
-                logger.info(f"✅ save_token_usage completed - session: {session_id}, total_tokens: {total_tokens}")
+                logger.info(
+                    f"✅ save_token_usage completed - session: {session_id}, total_tokens: {total_tokens}"
+                )
                 return True
 
         except Exception as e:
@@ -152,12 +196,20 @@ class TokenDAO:
     async def get_token_usage(self, session_id: str) -> List[Dict[str, Any]]:
         """Get token usage for a session"""
         # PG18: id IS the UUIDv7 PK — verify session exists
-        session_query = "SELECT id FROM chat_sessions WHERE id = CAST(:session_id AS UUID)"
+        session_query = (
+            "SELECT id FROM chat_sessions WHERE id = CAST(:session_id AS UUID)"
+        )
         try:
             async with get_db_session() as session:
                 logger.log_db_operation(session_query, session_id)
-                session_record = (await session.execute(text(session_query), {"session_id": session_id})).fetchone()
-                logger.log_db_query(session_query, {"session_id": session_id}, session_record)
+                session_record = (
+                    await session.execute(
+                        text(session_query), {"session_id": session_id}
+                    )
+                ).fetchone()
+                logger.log_db_query(
+                    session_query, {"session_id": session_id}, session_record
+                )
 
                 if not session_record:
                     return []
@@ -173,7 +225,9 @@ class TokenDAO:
                     ORDER BY id DESC
                 """
                 logger.log_db_operation(query, uuid_session_id)
-                result = (await session.execute(text(query), {"session_id": uuid_session_id})).fetchall()
+                result = (
+                    await session.execute(text(query), {"session_id": uuid_session_id})
+                ).fetchall()
                 logger.log_db_query(query, {"session_id": uuid_session_id}, result)
                 return [dict(row._mapping) for row in result]
         except Exception as e:
