@@ -179,7 +179,18 @@ class ComprehensiveDeletionService:
                     deletion_report["cleanup_summary"]["s3_raw_files_deleted"] = 1 if file_record['s3_key'] else 0
                     deletion_report["cleanup_summary"]["s3_processed_files_deleted"] = 1 if file_record['processed_content_s3_key'] else 0
 
-                    # Step 5: DATABASE TRANSACTION
+                    # Step 5: VECTOR CHUNK CLEANUP
+                    logger.info(f"🧹 [VECTOR_CLEANUP] Deleting vector chunks...")
+                    try:
+                        from shared.vector_dao import vector_dao
+                        chunks_deleted = await vector_dao.delete_chunks_for_document(file_id, "file")
+                        deletion_report["cleanup_summary"]["vector_chunks_deleted"] = chunks_deleted
+                        logger.info(f"   🧹 Deleted {chunks_deleted} vector chunks for file {file_id}")
+                    except Exception as vec_err:
+                        logger.warning(f"   ⚠️ Vector chunk cleanup failed: {vec_err}")
+                        deletion_report["warnings"].append(f"Vector cleanup failed: {vec_err}")
+
+                    # Step 6: DATABASE TRANSACTION
                     logger.info(f"💾 [DB_TRANSACTION] Updating database...")
                     if hard_delete:
                         # Hard delete: remove from database
@@ -324,7 +335,19 @@ class ComprehensiveDeletionService:
                                 redis_deleted += 1
                     deletion_report["cleanup_summary"]["redis_keys_deleted"] = redis_deleted
 
-                    # Step 4: DATABASE TRANSACTION (atomic - parent + children together)
+                    # Step 4: VECTOR CHUNK CLEANUP
+                    logger.info(f"🧹 [VECTOR_CLEANUP] Deleting vector chunks...")
+                    try:
+                        from shared.vector_dao import vector_dao
+                        all_page_ids = [str(p['id']) for p in all_pages]
+                        chunks_deleted = await vector_dao.delete_chunks_for_documents(all_page_ids, "website")
+                        deletion_report["cleanup_summary"]["vector_chunks_deleted"] = chunks_deleted
+                        logger.info(f"   🧹 Deleted {chunks_deleted} vector chunks for {len(all_page_ids)} website pages")
+                    except Exception as vec_err:
+                        logger.warning(f"   ⚠️ Vector chunk cleanup failed: {vec_err}")
+                        deletion_report["warnings"].append(f"Vector cleanup failed: {vec_err}")
+
+                    # Step 5: DATABASE TRANSACTION (atomic - parent + children together)
                     logger.info(f"💾 [DB_TRANSACTION] Updating database ({len(all_pages)} records)...")
 
                     if hard_delete:

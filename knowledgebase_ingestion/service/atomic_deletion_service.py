@@ -91,7 +91,15 @@ class AtomicDeletionService:
                         span.set_attribute("s3_processed_deleted", str(s3_processed_deleted))
                         logger.info(f"🧹 [S3_CLEANUP] Deleted retained processed markdown: {file_record['processed_content_s3_key']}")
 
-                    # Step 4: Mark as deleted in database
+                    # Step 4: Delete vector chunks from document_chunks table
+                    try:
+                        from shared.vector_dao import vector_dao
+                        chunks_deleted = await vector_dao.delete_chunks_for_document(file_id, "file")
+                        logger.info(f"🧹 [VECTOR_CLEANUP] Deleted {chunks_deleted} chunks from document_chunks for file {file_id}")
+                    except Exception as vec_err:
+                        logger.warning(f"⚠️ [VECTOR_CLEANUP] Failed to delete chunks for file {file_id}: {vec_err}")
+
+                    # Step 5: Mark as deleted in database
                     await session.execute(text("""
                         UPDATE file_uploads
                         SET processing_status = 'deleted',
@@ -182,7 +190,15 @@ class AtomicDeletionService:
                             span.set_attribute("s3_processed_deleted", str(s3_processed_deleted))
                             logger.info(f"🧹 [S3_CLEANUP] Deleted retained processed markdown: {website_record['processed_content_s3_key']}")
                         
-                        # Step 4: Mark as deleted in database
+                        # Step 4: Delete vector chunks from document_chunks table
+                        try:
+                            from shared.vector_dao import vector_dao
+                            chunks_deleted = await vector_dao.delete_chunks_for_document(website_id, "website")
+                            logger.info(f"🧹 [VECTOR_CLEANUP] Deleted {chunks_deleted} chunks from document_chunks for website {website_id}")
+                        except Exception as vec_err:
+                            logger.warning(f"⚠️ [VECTOR_CLEANUP] Failed to delete chunks for website {website_id}: {vec_err}")
+
+                        # Step 5: Mark as deleted in database
                         await conn.execute("""
                             UPDATE scraped_websites
                             SET processing_status = 'deleted',
