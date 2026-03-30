@@ -268,6 +268,42 @@ def _log_response_envelope(
         logger.warning(f"⚠️ Failed logging Gemini response envelope: {response_log_error}")
 
 
+def _log_raw_response_body(
+    response: GenerateContentResponse,
+    *,
+    cache_ref: str | None,
+    model_name: str | None,
+    prefix: str = "🧾 [GEMINI_RAW_RESPONSE]",
+) -> None:
+    """Log raw serialized Gemini response body for malformed tool-call cases."""
+    for serializer_name in ("model_dump_json", "json", "to_json_dict", "model_dump", "dict"):
+        serializer = getattr(response, serializer_name, None)
+        if serializer is None:
+            continue
+        try:
+            serialized = serializer()
+            logger.info(
+                f"{prefix} serializer={serializer_name} model={model_name} "
+                f"cache_ref={cache_ref} body={_safe_preview(serialized, 4000)}"
+            )
+            return
+        except TypeError:
+            try:
+                serialized = serializer(exclude_none=False)
+                logger.info(
+                    f"{prefix} serializer={serializer_name} model={model_name} "
+                    f"cache_ref={cache_ref} body={_safe_preview(serialized, 4000)}"
+                )
+                return
+            except Exception:
+                continue
+        except Exception:
+            continue
+    logger.warning(
+        f"⚠️ Failed to serialize raw Gemini response body model={model_name} cache_ref={cache_ref}"
+    )
+
+
 def _is_cache_error(error: Exception) -> bool:
     """Check if an error is related to a stale/expired/invalid cached_content reference."""
     msg = str(error).lower()
@@ -612,6 +648,23 @@ class CachedGoogleModel(GoogleModel):
                             f"cache_ref={model_settings.get('google_cached_content')} "
                             f"model={self.model_name} part_count={part_count} "
                             f"response={response}"
+                        )
+                        _log_raw_response_body(
+                            cast(GenerateContentResponse, response),
+                            cache_ref=model_settings.get("google_cached_content"),
+                            model_name=self.model_name,
+                        )
+
+                    if finish_reason_value == "MALFORMED_FUNCTION_CALL":
+                        logger.error(
+                            "🚨 [GEMINI_MALFORMED_FUNCTION_CALL] Gemini returned malformed function call "
+                            f"cache_ref={model_settings.get('google_cached_content')} "
+                            f"model={self.model_name} part_count={part_count}"
+                        )
+                        _log_raw_response_body(
+                            cast(GenerateContentResponse, response),
+                            cache_ref=model_settings.get("google_cached_content"),
+                            model_name=self.model_name,
                         )
 
                     if finish_reason_value == "ERROR" and not (parts or []):
