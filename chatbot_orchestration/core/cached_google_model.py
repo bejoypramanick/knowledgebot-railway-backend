@@ -85,6 +85,54 @@ async def _log_stream_chunks_on_error(
         yield chunk
 
 
+def _safe_preview(value: Any, limit: int = 500) -> str:
+    try:
+        text = str(value)
+    except Exception:
+        text = repr(value)
+    return text.replace("\n", " ")[:limit]
+
+
+def _log_outgoing_gemini_payload(
+    *,
+    contents: list[ContentUnionDict],
+    config: GenerateContentConfigDict,
+    model_settings: GoogleModelSettings,
+    model_name: str | None,
+) -> None:
+    try:
+        config_dict = cast(dict[str, Any], config)
+        logger.info(
+            "📤 [GEMINI_PAYLOAD] "
+            f"model={model_name} "
+            f"cache_ref={model_settings.get('google_cached_content')} "
+            f"contents_count={len(contents or [])} "
+            f"has_system_instruction={'yes' if config_dict.get('system_instruction') else 'no'} "
+            f"has_tools={'yes' if config_dict.get('tools') else 'no'} "
+            f"has_tool_config={'yes' if config_dict.get('tool_config') else 'no'} "
+            f"automatic_function_calling={_safe_preview(config_dict.get('automatic_function_calling'), 200)}"
+        )
+
+        for idx, content in enumerate(contents or []):
+            if not isinstance(content, dict):
+                logger.info(
+                    f"📤 [GEMINI_PAYLOAD_CONTENT] idx={idx} raw={_safe_preview(content, 800)}"
+                )
+                continue
+
+            role = content.get("role")
+            parts = content.get("parts") or []
+            logger.info(
+                f"📤 [GEMINI_PAYLOAD_CONTENT] idx={idx} role={role} parts_count={len(parts)}"
+            )
+            for part_idx, part in enumerate(parts[:8]):
+                logger.info(
+                    f"   payload_part {idx}.{part_idx}: {_safe_preview(part, 1000)}"
+                )
+    except Exception as payload_log_error:
+        logger.warning(f"⚠️ Failed logging outgoing Gemini payload: {payload_log_error}")
+
+
 def _is_cache_error(error: Exception) -> bool:
     """Check if an error is related to a stale/expired/invalid cached_content reference."""
     msg = str(error).lower()
@@ -313,6 +361,13 @@ class CachedGoogleModel(GoogleModel):
                         continue
                     sanitized_contents.append(content)
                 contents = sanitized_contents
+
+        _log_outgoing_gemini_payload(
+            contents=contents,
+            config=config,
+            model_settings=model_settings,
+            model_name=self.model_name,
+        )
 
         return contents, config
 
