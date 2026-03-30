@@ -219,9 +219,14 @@ class CachedGoogleModel(GoogleModel):
             messages, model_settings, model_request_parameters
         )
 
-        # Let Pydantic AI and the Google SDK handle automatic_function_calling natively.
-        # Overriding it here caused Gemini to reject ToolReturnParts during cache iterations.
+        # Disable Google SDK automatic function calling so PydanticAI remains the
+        # single controller of the tool loop. Leaving AFC enabled causes Gemini
+        # to consume tool calls remotely and return finish=error/empty responses
+        # when PydanticAI later sends ToolReturnParts.
         config_dict = cast(dict[str, Any], config)
+        config_dict["automatic_function_calling"] = (
+            AutomaticFunctionCallingConfig(disable=True)
+        )
         has_tool_return = any(
             any(
                 isinstance(part, (BuiltinToolReturnPart, ToolReturnPart))
