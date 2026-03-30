@@ -1,4 +1,5 @@
 """Configuration settings for Chatbot Orchestration service."""
+
 from typing import Optional
 
 from shared.base_settings import BaseServiceSettings

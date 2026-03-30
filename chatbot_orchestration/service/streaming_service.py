@@ -855,7 +855,23 @@ class StreamingService:
                 response_policy = 0.5  # Default balanced
                 try:
                     persona_config = await agent_manager._fetch_persona_config()
-                    response_policy = persona_config.get("response_policy", 0.5)
+                    raw_policy = persona_config.get("response_policy", 0.5)
+
+                    # Validate and clamp response_policy to 0-1 range
+                    if isinstance(raw_policy, (int, float)) and 0 <= raw_policy <= 1:
+                        response_policy = float(raw_policy)
+                    elif isinstance(raw_policy, (int, float)) and raw_policy > 1:
+                        # If stored as percentage (e.g., 60), convert to fraction (0.6)
+                        response_policy = float(raw_policy) / 100.0
+                        logger.warning(
+                            f"⚠️ response_policy was > 1 ({raw_policy}), converted to {response_policy}"
+                        )
+                    else:
+                        response_policy = 0.5
+                        logger.warning(
+                            f"⚠️ Invalid response_policy value: {raw_policy}, using default 0.5"
+                        )
+
                     logger.info(f"Temperature: {response_policy}")
                 except Exception as e:
                     logger.warning(
