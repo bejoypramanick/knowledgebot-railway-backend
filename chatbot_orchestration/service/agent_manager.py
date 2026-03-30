@@ -87,14 +87,6 @@ class AgentManager:
                                 f"⚠️ response_policy out of range: {policy_value}, using default 0.5"
                             )
 
-                        # Clamp to valid range and enforce minimum sensible temperature
-                        MIN_TEMPERATURE = 0.1  # Prevent extremely low temperatures
-                        response_policy = max(0.0, min(1.0, response_policy))
-                        if policy_value < MIN_TEMPERATURE:
-                            logger.warning(
-                                f"⚠️ response_policy was suspiciously low ({policy_value}), clamping to {MIN_TEMPERATURE}"
-                            )
-                            response_policy = MIN_TEMPERATURE
                         logger.info(
                             f"✅ Fetched response_policy from database: {response_policy}"
                         )
