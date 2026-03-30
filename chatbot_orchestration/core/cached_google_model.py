@@ -311,12 +311,12 @@ class CachedGoogleModel(GoogleModel):
             )
 
         try:
-            result = await super()._generate_content(
+            response = await super()._generate_content(
                 messages, stream, model_settings, model_request_parameters
             )
             # Success — reset the guard flag
             self._cache_rebuild_attempted = False
-            return result
+            return response
         except Exception as e:
             # ==================== DIAGNOSTIC LOGGING ====================
             import os as _os
