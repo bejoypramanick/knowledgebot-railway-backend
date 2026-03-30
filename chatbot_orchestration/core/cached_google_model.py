@@ -523,8 +523,14 @@ class CachedGoogleModel(GoogleModel):
                 # keys present at all (even as null) alongside cached_content.
                 config_dict = cast(dict[str, Any], config)
                 config_dict.pop("system_instruction", None)
+                
+                # THE WORKAROUND IS REMOVED.
+                # We now trust that our root-cause fixes in converters.py (types/descriptions)
+                # and cache_manager.py (removing tool_config) allow Gemini to cache tools.
+                logger.info("🛡️ Cache active - stripping system_instruction, tools, and tool_config from request")
                 config_dict.pop("tools", None)
                 config_dict.pop("tool_config", None)
+                
                 config = cast(GenerateContentConfigDict, config_dict)
 
                 # DEEP DEFENSE: Some pydantic-ai versions might尝试将system prompt

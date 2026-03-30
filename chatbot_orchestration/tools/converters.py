@@ -17,23 +17,22 @@ logger = get_otel_logger(__name__, "chatbot-orchestration")
 
 def convert_python_type_to_json_schema_type(python_type: Any) -> str:
     """Convert Python type annotation to JSON Schema type string."""
-    # Handle string annotations (forward references)
-    if isinstance(python_type, str):
-        python_type_lower = python_type.lower()
-        if 'int' in python_type_lower:
-            return 'integer'
-        elif 'float' in python_type_lower or 'number' in python_type_lower:
-            return 'number'
-        elif 'bool' in python_type_lower:
-            return 'boolean'
-        elif 'list' in python_type_lower or 'array' in python_type_lower:
-            return 'array'
-        elif 'dict' in python_type_lower or 'object' in python_type_lower:
-            return 'object'
-        return 'string'
-
-    # Get the origin type (for generics like List[str])
+    # Get the origin type (for generics like List[str] or Union[str, None])
     origin = get_origin(python_type)
+    args = get_args(python_type)
+
+    # Handle Optional[T] or Union[T, None]
+    if origin is Union:
+        # Filter out NoneType
+        non_none_args = [a for a in args if a is not type(None)]
+        if non_none_args:
+            # Recurse with the first non-None type
+            return convert_python_type_to_json_schema_type(non_none_args[0])
+
+    # Handle Annotated[T, ...]
+    if origin is Annotated:
+        if args:
+            return convert_python_type_to_json_schema_type(args[0])
 
     # Handle generic types
     if origin is list or origin is List:
@@ -54,6 +53,21 @@ def convert_python_type_to_json_schema_type(python_type: Any) -> str:
         return 'array'
     if python_type == dict:
         return 'object'
+
+    # Handle string annotations (forward references)
+    if isinstance(python_type, str):
+        python_type_lower = python_type.lower()
+        if 'int' in python_type_lower:
+            return 'integer'
+        elif 'float' in python_type_lower or 'number' in python_type_lower:
+            return 'number'
+        elif 'bool' in python_type_lower:
+            return 'boolean'
+        elif 'list' in python_type_lower or 'array' in python_type_lower:
+            return 'array'
+        elif 'dict' in python_type_lower or 'object' in python_type_lower:
+            return 'object'
+        return 'string'
 
     # Default to string for unknown types
     return 'string'
@@ -96,19 +110,26 @@ def extract_tool_metadata(func: Callable) -> dict:
         if param_name in ('self', 'cls', 'deps', 'ctx'):
             continue
 
-        param_type = type_hints.get(param_name, str)
+        param_type = type_hints.get(param_name, param.annotation)
+        if param_type == inspect.Parameter.empty:
+            param_type = str
+        
         param_description = f"Parameter {param_name}"
 
-        # Extract description from Annotated type
-        if get_origin(param_type) is type(Annotated):
+        # Unwrap Annotated and potentially Union/Optional
+        actual_type = param_type
+        if get_origin(param_type) is Annotated:
             args = get_args(param_type)
-            if len(args) >= 2:
-                # First arg is the actual type, second is the description
-                param_type = args[0]
-                param_description = args[1] if isinstance(args[1], str) else param_description
-
+            if args:
+                actual_type = args[0]
+                if len(args) >= 2 and isinstance(args[1], str):
+                    param_description = args[1]
+        
+        # If it was Optional[Annotated[...]], we need to handle that too
+        # But usually it's Annotated[Optional[...], ...]
+        
         # Convert type to JSON Schema type
-        json_type = convert_python_type_to_json_schema_type(param_type)
+        json_type = convert_python_type_to_json_schema_type(actual_type)
 
         properties[param_name] = {
             "type": json_type,

@@ -114,6 +114,7 @@ class GeminiCacheManager:
                 "🗃️ [CACHE_REDIS_LOAD] "
                 f"cache_name={decoded.get('cache_name')} "
                 f"model_name={decoded.get('model_name')} "
+                f"has_tools={decoded.get('has_tools')} "
                 f"created_at={decoded.get('created_at')}"
             )
             return decoded
@@ -122,11 +123,12 @@ class GeminiCacheManager:
             await client.delete(REDIS_CACHE_METADATA_KEY)
             return None
 
-    async def _store_metadata(self, cache_name: str, model_name: str) -> None:
+    async def _store_metadata(self, cache_name: str, model_name: str, has_tools: bool = False) -> None:
         client = await self._get_redis_client()
         payload = {
             "cache_name": cache_name,
             "model_name": model_name,
+            "has_tools": has_tools,
             "created_at": time.time(),
         }
         await client.set(REDIS_CACHE_METADATA_KEY, json.dumps(payload))
@@ -134,6 +136,7 @@ class GeminiCacheManager:
             "🗃️ [CACHE_REDIS_STORE] "
             f"cache_name={cache_name} "
             f"model_name={model_name} "
+            f"has_tools={has_tools} "
             f"created_at={payload['created_at']}"
         )
 
@@ -176,8 +179,16 @@ class GeminiCacheManager:
         if elapsed >= self._cache_ttl:
             logger.info(f"Gemini cache expired locally (elapsed: {elapsed:.0f}s, TTL: {self._cache_ttl}s)")
             self._cache_name = None
+            self._has_tools = False
             return None
         return self._cache_name
+
+    @property
+    def has_tools(self) -> bool:
+        """Returns True if the active cache contains tools."""
+        if not self.cache_name: # Uses the property to check TTL
+            return False
+        return getattr(self, "_has_tools", False)
 
     async def ensure_cache(
         self,
@@ -209,6 +220,7 @@ class GeminiCacheManager:
                 if cached_name:
                     self._cache_name = cached_name
                     self._cache_created_at = float(metadata.get("created_at") or time.time())
+                    self._has_tools = bool(metadata.get("has_tools", False))
                     self._cached_system_prompt = system_prompt
                     self._cached_tool_functions = tool_functions
                     self._last_ensure_stats["reused_existing"] = True
@@ -256,11 +268,6 @@ class GeminiCacheManager:
                 cache_config = types.CreateCachedContentConfig(
                     system_instruction=system_prompt,
                     tools=gemini_tools if gemini_tools else None,
-                    tool_config=types.ToolConfig(
-                        function_calling_config=types.FunctionCallingConfig(
-                            mode=types.FunctionCallingConfigMode.AUTO,
-                        )
-                    ) if gemini_tools else None,
                     ttl=f"{self._cache_ttl}s",
                     display_name=f"knowledgebot-system-{int(time.time())}",
                 )
@@ -309,10 +316,13 @@ class GeminiCacheManager:
 
                 self._cache_name = cached_content.name
                 self._cache_created_at = time.time()
+                # Check if tools were actually cached (Gemini might ignore them)
+                self._has_tools = len(getattr(cached_content, 'tools', None) or []) > 0
+                
                 # Store the system prompt and tools for reuse
                 self._cached_system_prompt = system_prompt
                 self._cached_tool_functions = tool_functions
-                await self._store_metadata(self._cache_name, model_name)
+                await self._store_metadata(self._cache_name, model_name, has_tools=self._has_tools)
 
                 logger.info(f"Created Gemini cache: {self._cache_name}")
                 if cached_content.usage_metadata:
