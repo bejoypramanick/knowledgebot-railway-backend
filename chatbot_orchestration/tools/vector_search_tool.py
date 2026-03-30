@@ -123,7 +123,7 @@ async def search_knowledge_base(
     ctx: RunContext[ChatSessionDeps],
     query: Annotated[
         str,
-        "The search query. IMPORTANT: For complex/multi-part questions, SPLIT the query into multiple search terms joined by ' | '. Example: 'weather in NYC | population of Tokyo | GDP of USA'. Try to find all answers in ONE tool call by combining multiple search concepts with ' | ' separator.",
+        "The search query derived from the user's latest request.",
     ],
 ) -> str:
     """

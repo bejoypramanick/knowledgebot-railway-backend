@@ -524,18 +524,12 @@ class CachedGoogleModel(GoogleModel):
                 config_dict = cast(dict[str, Any], config)
                 config_dict.pop("system_instruction", None)
                 
-                # TOOL RESILIENCE LAYER:
-                # Logs show gemini-2.5-flash-lite fails with MALFORMED_FUNCTION_CALL if tools are stripped 
-                # but weren't successfully stored in the cache. We only strip if the cache confirms tool ownership.
-                from .cache_manager import gemini_cache_manager
-                if gemini_cache_manager.has_tools:
-                    logger.info("🛡️ Cache HAS tools - stripping tools/tool_config from request")
-                    config_dict.pop("tools", None)
-                    config_dict.pop("tool_config", None)
-                else:
-                    logger.warning(
-                        "🛡️ Guard: Cache HAS NO tools - keeping tools in outgoing request to avoid MALFORMED_FUNCTION_CALL"
-                    )
+                # UNCONDITIONAL STRIP (Workaround removed)
+                # We expect the tool to be in the cache. 
+                # If tool calls fail, it means we must continue fixing the CACHE creation logic.
+                logger.info("🛡️ Cache active - stripping system_instruction, tools, and tool_config from request")
+                config_dict.pop("tools", None)
+                config_dict.pop("tool_config", None)
                 
                 config = cast(GenerateContentConfigDict, config_dict)
 

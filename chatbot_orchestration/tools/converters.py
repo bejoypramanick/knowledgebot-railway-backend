@@ -10,7 +10,7 @@ from shared.otel_logger import get_otel_logger
 from shared.otel_logger import get_otel_logger
 from typing import Any, Annotated, Callable, List, Union, get_args, get_origin, get_type_hints
 from google.genai import types
-from pydantic_ai.tools import ToolDefinition
+from pydantic_ai.tools import ToolDefinition, Tool as PydanticTool
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
@@ -131,23 +131,27 @@ def extract_tool_metadata(func: Callable) -> dict:
         # Convert type to JSON Schema type
         json_type = convert_python_type_to_json_schema_type(actual_type)
 
-        properties[param_name] = {
-            "type": json_type,
-            "description": param_description
-        }
+        # Use types.Schema constructor for perfect Protobuf compliance
+        properties[param_name] = types.Schema(
+            type=json_type,
+            description=param_description
+        )
 
         # Check if parameter is required (no default value)
         if param.default == inspect.Parameter.empty:
             required.append(param_name)
 
+    # Construct the final Schema for parameters
+    parameters_schema = types.Schema(
+        type="object",
+        properties=properties,
+        required=required
+    ) if properties else types.Schema(type="object", properties={})
+
     return {
         "name": name,
         "description": description,
-        "parameters": {
-            "type": "object",
-            "properties": properties,
-            "required": required
-        } if properties else {"type": "object", "properties": {}}
+        "parameters": parameters_schema
     }
 
 
@@ -162,15 +166,21 @@ def convert_pydantic_ai_tool_to_gemini(func: Union[Callable, ToolDefinition]) ->
         types.FunctionDeclaration for use in Gemini API
     """
     try:
+        # 1. Handle Pydantic AI's high-level Tool object
+        if isinstance(func, PydanticTool):
+            func = func.definition
+
+        # 2. Handle Pydantic AI's ToolDefinition
         if isinstance(func, ToolDefinition):
             return types.FunctionDeclaration(
                 name=func.name,
                 description=func.description or f"Tool {func.name}",
+                # Use the schema Pydantic AI already calculated for us!
                 parameters=func.parameters_json_schema or {"type": "object", "properties": {}},
             )
 
+        # 3. Handle raw Python functions (as fallback)
         metadata = extract_tool_metadata(func)
-
         return types.FunctionDeclaration(
             name=metadata["name"],
             description=metadata["description"],
