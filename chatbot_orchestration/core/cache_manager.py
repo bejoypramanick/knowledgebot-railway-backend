@@ -30,8 +30,8 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
-# Default cache TTL: 10 minutes (safety net — cache is explicitly deleted on last session close)
-DEFAULT_CACHE_TTL_SECONDS = 600
+# Default cache TTL: 1 hour (safety net — cache is explicitly deleted on last session close)
+DEFAULT_CACHE_TTL_SECONDS = 3600
 
 REDIS_CACHE_METADATA_KEY = "gemini:explicit_cache:metadata"
 REDIS_CACHE_SESSIONS_KEY = "gemini:explicit_cache:active_sessions"
@@ -172,15 +172,12 @@ class GeminiCacheManager:
 
     @property
     def cache_name(self) -> Optional[str]:
-        """Returns active cache name, or None if expired/not set."""
-        if not self._cache_name:
-            return None
-        elapsed = time.time() - self._cache_created_at
-        if elapsed >= self._cache_ttl:
-            logger.info(f"Gemini cache expired locally (elapsed: {elapsed:.0f}s, TTL: {self._cache_ttl}s)")
-            self._cache_name = None
-            self._has_tools = False
-            return None
+        """Returns active cache name, or None if not set.
+        
+        Note: We no longer check TTL locally. Gemini is the sole source of truth
+        for cache expiry. If a request fails with a cache error, the model
+        wrapper will trigger a rebuild.
+        """
         return self._cache_name
 
     @property

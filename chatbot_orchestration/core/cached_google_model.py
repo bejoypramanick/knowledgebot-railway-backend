@@ -198,6 +198,7 @@ def _summarize_generate_config(config: GenerateContentConfigDict) -> dict[str, A
                     tool_names.append(str(decl_group.get("name", "<unknown>")))
     return {
         "has_system_instruction": bool(config_dict.get("system_instruction")),
+        "cached_content": config_dict.get("cached_content"),
         "tools_count": len(tools),
         "tool_names": tool_names,
         "has_tool_config": bool(config_dict.get("tool_config")),
@@ -322,6 +323,10 @@ def _is_cache_error(error: Exception) -> bool:
         )
     )
     
+    # Skip if this is our own terminal error to prevent infinite loops
+    if any(term in msg for term in ("already attempted", "rebuild failed", "skipping rebuild")):
+        return False
+
     # Only treat as cache error if it explicitly mentions cache OR is a 403/404 with cache terms
     # We want to avoid catching generic "Resource Exhausted" 403s here.
     return has_cache_terms or ((is_permission_denied or is_not_found) and "cache" in msg)
@@ -522,12 +527,16 @@ class CachedGoogleModel(GoogleModel):
                 # The Gemini API rejects requests that have system_instruction/tools
                 # keys present at all (even as null) alongside cached_content.
                 config_dict = cast(dict[str, Any], config)
+                
+                # Assign the cache ID explicitly to the config (Source of Truth)
+                config_dict["cached_content"] = cached_content
+                
                 config_dict.pop("system_instruction", None)
                 
                 # UNCONDITIONAL STRIP (Workaround removed)
                 # We expect the tool to be in the cache. 
                 # If tool calls fail, it means we must continue fixing the CACHE creation logic.
-                logger.info("🛡️ Cache active - stripping system_instruction, tools, and tool_config from request")
+                logger.info(f"🛡️ Cache active ({cached_content}) - stripping system_instruction, tools, and tool_config from request")
                 config_dict.pop("tools", None)
                 config_dict.pop("tool_config", None)
                 
@@ -607,14 +616,14 @@ class CachedGoogleModel(GoogleModel):
         if getattr(self, '_cache_rebuild_attempted', False):
             cache_ref = model_settings.get("google_cached_content")
             logger.error(
-                f"🚫 [CACHE_GUARD] Skipping rebuild — already attempted this iteration. "
-                f"cache_ref={cache_ref}"
+                f"🚫 [CACHE_GUARD] Fail-fast: Rebuild already attempted in this flow. "
+                f"New cache also failing or rejected. cache_ref={cache_ref}"
             )
             # Raise a RuntimeError (NOT a cache error) so pydantic-ai stops retrying
             raise RuntimeError(
-                "Gemini cache rebuild already attempted and failed. "
-                "The newly created cache was also rejected by Google. "
-                "This may indicate an API key permission issue, model mismatch, or propagation delay."
+                f"Gemini cache rebuild already attempted once and failed. "
+                f"Current cache ID ({cache_ref}) is still being rejected by Google. "
+                "Stopping to prevent infinite loop."
             )
 
         try:
@@ -752,9 +761,14 @@ class CachedGoogleModel(GoogleModel):
                 )
                 await asyncio.sleep(1.5)
                 # Note: We call super()._generate_content directly to retry the EXACT same request
-                return await super()._generate_content(
-                    messages, stream, model_settings, model_request_parameters
-                )
+                try:
+                    return await super()._generate_content(
+                        messages, stream, model_settings, model_request_parameters
+                    )
+                except Exception as race_retry_error:
+                    logger.warning(f"⚠️ [CACHE_RACE] Race retry also failed: {race_retry_error}")
+                    # Fall through to the rebuild logic below.
+                    pass
             
             # Reset race-retry flag if we got past it but still failed
             self._cache_retry_attempted = False
