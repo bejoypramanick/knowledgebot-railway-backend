@@ -99,6 +99,49 @@ def _safe_preview(value: Any, limit: int = 500) -> str:
     return text.replace("\n", " ")[:limit]
 
 
+def _log_candidate_parts(
+    candidate: Any,
+    *,
+    cache_ref: str | None,
+    model_name: str | None,
+    prefix: str,
+) -> None:
+    """Log raw Gemini candidate parts so we can tell empty responses from malformed tool calls."""
+    try:
+        content = getattr(candidate, "content", None) if candidate else None
+        parts = getattr(content, "parts", None) if content is not None else None
+        logger.info(
+            f"{prefix} summary has_candidate={'yes' if candidate else 'no'} "
+            f"has_content={'yes' if content is not None else 'no'} "
+            f"parts_count={len(parts or []) if parts is not None else 0} "
+            f"cache_ref={cache_ref} model={model_name}"
+        )
+        for idx, part in enumerate(parts or []):
+            function_call = getattr(part, "function_call", None)
+            function_response = getattr(part, "function_response", None)
+            text = getattr(part, "text", None)
+            logger.info(
+                f"{prefix} idx={idx} "
+                f"has_text={'yes' if text else 'no'} "
+                f"has_function_call={'yes' if function_call else 'no'} "
+                f"has_function_response={'yes' if function_response else 'no'}"
+            )
+            if text:
+                logger.info(f"{prefix} idx={idx} text={_safe_preview(text, 1000)}")
+            if function_call:
+                logger.info(
+                    f"{prefix} idx={idx} function_call={_safe_preview(function_call, 1000)}"
+                )
+            if function_response:
+                logger.info(
+                    f"{prefix} idx={idx} function_response={_safe_preview(function_response, 1000)}"
+                )
+            if not text and not function_call and not function_response:
+                logger.info(f"{prefix} idx={idx} raw_part={_safe_preview(part, 1000)}")
+    except Exception as candidate_log_error:
+        logger.warning(f"⚠️ Failed logging Gemini candidate parts: {candidate_log_error}")
+
+
 def _log_outgoing_gemini_payload(
     *,
     contents: list[ContentUnionDict],
