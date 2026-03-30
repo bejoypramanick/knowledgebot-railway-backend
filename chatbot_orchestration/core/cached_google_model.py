@@ -55,7 +55,8 @@ def _is_cache_error(error: Exception) -> bool:
     is_permission_denied = "403" in msg or "permission_denied" in msg or "permission denied" in msg
     is_not_found = "404" in msg or "not found" in msg or "not_found" in msg
     
-    return any(
+    # Specific terms that imply a cache issue
+    has_cache_terms = any(
         term in msg
         for term in (
             "cached_content",
@@ -63,7 +64,28 @@ def _is_cache_error(error: Exception) -> bool:
             "cache",
             "expired",
         )
-    ) or (is_permission_denied and "cache" in msg) or (is_not_found and "cache" in msg)
+    )
+    
+    # Only treat as cache error if it explicitly mentions cache OR is a 403/404 with cache terms
+    # We want to avoid catching generic "Resource Exhausted" 403s here.
+    return has_cache_terms or ((is_permission_denied or is_not_found) and "cache" in msg)
+
+
+def _is_quota_error(error: Exception) -> bool:
+    """Check if error is a 429 Resource Exhausted or 403 Quota exceeded."""
+    msg = str(error).lower()
+    return any(
+        term in msg
+        for term in (
+            "429",
+            "resource_exhausted",
+            "resource exhausted",
+            "quota exceeded",
+            "rate limit",
+            "reached for tpm",
+            "reached for rpm",
+        )
+    )
 
 
 def _is_503_error(error: Exception) -> bool:
@@ -318,6 +340,19 @@ class CachedGoogleModel(GoogleModel):
             if hasattr(e, 'body'):
                 logger.error(f"🔍 [DIAG] body={e.body}")
             # ===========================================================
+
+            # NEW: Handle Quota/Rate Limit errors BEFORE cache errors
+            if _is_quota_error(e):
+                logger.warning(
+                    f"⚠️ [QUOTA_EXCEEDED] Gemini TPM/RPM limit hit. Waiting 5s... "
+                    f"model={self.model_name}"
+                )
+                await asyncio.sleep( random.uniform(5.0, 7.0) ) # Smear retry to avoid thundering herd
+                # Retry the same call. We don't increment the rebuild guard here
+                # because the cache ID itself is likely perfectly fine.
+                return await super()._generate_content(
+                    messages, stream, model_settings, model_request_parameters
+                )
 
             if not _is_cache_error(e):
                 raise
