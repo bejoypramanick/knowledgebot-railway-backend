@@ -186,14 +186,9 @@ class CachedGoogleModel(GoogleModel):
             messages, model_settings, model_request_parameters
         )
 
-        # Disable the Google GenAI SDK's Automatic Function Calling loop.
-        # Pydantic AI already manages tool execution, and leaving SDK-level AFC enabled
-        # causes repeated remote tool-call cycles (default maximum_remote_calls=10).
+        # Let Pydantic AI and the Google SDK handle automatic_function_calling natively.
+        # Overriding it here caused Gemini to reject ToolReturnParts during cache iterations.
         config_dict = cast(dict[str, Any], config)
-        config_dict["automatic_function_calling"] = AutomaticFunctionCallingConfig(
-            disable=True,
-            maximum_remote_calls=1,
-        )
         has_tool_return = any(
             any(
                 isinstance(part, (BuiltinToolReturnPart, ToolReturnPart))
@@ -217,9 +212,6 @@ class CachedGoogleModel(GoogleModel):
                 )
             )
         config = cast(GenerateContentConfigDict, config_dict)
-        logger.info(
-            f"Gemini automatic_function_calling config: {config_dict.get('automatic_function_calling')}"
-        )
 
         cached_content = model_settings.get("google_cached_content")
         if cached_content:
@@ -289,11 +281,20 @@ class CachedGoogleModel(GoogleModel):
         model_settings: GoogleModelSettings,
         model_request_parameters: ModelRequestParameters,
     ) -> GenerateContentResponse | Awaitable[AsyncIterator[GenerateContentResponse]]:
-        """Fail-fast Gemini call path with exactly ONE cache rebuild attempt.
-
-        If the rebuilt cache also fails, raises a non-retryable RuntimeError
-        to prevent pydantic-ai from looping back into more rebuilds.
-        """
+        """Fail-fast Gemini call path with exactly ONE cache rebuild attempt."""
+        
+        # 🚨 [DEBUG INJECTION] Show the actual request message parts that Pydantic-AI is sending
+        try:
+            if messages:
+                last_msg = messages[-1]
+                logger.info(f"🔍 [DEBUG_PAYLOAD] Pydantic msg kind: {getattr(last_msg, 'kind', 'unknown')} type: {type(last_msg).__name__}")
+                if hasattr(last_msg, 'parts'):
+                    for i, p in enumerate(last_msg.parts):
+                        logger.info(f"   part {i}: {type(p).__name__} = {repr(p)[:200]}...")
+                else:
+                    logger.info("   last_msg has no parts attribute.")
+        except Exception as e:
+            pass
         # Guard: if we already tried rebuilding in this agent iteration, don't do it again.
         # pydantic-ai retries call _generate_content repeatedly — this flag prevents the loop.
         if getattr(self, '_cache_rebuild_attempted', False):
