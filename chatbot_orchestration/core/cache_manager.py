@@ -247,6 +247,14 @@ class GeminiCacheManager:
 
                 logger.info(f"Creating Gemini cache (model: {model_name}, TTL: {self._cache_ttl}s)")
                 self._last_ensure_stats["create_attempts"] += 1
+                logger.info(
+                    "🧱 [CACHE_CREATE_PAYLOAD] "
+                    f"model={model_name} "
+                    f"system_instruction_chars={len(system_prompt)} "
+                    f"tools_count={len(gemini_tools) if gemini_tools else 0} "
+                    f"tool_config_mode={'AUTO' if gemini_tools else 'none'} "
+                    f"tool_schema_preview={serialized_tool_schema[:1500]}"
+                )
                 logger.info(f"Cache config includes:")
                 logger.info(f"  - System instruction: {len(system_prompt)} chars")
                 logger.info(f"  - System instruction tokens (sdk): {system_prompt_tokens if system_prompt_tokens is not None else 'unavailable'}")
@@ -262,6 +270,15 @@ class GeminiCacheManager:
                 cached_content = await client.aio.caches.create(
                     model=model_name,
                     config=cache_config,
+                )
+                logger.info(
+                    "🧱 [CACHE_CREATE_RESULT] "
+                    f"name={getattr(cached_content, 'name', None)} "
+                    f"display_name={getattr(cached_content, 'display_name', None)} "
+                    f"model={getattr(cached_content, 'model', None)} "
+                    f"tool_count={len(getattr(cached_content, 'tools', None) or [])} "
+                    f"tool_config={getattr(cached_content, 'tool_config', None)} "
+                    f"usage_metadata={getattr(cached_content, 'usage_metadata', None)}"
                 )
 
                 old_cache_name = metadata.get("cache_name") if metadata else None
