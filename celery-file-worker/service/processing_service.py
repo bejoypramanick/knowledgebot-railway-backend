@@ -144,23 +144,8 @@ async def process_file_content(
         
         logger.info(f"📋 [FILE_DETAILS] Retrieved: file_id={file_id}, filename={original_filename}, s3_key={s3_key}")
 
-        # STEP 2: GENERATE PRESIGNED URL (instead of downloading)
-        logger.info(f"� [S3] Generating presigned URL for S3 object: {s3_key}")
-        from shared.s3_file_storage import s3_file_storage
-
-        success, result = s3_file_storage.generate_presigned_url(s3_key, expiration=3600)
-        if not success:
-            logger.error(f"❌ [S3] Failed to generate presigned URL: {result}")
-            return {
-                "success": False,
-                "error": f"Failed to generate presigned URL: {result}"
-            }
-
-        presigned_url = result
-        logger.info(f"✅ [S3] Generated presigned URL for {s3_key}")
-
-        # No need to create temp files - kreuzberg service will download directly
-        tmp_path = None  # Not used with presigned URL approach
+        # No need to generate presigned URLs - kreuzberg service uses s3_key directly
+        tmp_path = None
 
         # STEP 3: VALIDATION PHASE
         logger.info(f"🔍 [VALIDATION] Starting file validation for {original_filename}")
@@ -234,7 +219,7 @@ async def process_file_content(
             
             try:
                 markdown_content, kreuzberg_metadata = await process_with_kreuzberg(
-                    presigned_url=presigned_url,
+                    s3_key=s3_key,
                     original_filename=original_filename,
                     mime_type=detected_mime_type,
                     worker_type="file",

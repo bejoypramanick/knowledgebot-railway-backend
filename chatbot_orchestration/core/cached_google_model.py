@@ -51,16 +51,19 @@ logger = get_otel_logger(__name__, "chatbot-orchestration")
 def _is_cache_error(error: Exception) -> bool:
     """Check if an error is related to a stale/expired/invalid cached_content reference."""
     msg = str(error).lower()
+    # Handle SDK error codes and descriptions
+    is_permission_denied = "403" in msg or "permission_denied" in msg or "permission denied" in msg
+    is_not_found = "404" in msg or "not found" in msg or "not_found" in msg
+    
     return any(
         term in msg
         for term in (
             "cached_content",
             "cachedcontent",
             "cache",
-            "not found",
             "expired",
         )
-    )
+    ) or (is_permission_denied and "cache" in msg) or (is_not_found and "cache" in msg)
 
 
 def _is_503_error(error: Exception) -> bool:
@@ -198,6 +201,21 @@ class CachedGoogleModel(GoogleModel):
 
         cached_content = model_settings.get("google_cached_content")
         if cached_content:
+            # LATE-BINDING SYNCHRONIZATION:
+            # The Agent may have been initialized with a stale cache ID (e.g. ID_OLD).
+            # If a concurrent request or previous retry has already rebuilt the cache (ID_NEW),
+            # we should use the new one instead of failing again with the old one.
+            from .cache_manager import gemini_cache_manager
+            
+            live_cache_name = gemini_cache_manager.cache_name
+            if live_cache_name and live_cache_name != cached_content:
+                logger.info(f"🔄 Syncing stale cache reference: {cached_content} -> {live_cache_name}")
+                cached_content = live_cache_name
+                # Update settings so the REST of the pipeline (and super() if called) sees the new ID
+                # Note: We cast to dict to ensure we can modify it (settings is typically a TypedDict)
+                mutable_settings = cast(dict[str, Any], model_settings)
+                mutable_settings["google_cached_content"] = live_cache_name
+
             logger.info(f"Gemini cache active: {cached_content}")
             logger.info(
                 "Stripping system_instruction, tools, tool_config from API request (included in cache)"

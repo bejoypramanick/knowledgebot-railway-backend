@@ -433,6 +433,11 @@ class StreamingService:
                             sanitized_history.append(msg)
                         else:
                             logger.warning("🗑️ Stripped empty ModelRequest (all parts were system prompts)")
+                    elif hasattr(msg, "kind") and getattr(msg, "kind") == "response" and getattr(msg, "status", None) == "error":
+                        # Strip transient error responses (e.g. 403 Cache Rejection) so they don't pollute history
+                        # and confuse pydantic-ai's retry/validation logic.
+                        logger.warning("🛡️ Deep strip: Removed ModelResponse(status='error') from history")
+                        continue
                     else:
                         sanitized_history.append(msg)
                 
