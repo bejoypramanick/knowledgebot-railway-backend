@@ -512,6 +512,13 @@ class CachedGoogleModel(GoogleModel):
                 raise
 
             logger.warning(f"Gemini cached content rejected: {cache_ref} error={e}")
+            logger.warning(
+                "🚨 [CACHE_REJECTED] "
+                f"cache_ref={cache_ref} "
+                f"model={self.model_name} "
+                f"stream={stream} "
+                f"message_count={len(messages)}"
+            )
 
             # ==================== SINGLE REBUILD ATTEMPT ====================
             # Set the guard flag BEFORE rebuilding so that if pydantic-ai retries
@@ -532,6 +539,9 @@ class CachedGoogleModel(GoogleModel):
             try:
                 client = await gemini_cache_manager._get_redis_client()
                 await client.delete(REDIS_CACHE_METADATA_KEY)
+                logger.info(
+                    f"🗃️ [CACHE_REDIS_DELETE] key={REDIS_CACHE_METADATA_KEY} reason=stale_cache_rebuild"
+                )
             except Exception as redis_error:
                 logger.warning(
                     f"Failed to clear stale Gemini cache metadata from Redis: {redis_error}"
@@ -554,6 +564,12 @@ class CachedGoogleModel(GoogleModel):
             # Retry ONCE with the rebuilt cache
             retry_settings = cast(dict[str, Any], dict(model_settings))
             retry_settings["google_cached_content"] = rebuilt_cache_name
+            logger.info(
+                "🔁 [CACHE_RETRY_SETTINGS] "
+                f"old_cache_ref={cache_ref} "
+                f"new_cache_ref={rebuilt_cache_name} "
+                f"keys={sorted(retry_settings.keys())}"
+            )
 
             try:
                 result = await super()._generate_content(

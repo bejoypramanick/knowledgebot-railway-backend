@@ -106,9 +106,17 @@ class GeminiCacheManager:
         client = await self._get_redis_client()
         raw = await client.get(REDIS_CACHE_METADATA_KEY)
         if not raw:
+            logger.info("🗃️ [CACHE_REDIS_LOAD] metadata=missing")
             return None
         try:
-            return json.loads(raw)
+            decoded = json.loads(raw)
+            logger.info(
+                "🗃️ [CACHE_REDIS_LOAD] "
+                f"cache_name={decoded.get('cache_name')} "
+                f"model_name={decoded.get('model_name')} "
+                f"created_at={decoded.get('created_at')}"
+            )
+            return decoded
         except Exception:
             logger.warning("Failed to decode Redis Gemini cache metadata; clearing it")
             await client.delete(REDIS_CACHE_METADATA_KEY)
@@ -122,6 +130,12 @@ class GeminiCacheManager:
             "created_at": time.time(),
         }
         await client.set(REDIS_CACHE_METADATA_KEY, json.dumps(payload))
+        logger.info(
+            "🗃️ [CACHE_REDIS_STORE] "
+            f"cache_name={cache_name} "
+            f"model_name={model_name} "
+            f"created_at={payload['created_at']}"
+        )
 
     async def register_session(self, session_id: str) -> None:
         client = await self._get_redis_client()
@@ -147,6 +161,7 @@ class GeminiCacheManager:
                 logger.warning("GenAI client not available, cannot delete cache")
                 return
 
+            logger.info(f"🗑️ [CACHE_REMOTE_DELETE] cache_name={cache_name}")
             await client.aio.caches.delete(name=cache_name)
             logger.info(f"Deleted Gemini cache from Google: {cache_name} (billing stopped)")
         except Exception as e:
@@ -197,7 +212,12 @@ class GeminiCacheManager:
                     self._cached_system_prompt = system_prompt
                     self._cached_tool_functions = tool_functions
                     self._last_ensure_stats["reused_existing"] = True
-                    logger.info(f"Reusing Redis-registered Gemini cache: {cached_name}")
+                    logger.info(
+                        "♻️ [CACHE_REUSE] "
+                        f"cache_name={cached_name} "
+                        f"model_name={metadata.get('model_name')} "
+                        f"created_at={metadata.get('created_at')}"
+                    )
                     return cached_name
 
             # Need to create new cache
@@ -335,6 +355,7 @@ class GeminiCacheManager:
 
             client = await self._get_redis_client()
             await client.delete(REDIS_CACHE_METADATA_KEY)
+            logger.info("🗃️ [CACHE_REDIS_DELETE] metadata_key_cleared=true")
 
     def invalidate(self, keep_cached_content: bool = False):
         """Clear local cache reference (does NOT delete from Google).
@@ -352,6 +373,10 @@ class GeminiCacheManager:
         if not keep_cached_content:
             self._cached_system_prompt = None
             self._cached_tool_functions = None
+        logger.info(
+            "🧹 [CACHE_LOCAL_INVALIDATE] "
+            f"keep_cached_content={keep_cached_content}"
+        )
 
     def get_cached_content(self) -> tuple[Optional[str], Optional[List[Callable]]]:
         """Get the cached system prompt and tool functions for reuse in fallback caches.
