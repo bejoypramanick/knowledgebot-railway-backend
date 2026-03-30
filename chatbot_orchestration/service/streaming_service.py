@@ -1093,6 +1093,7 @@ class StreamingService:
                         logger.error(
                             f"❌ Agent.iter() inner setup exception type={type(e).__name__} repr={repr(e)} "
                             f"cause={repr(getattr(e, '__cause__', None))} "
+                            f"body={repr(getattr(e, 'body', None))} "
                             f"temperature={active_model_settings.get('temperature')} "
                             f"recent_events={recent_event_summaries if 'recent_event_summaries' in locals() else []} "
                             f"message_history_tail={last_message_history_summary if 'last_message_history_summary' in locals() else []}",

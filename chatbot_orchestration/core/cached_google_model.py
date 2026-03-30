@@ -26,6 +26,7 @@ from collections import deque
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.messages import ModelMessage, BuiltinToolReturnPart, ToolReturnPart
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from shared.otel_logger import get_otel_logger
 
 # Import cache manager for fallback cache creation
@@ -314,6 +315,36 @@ class CachedGoogleModel(GoogleModel):
             response = await super()._generate_content(
                 messages, stream, model_settings, model_request_parameters
             )
+            if not stream:
+                try:
+                    candidates = getattr(response, "candidates", None) or []
+                    candidate = candidates[0] if len(candidates) == 1 else None
+                    finish_reason = getattr(candidate, "finish_reason", None)
+                    content = getattr(candidate, "content", None) if candidate else None
+                    parts = getattr(content, "parts", None) if content is not None else None
+                    finish_reason_value = getattr(finish_reason, "value", finish_reason)
+                    part_count = len(parts or []) if parts is not None else None
+
+                    if finish_reason_value == "ERROR":
+                        logger.error(
+                            "🚨 [GEMINI_FINISH_ERROR] Gemini returned finish_reason=ERROR "
+                            f"cache_ref={model_settings.get('google_cached_content')} "
+                            f"model={self.model_name} part_count={part_count} "
+                            f"response={response}"
+                        )
+
+                    if finish_reason_value == "ERROR" and not (parts or []):
+                        raise UnexpectedModelBehavior(
+                            "Gemini returned finish_reason=ERROR with no text or tool calls",
+                            str(response),
+                        )
+                except UnexpectedModelBehavior:
+                    raise
+                except Exception as response_inspection_error:
+                    logger.warning(
+                        "⚠️ Failed inspecting Gemini response after _generate_content: "
+                        f"{response_inspection_error}"
+                    )
             # Success — reset the guard flag
             self._cache_rebuild_attempted = False
             return response
