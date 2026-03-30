@@ -49,6 +49,38 @@ except ImportError:
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
 
+async def _log_stream_chunks_on_error(
+    response_stream: AsyncIterator[GenerateContentResponse],
+    *,
+    cache_ref: str | None,
+    model_name: str | None,
+) -> AsyncIterator[GenerateContentResponse]:
+    """Pass through Gemini stream chunks while logging raw finish=ERROR candidates."""
+    async for chunk in response_stream:
+        try:
+            candidates = getattr(chunk, "candidates", None) or []
+            candidate = candidates[0] if len(candidates) == 1 else None
+            finish_reason = getattr(candidate, "finish_reason", None)
+            finish_reason_value = getattr(finish_reason, "value", finish_reason)
+            content = getattr(candidate, "content", None) if candidate else None
+            parts = getattr(content, "parts", None) if content is not None else None
+            part_count = len(parts or []) if parts is not None else None
+
+            if finish_reason_value == "ERROR":
+                logger.error(
+                    "🚨 [GEMINI_STREAM_FINISH_ERROR] Stream chunk returned finish_reason=ERROR "
+                    f"cache_ref={cache_ref} model={model_name} part_count={part_count} "
+                    f"chunk={chunk}"
+                )
+        except Exception as stream_inspection_error:
+            logger.warning(
+                "⚠️ Failed inspecting Gemini streamed chunk: "
+                f"{stream_inspection_error}"
+            )
+
+        yield chunk
+
+
 def _is_cache_error(error: Exception) -> bool:
     """Check if an error is related to a stale/expired/invalid cached_content reference."""
     msg = str(error).lower()
@@ -315,6 +347,12 @@ class CachedGoogleModel(GoogleModel):
             response = await super()._generate_content(
                 messages, stream, model_settings, model_request_parameters
             )
+            if stream:
+                response = _log_stream_chunks_on_error(
+                    response,
+                    cache_ref=model_settings.get("google_cached_content"),
+                    model_name=self.model_name,
+                )
             if not stream:
                 try:
                     candidates = getattr(response, "candidates", None) or []
