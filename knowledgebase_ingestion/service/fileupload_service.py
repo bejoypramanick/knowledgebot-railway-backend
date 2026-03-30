@@ -21,6 +21,7 @@ from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery, web_celery
 from shared.task_control import TaskControl
+from shared.vector_dao import vector_dao
 from shared.redis_ui_cache import invalidate_kb_caches
 
 logger = get_otel_logger("fileupload_service", "knowledgebase-ingestion")
@@ -449,11 +450,23 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [DB_DELETE_WEBSITES_ERROR] Error deleting websites: {e}")
             errors.append(f"Website deletion failed: {e}")
 
+        # Step 5: CLEAR Vector Knowledge Base (document_chunks table)
+        logger.info("💾 [DB_CLEAR_RAG] Emptying document_chunks table (clearing vector embeddings)...")
+        try:
+            chunks_cleared = await vector_dao.clear_all_chunks()
+            logger.info(f"   ✅ [DB_CLEAR_RAG_SUCCESS] Cleared {chunks_cleared} vector chunks from document_chunks")
+            # Vacuum the table after full reset
+            await vector_dao.vacuum_document_chunks()
+        except Exception as e:
+            logger.error(f"❌ [DB_CLEAR_RAG_ERROR] Error clearing document_chunks: {e}")
+            errors.append(f"Vector knowledge base clear failed: {e}")
+
         logger.info("=" * 80)
         logger.info("✅ [DELETE_ALL_COMPLETE] Knowledge base clear completed")
         logger.info("=" * 80)
         logger.info(f"📊 [RESULT] Files deleted from S3: {s3_files_deleted}")
         logger.info(f"📊 [RESULT] Websites marked as deleted: {deleted_websites}")
+        logger.info(f"📊 [RESULT] Vector chunks cleared: {chunks_cleared}")
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
 
         if errors:
@@ -466,6 +479,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             "message": "Knowledge base cleared successfully" if len(errors) == 0 else "Knowledge base cleared with errors",
             "s3_files_deleted": s3_files_deleted,
             "websites_marked_deleted": deleted_websites,
+            "chunks_cleared": chunks_cleared,
             "redis_queues_cleared": 2,
             "errors": errors if errors else None
         }

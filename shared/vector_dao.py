@@ -115,6 +115,21 @@ class VectorDAO:
         return await VectorDAO.delete_chunks_for_documents([document_id], document_type)
 
     @staticmethod
+    async def clear_all_chunks() -> int:
+        """HARD DELETE all records from the document_chunks table. Use with caution!"""
+        try:
+            logger.info("🗑️ [VECTOR_DAO] Emptying document_chunks table (total reset)...")
+            async with get_db_session() as session:
+                result = await session.execute(text("DELETE FROM public.document_chunks"))
+                count = result.rowcount or 0
+                await session.commit()
+                logger.info(f"✅ [VECTOR_DAO_SUCCESS] Cleared {count} vector chunks")
+                return count
+        except Exception as e:
+            logger.error(f"❌ [VECTOR_DAO_ERROR] Failed to clear document_chunks: {e}")
+            return 0
+
+    @staticmethod
     async def vacuum_document_chunks() -> None:
         """Run VACUUM (ANALYZE) for document_chunks in autocommit mode."""
         try:
