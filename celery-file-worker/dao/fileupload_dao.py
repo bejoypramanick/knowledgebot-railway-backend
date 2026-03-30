@@ -62,10 +62,6 @@ class FileUploadDAO:
         original_file_extension: str = None,
         original_mime_type: str = None,
         processed_content_s3_key: str = None,
-        filestore_char_count: int = 0,
-        filestore_word_count: int = 0,
-        filestore_token_count: int = 0,
-        md_file_size: int = 0,
         total_pages: int = 0
     ) -> bool:
         """
@@ -96,10 +92,6 @@ class FileUploadDAO:
                 file_extension = :original_file_extension,
                 mime_type = :original_mime_type,
                 processed_content_s3_key = :processed_content_s3_key,
-                filestore_char_count = :filestore_char_count,
-                filestore_word_count = :filestore_word_count,
-                filestore_token_count = :filestore_token_count,
-                md_file_size = :md_file_size,
                 total_pages = :total_pages,
                 processing_status = 'completed',
                 updated_at = NOW()
@@ -121,10 +113,6 @@ class FileUploadDAO:
             "original_file_extension": original_file_extension,
             "original_mime_type": original_mime_type,
             "processed_content_s3_key": processed_content_s3_key,
-            "filestore_char_count": filestore_char_count,
-            "filestore_word_count": filestore_word_count,
-            "filestore_token_count": filestore_token_count,
-            "md_file_size": md_file_size,
             "total_pages": total_pages,
             "file_id": file_id
         }
