@@ -279,11 +279,10 @@ class OpenTelemetryLogger:
             span_attributes = {
                 "log.level": logging.getLevelName(level),
                 "log.message": message,
-                "log.logger": self.logger.name,
                 "service.name": self.service_name,
                 "file.path": file_info["file_path"],
                 "file.line": file_info["line_number"],
-                "file.method": file_info["method_name"],
+                "file.func": file_info["method_name"],
             }
 
             # Add trace/span IDs to span attributes
