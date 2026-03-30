@@ -384,6 +384,8 @@ class AgentManager:
                 model,
                 output_type=str,
                 system_prompt=system_prompt,
+                retries=None,
+                output_retries=None,
                 tools=[search_knowledge_base],
                 deps_type=ChatSessionDeps,
                 end_strategy="exhaustive",
