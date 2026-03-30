@@ -19,7 +19,6 @@ the 400 error from Gemini (can't send cached_content AND tools/system_instructio
 """
 
 import asyncio
-import hashlib
 import json
 import os
 import time
@@ -70,11 +69,10 @@ def _serialize_gemini_tools(gemini_tools: list) -> str:
 
 
 class GeminiCacheManager:
-    """Manages Gemini cached content lifecycle with hash-based invalidation."""
+    """Manages Gemini cached content lifecycle with Redis as the cache-id registry."""
 
     def __init__(self):
         self._cache_name: Optional[str] = None
-        self._cache_hash: Optional[str] = None
         self._cache_created_at: float = 0
         self._cache_ttl: int = int(os.getenv("GEMINI_CACHE_TTL_SECONDS", str(DEFAULT_CACHE_TTL_SECONDS)))
         self._lock = asyncio.Lock()
@@ -116,11 +114,10 @@ class GeminiCacheManager:
             await client.delete(REDIS_CACHE_METADATA_KEY)
             return None
 
-    async def _store_metadata(self, cache_name: str, content_hash: str, model_name: str) -> None:
+    async def _store_metadata(self, cache_name: str, model_name: str) -> None:
         client = await self._get_redis_client()
         payload = {
             "cache_name": cache_name,
-            "content_hash": content_hash,
             "model_name": model_name,
             "created_at": time.time(),
         }
@@ -155,15 +152,6 @@ class GeminiCacheManager:
         except Exception as e:
             logger.warning(f"Could not delete Gemini cache {cache_name}: {e}")
 
-    def _compute_hash(self, system_prompt: str, tool_functions: List[Union[Callable, ToolDefinition]]) -> str:
-        """Compute hash of system prompt + tool names to detect changes."""
-        tool_names = sorted(
-            getattr(f, "__name__", None) or getattr(f, "name", "unknown_tool")
-            for f in tool_functions
-        )
-        content = f"{system_prompt}|{'|'.join(tool_names)}"
-        return hashlib.sha256(content.encode()).hexdigest()[:16]
-
     @property
     def cache_name(self) -> Optional[str]:
         """Returns active cache name, or None if expired/not set."""
@@ -173,7 +161,6 @@ class GeminiCacheManager:
         if elapsed >= self._cache_ttl:
             logger.info(f"Gemini cache expired locally (elapsed: {elapsed:.0f}s, TTL: {self._cache_ttl}s)")
             self._cache_name = None
-            self._cache_hash = None
             return None
         return self._cache_name
 
@@ -201,20 +188,16 @@ class GeminiCacheManager:
                 "recreated_remote": False,
                 "last_error": None,
             }
-            content_hash = self._compute_hash(system_prompt, tool_functions)
             metadata = await self._load_metadata()
             if metadata:
                 cached_name = metadata.get("cache_name")
-                cached_hash = metadata.get("content_hash")
-                cached_model = metadata.get("model_name")
-                if cached_name and cached_hash == content_hash and cached_model == model_name:
+                if cached_name:
                     self._cache_name = cached_name
-                    self._cache_hash = cached_hash
                     self._cache_created_at = float(metadata.get("created_at") or time.time())
                     self._cached_system_prompt = system_prompt
                     self._cached_tool_functions = tool_functions
                     self._last_ensure_stats["reused_existing"] = True
-                    logger.info(f"Reusing Redis-registered Gemini cache: {cached_name} (hash: {content_hash})")
+                    logger.info(f"Reusing Redis-registered Gemini cache: {cached_name}")
                     return cached_name
 
             # Need to create new cache
@@ -259,10 +242,10 @@ class GeminiCacheManager:
                         )
                     ) if gemini_tools else None,
                     ttl=f"{self._cache_ttl}s",
-                    display_name=f"knowledgebot-system-{content_hash}",
+                    display_name=f"knowledgebot-system-{int(time.time())}",
                 )
 
-                logger.info(f"Creating Gemini cache (model: {model_name}, TTL: {self._cache_ttl}s, hash: {content_hash})")
+                logger.info(f"Creating Gemini cache (model: {model_name}, TTL: {self._cache_ttl}s)")
                 self._last_ensure_stats["create_attempts"] += 1
                 logger.info(f"Cache config includes:")
                 logger.info(f"  - System instruction: {len(system_prompt)} chars")
@@ -288,12 +271,11 @@ class GeminiCacheManager:
                     await self._delete_remote_cache_by_name(old_cache_name)
 
                 self._cache_name = cached_content.name
-                self._cache_hash = content_hash
                 self._cache_created_at = time.time()
                 # Store the system prompt and tools for reuse
                 self._cached_system_prompt = system_prompt
                 self._cached_tool_functions = tool_functions
-                await self._store_metadata(self._cache_name, content_hash, model_name)
+                await self._store_metadata(self._cache_name, model_name)
 
                 logger.info(f"Created Gemini cache: {self._cache_name}")
                 if cached_content.usage_metadata:
@@ -327,7 +309,6 @@ class GeminiCacheManager:
             cache_name = (metadata or {}).get("cache_name") or self._cache_name
 
             self._cache_name = None
-            self._cache_hash = None
             self._cache_created_at = 0
             self._cached_system_prompt = None
             self._cached_tool_functions = None
@@ -350,7 +331,6 @@ class GeminiCacheManager:
         if self._cache_name:
             logger.info(f"Invalidating local Gemini cache reference: {self._cache_name}")
         self._cache_name = None
-        self._cache_hash = None
         self._cache_created_at = 0
         if not keep_cached_content:
             self._cached_system_prompt = None
