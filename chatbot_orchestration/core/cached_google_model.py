@@ -273,10 +273,34 @@ class CachedGoogleModel(GoogleModel):
                 messages, stream, model_settings, model_request_parameters
             )
         except Exception as e:
+            # ==================== DIAGNOSTIC LOGGING ====================
+            import os as _os
+            api_key = _os.getenv("GEMINI_API_KEY", "")
+            api_key_info = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else ("SET" if api_key else "MISSING")
+            cache_ref = model_settings.get("google_cached_content")
+            logger.error(
+                f"🔍 [DIAG] _generate_content exception:\n"
+                f"  exception_type={type(e).__name__}\n"
+                f"  exception_str={str(e)[:500]}\n"
+                f"  model_name={self.model_name}\n"
+                f"  cache_ref={cache_ref}\n"
+                f"  api_key={api_key_info}\n"
+                f"  is_cache_error={_is_cache_error(e)}\n"
+                f"  message_count={len(messages)}\n"
+                f"  stream={stream}"
+            )
+            # Check for nested/cause exceptions
+            if e.__cause__:
+                logger.error(f"🔍 [DIAG] __cause__: type={type(e.__cause__).__name__} str={str(e.__cause__)[:300]}")
+            if hasattr(e, 'status_code'):
+                logger.error(f"🔍 [DIAG] status_code={e.status_code}")
+            if hasattr(e, 'body'):
+                logger.error(f"🔍 [DIAG] body={e.body}")
+            # ===========================================================
+
             if not _is_cache_error(e):
                 raise
 
-            cache_ref = model_settings.get("google_cached_content")
             logger.warning(f"Gemini cached content rejected: {cache_ref} error={e}")
 
             from .cache_manager import REDIS_CACHE_METADATA_KEY, gemini_cache_manager
