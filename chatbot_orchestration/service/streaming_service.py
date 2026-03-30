@@ -418,21 +418,25 @@ class StreamingService:
             # cachedContent cannot be used with a request setting system_instruction/tools/tool_config.
             try:
 
-                def _is_system_prompt_request(msg: object) -> bool:
-                    if not isinstance(msg, ModelRequest):
-                        return False
-                    parts = getattr(msg, "parts", None) or []
-                    return any(isinstance(p, SystemPromptPart) for p in parts)
-
-                before = len(pydantic_messages)
-                pydantic_messages = [
-                    m for m in pydantic_messages if not _is_system_prompt_request(m)
-                ]
-                removed = before - len(pydantic_messages)
-                if removed:
-                    logger.warning(
-                        f"⚠️ Removed {removed} SystemPromptPart message(s) from history because Gemini cache is active"
-                    )
+                # PG18: Pydantic AI (especially v1.70+) often merges system prompts 
+                # into the first user ModelRequest. Strip ONLY the SystemPromptPart 
+                # to satisfy Gemini caching rules without losing the user's prompt.
+                sanitized_history = []
+                for msg in pydantic_messages:
+                    if isinstance(msg, ModelRequest):
+                        before = len(msg.parts)
+                        msg.parts = [p for p in msg.parts if not isinstance(p, SystemPromptPart)]
+                        removed = before - len(msg.parts)
+                        if removed:
+                            logger.info(f"🛡️ Stripped {removed} SystemPromptPart(s) from ModelRequest (cache active)")
+                        if msg.parts:
+                            sanitized_history.append(msg)
+                        else:
+                            logger.warning("🗑️ Stripped empty ModelRequest (all parts were system prompts)")
+                    else:
+                        sanitized_history.append(msg)
+                
+                pydantic_messages = sanitized_history
             except Exception as e:
                 logger.warning(
                     f"⚠️ Failed to sanitize message_history for cached mode: {e}"

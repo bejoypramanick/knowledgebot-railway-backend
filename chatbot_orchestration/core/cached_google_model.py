@@ -226,8 +226,19 @@ class CachedGoogleModel(GoogleModel):
                 config_dict.pop("system_instruction", None)
                 config_dict.pop("tools", None)
                 config_dict.pop("tool_config", None)
-
                 config = cast(GenerateContentConfigDict, config_dict)
+
+                # DEEP DEFENSE: Some pydantic-ai versions might尝试将system prompt
+                # 作为contents中的消息发送。Gemini API 严禁在有cache的情况下发送这些内容。
+                sanitized_contents = []
+                for content in (contents or []):
+                    # In Gemini API, 'system' is not a valid role for contents (system_instruction is separate)
+                    # but pydantic-ai might map it this way.
+                    if isinstance(content, dict) and content.get("role") == "system":
+                        logger.warning("🛡️ Deep strip: Removed role='system' Content from payload (cache active)")
+                        continue
+                    sanitized_contents.append(content)
+                contents = sanitized_contents
 
         return contents, config
 
