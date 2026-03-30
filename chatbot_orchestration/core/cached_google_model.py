@@ -19,6 +19,7 @@ Resilience Patterns:
 from collections.abc import AsyncIterator, Awaitable
 from typing import Any, cast
 import asyncio
+import os
 import random
 import time
 from collections import deque
@@ -180,6 +181,91 @@ def _log_outgoing_gemini_payload(
                 )
     except Exception as payload_log_error:
         logger.warning(f"⚠️ Failed logging outgoing Gemini payload: {payload_log_error}")
+
+
+def _summarize_generate_config(config: GenerateContentConfigDict) -> dict[str, Any]:
+    config_dict = cast(dict[str, Any], config or {})
+    tools = config_dict.get("tools") or []
+    tool_names: list[str] = []
+    for tool in tools:
+        declarations = getattr(tool, "function_declarations", None)
+        if declarations:
+            tool_names.extend(getattr(decl, "name", "<unknown>") for decl in declarations)
+            continue
+        if isinstance(tool, dict):
+            for decl_group in tool.get("function_declarations", []) or []:
+                if isinstance(decl_group, dict):
+                    tool_names.append(str(decl_group.get("name", "<unknown>")))
+    return {
+        "has_system_instruction": bool(config_dict.get("system_instruction")),
+        "tools_count": len(tools),
+        "tool_names": tool_names,
+        "has_tool_config": bool(config_dict.get("tool_config")),
+        "tool_config": _safe_preview(config_dict.get("tool_config"), 400),
+        "automatic_function_calling": _safe_preview(
+            config_dict.get("automatic_function_calling"), 400
+        ),
+        "temperature": config_dict.get("temperature"),
+        "max_output_tokens": config_dict.get("max_output_tokens"),
+        "thinking_config": _safe_preview(config_dict.get("thinking_config"), 300),
+        "response_mime_type": config_dict.get("response_mime_type"),
+        "response_schema": _safe_preview(config_dict.get("response_schema"), 300),
+        "safety_settings": _safe_preview(config_dict.get("safety_settings"), 300),
+    }
+
+
+def _log_generate_config_snapshot(
+    *,
+    label: str,
+    config: GenerateContentConfigDict,
+    model_settings: GoogleModelSettings,
+    model_name: str | None,
+) -> None:
+    try:
+        logger.info(
+            f"🛠️ [GEMINI_CONFIG] label={label} model={model_name} "
+            f"cache_ref={model_settings.get('google_cached_content')} "
+            f"settings_keys={sorted(cast(dict[str, Any], model_settings).keys())} "
+            f"summary={_summarize_generate_config(config)}"
+        )
+    except Exception as config_log_error:
+        logger.warning(f"⚠️ Failed logging Gemini config snapshot: {config_log_error}")
+
+
+def _log_response_envelope(
+    response: GenerateContentResponse,
+    *,
+    cache_ref: str | None,
+    model_name: str | None,
+    prefix: str = "📦 [GEMINI_RESPONSE]",
+) -> None:
+    try:
+        candidates = getattr(response, "candidates", None) or []
+        candidate = candidates[0] if len(candidates) == 1 else None
+        finish_reason = getattr(candidate, "finish_reason", None)
+        finish_reason_value = getattr(finish_reason, "value", finish_reason)
+        prompt_feedback = getattr(response, "prompt_feedback", None)
+        usage_metadata = getattr(response, "usage_metadata", None)
+        safety_ratings = getattr(candidate, "safety_ratings", None) if candidate else None
+        model_version = getattr(response, "model_version", None)
+        logger.info(
+            f"{prefix} model={model_name} cache_ref={cache_ref} "
+            f"candidate_count={len(candidates)} finish_reason={finish_reason_value} "
+            f"has_prompt_feedback={'yes' if prompt_feedback else 'no'} "
+            f"has_usage_metadata={'yes' if usage_metadata else 'no'} "
+            f"has_safety_ratings={'yes' if safety_ratings else 'no'} "
+            f"model_version={model_version}"
+        )
+        if prompt_feedback is not None:
+            logger.info(f"{prefix} prompt_feedback={_safe_preview(prompt_feedback, 1000)}")
+        if usage_metadata is not None:
+            logger.info(f"{prefix} usage_metadata={_safe_preview(usage_metadata, 1000)}")
+        if safety_ratings is not None:
+            logger.info(f"{prefix} safety_ratings={_safe_preview(safety_ratings, 1000)}")
+        if candidate is not None:
+            logger.info(f"{prefix} candidate={_safe_preview(candidate, 1500)}")
+    except Exception as response_log_error:
+        logger.warning(f"⚠️ Failed logging Gemini response envelope: {response_log_error}")
 
 
 def _is_cache_error(error: Exception) -> bool:
@@ -351,6 +437,12 @@ class CachedGoogleModel(GoogleModel):
                 )
             )
         config = cast(GenerateContentConfigDict, config_dict)
+        _log_generate_config_snapshot(
+            label="pre_cache_strip",
+            config=config,
+            model_settings=model_settings,
+            model_name=self.model_name,
+        )
 
         cached_content = model_settings.get("google_cached_content")
         if cached_content:
@@ -410,6 +502,13 @@ class CachedGoogleModel(GoogleModel):
                         continue
                     sanitized_contents.append(content)
                 contents = sanitized_contents
+
+        _log_generate_config_snapshot(
+            label="final_request",
+            config=config,
+            model_settings=model_settings,
+            model_name=self.model_name,
+        )
 
         _log_outgoing_gemini_payload(
             contents=contents,
@@ -488,6 +587,11 @@ class CachedGoogleModel(GoogleModel):
                 )
             if not stream:
                 try:
+                    _log_response_envelope(
+                        cast(GenerateContentResponse, response),
+                        cache_ref=model_settings.get("google_cached_content"),
+                        model_name=self.model_name,
+                    )
                     candidates = getattr(response, "candidates", None) or []
                     candidate = candidates[0] if len(candidates) == 1 else None
                     finish_reason = getattr(candidate, "finish_reason", None)
@@ -522,6 +626,12 @@ class CachedGoogleModel(GoogleModel):
                         "⚠️ Failed inspecting Gemini response after _generate_content: "
                         f"{response_inspection_error}"
                     )
+                await self._maybe_run_noncached_control_probe(
+                    messages=messages,
+                    stream=stream,
+                    model_settings=model_settings,
+                    model_request_parameters=model_request_parameters,
+                )
             # Success — reset the guard flag
             self._cache_rebuild_attempted = False
             return response
@@ -636,6 +746,25 @@ class CachedGoogleModel(GoogleModel):
                 # Rebuilt cache worked! Reset the guard flag.
                 self._cache_rebuild_attempted = False
                 logger.info(f"✅ Rebuilt cache {rebuilt_cache_name} succeeded on retry")
+                if not stream:
+                    _log_response_envelope(
+                        cast(GenerateContentResponse, result),
+                        cache_ref=rebuilt_cache_name,
+                        model_name=self.model_name,
+                        prefix="📦 [GEMINI_RESPONSE_RETRY]",
+                    )
+                    _log_candidate_parts(
+                        (getattr(result, "candidates", None) or [None])[0],
+                        cache_ref=rebuilt_cache_name,
+                        model_name=self.model_name,
+                        prefix="🧩 [GEMINI_PART_RETRY]",
+                    )
+                await self._maybe_run_noncached_control_probe(
+                    messages=messages,
+                    stream=stream,
+                    model_settings=cast(GoogleModelSettings, retry_settings),
+                    model_request_parameters=model_request_parameters,
+                )
                 return result
             except Exception as retry_error:
                 # The REBUILT cache also failed. Log everything for diagnosis.
@@ -661,6 +790,58 @@ class CachedGoogleModel(GoogleModel):
                     f"rebuilt cache ({rebuilt_cache_name}) were rejected by Google with 403. "
                     f"Retry error: {retry_error}"
                 ) from retry_error
+
+    async def _maybe_run_noncached_control_probe(
+        self,
+        *,
+        messages: list[ModelMessage],
+        stream: bool,
+        model_settings: GoogleModelSettings,
+        model_request_parameters: ModelRequestParameters,
+    ) -> None:
+        """Optionally run a non-cached control request to compare with cached mode."""
+        if stream:
+            return
+        if not os.getenv("GEMINI_DEBUG_CONTROL_NONCACHED", "").lower() in {"1", "true", "yes"}:
+            return
+        if not model_settings.get("google_cached_content"):
+            return
+        if getattr(self, "_control_probe_ran", False):
+            return
+        self._control_probe_ran = True
+        control_settings = cast(dict[str, Any], dict(model_settings))
+        cache_ref = control_settings.pop("google_cached_content", None)
+        logger.info(
+            "🧪 [GEMINI_CONTROL] starting non-cached control probe "
+            f"model={self.model_name} stripped_cache_ref={cache_ref} "
+            f"message_count={len(messages)}"
+        )
+        try:
+            control_response = await super()._generate_content(
+                messages,
+                stream,
+                cast(GoogleModelSettings, control_settings),
+                model_request_parameters,
+            )
+            _log_response_envelope(
+                cast(GenerateContentResponse, control_response),
+                cache_ref=None,
+                model_name=self.model_name,
+                prefix="📦 [GEMINI_CONTROL_RESPONSE]",
+            )
+            candidates = getattr(control_response, "candidates", None) or []
+            candidate = candidates[0] if len(candidates) == 1 else None
+            _log_candidate_parts(
+                candidate,
+                cache_ref=None,
+                model_name=self.model_name,
+                prefix="🧪 [GEMINI_CONTROL_PART]",
+            )
+        except Exception as control_error:
+            logger.warning(
+                "🧪 [GEMINI_CONTROL] non-cached control probe failed "
+                f"type={type(control_error).__name__} error={control_error}"
+            )
 
     async def _try_fallback_model(
         self,
