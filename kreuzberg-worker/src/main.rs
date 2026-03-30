@@ -222,7 +222,10 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
 
     if extraction.markdown.trim().is_empty() {
         return Err(anyhow!(
-            "extraction produced empty markdown (mime_type may be unsupported or content extraction failed)"
+            "extraction produced empty markdown for filename={} mime_type={} s3_key={} (mime_type may be unsupported or content extraction failed)",
+            job.original_filename.as_deref().unwrap_or("unknown"),
+            job.mime_type.as_deref().unwrap_or("unknown"),
+            job.s3_key,
         ));
     }
 

@@ -125,11 +125,13 @@ async def process_file_content(
         s3_key = file_record['s3_key']
         file_size = file_record['file_size']
         user_role_id = file_record['user_role_id']
+        db_mime_type = file_record.get('mime_type')
         original_sha256_hash = file_record.get('sha256_hash')  # Preserve original hash from upload
 
         logger.info(f"   Display name: {file_display_name}")
         logger.info(f"   S3 key: {s3_key}")
         logger.info(f"   Size: {file_size} bytes")
+        logger.info(f"   DB MIME Type: {db_mime_type}")
         logger.info(f"   Original SHA256 Hash: {original_sha256_hash}")
         
         # Validate s3_key is present
@@ -151,8 +153,14 @@ async def process_file_content(
         logger.info(f"🔍 [VALIDATION] Starting file validation for {original_filename}")
 
         # Detect MIME type first (needed for validation)
-        detected_mime_type = detect_mime_type_from_extension(original_filename)
-        logger.info(f"🔍 [VALIDATION] Detected MIME type: {detected_mime_type} for {original_filename}")
+        detected_mime_type = detect_mime_type_from_extension(
+            original_filename,
+            provided_mime_type=db_mime_type,
+        )
+        logger.info(
+            f"🔍 [VALIDATION] Resolved MIME type: {detected_mime_type} "
+            f"(db_mime_type={db_mime_type or 'none'}) for {original_filename}"
+        )
 
         # Validate file extension
         ext_valid, ext_error = validate_file_extension(original_filename)
@@ -196,7 +204,10 @@ async def process_file_content(
         original_file_extension = original_filename.rsplit('.', 1)[-1] if '.' in original_filename else ''
         original_mime_type = detected_mime_type
         
-        logger.info(f"🔍 [ROUTING] Detected MIME: {detected_mime_type} for {original_filename}")
+        logger.info(
+            f"🔍 [ROUTING] Resolved MIME for Kreuzberg routing: {detected_mime_type} "
+            f"(db_mime_type={db_mime_type or 'none'}, s3_key={s3_key})"
+        )
 
         # Initialize metrics variables
         content_for_upload = ""
@@ -262,6 +273,11 @@ async def process_file_content(
                     processed_successfully = True
                 else:
                     error_msg = kreuzberg_metadata.get("error", "Kreuzberg processing failed")
+                    logger.error(
+                        "❌ [KREUZBERG_EMPTY_EXTRACTION] Extraction returned no markdown "
+                        f"for filename={original_filename} mime_type={detected_mime_type} "
+                        f"s3_key={s3_key} file_id={file_id} error={error_msg}"
+                    )
                     if tmp_path and os.path.exists(tmp_path):
                         os.unlink(tmp_path)
                     return {
@@ -269,6 +285,11 @@ async def process_file_content(
                         "error": f"Kreuzberg processing failed: {error_msg}"
                     }
             except Exception as e:
+                logger.error(
+                    "❌ [KREUZBERG_PROCESSING_EXCEPTION] Kreuzberg processing raised "
+                    f"for filename={original_filename} mime_type={detected_mime_type} "
+                    f"s3_key={s3_key} file_id={file_id}: {e}"
+                )
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
                 return {

@@ -55,14 +55,14 @@ CITATION REMINDERS
 - Do not mention internal source URLs in user-facing prose unless they are already rendered through citation markers.
 
 FORMAT REMINDERS
-- Return a structured result with these fields:
-  - `message_type`: `PURE_GREETING` or `NON_GREETING`
-  - `answer_html`: the user-facing answer
-  - `citation_ids`: unique source numbers used in the answer
-- For exact no-answer output, set `answer_html` to exactly:
+- Return a normal user-facing reply, not JSON and not named fields.
+- You may optionally start with a single line header:
+  MESSAGE_TYPE: PURE_GREETING
+  or
+  MESSAGE_TYPE: NON_GREETING
+- After that optional header, write the answer directly as plain text or brief HTML.
+- For the exact no-answer output, return exactly:
 I don't have any information on this topic.
-- For PURE_GREETING, `citation_ids` must be empty.
-- For NON_GREETING factual answers, `citation_ids` must list the unique source numbers you used.
 
 FOLLOW-UP EXAMPLES
 - User: "and in 1941?"
@@ -199,7 +199,7 @@ CITATION RULES
 I don't have any information on this topic.
 
 FORMAT RULES
-- Return plain user-facing text or brief HTML.
+- Return plain user-facing text or brief HTML, not structured fields or JSON.
 - Use brief HTML for normal answers, such as simple `<p>` and `<ul><li>` structures when helpful.
 - Do not add HTML to the exact no-answer response.
 - Keep answers direct and user-facing.
