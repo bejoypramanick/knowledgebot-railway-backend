@@ -69,6 +69,12 @@ async def _log_stream_chunks_on_error(
                 "🔎 [DEBUG] Gemini Finish Reason: "
                 f"{finish_reason_value} cache_ref={cache_ref} model={model_name} part_count={part_count}"
             )
+            _log_candidate_parts(
+                candidate,
+                cache_ref=cache_ref,
+                model_name=model_name,
+                prefix="🧩 [GEMINI_STREAM_PART]",
+            )
 
             if finish_reason_value == "ERROR":
                 logger.error(
@@ -446,6 +452,12 @@ class CachedGoogleModel(GoogleModel):
                     parts = getattr(content, "parts", None) if content is not None else None
                     finish_reason_value = getattr(finish_reason, "value", finish_reason)
                     part_count = len(parts or []) if parts is not None else None
+                    _log_candidate_parts(
+                        candidate,
+                        cache_ref=model_settings.get("google_cached_content"),
+                        model_name=self.model_name,
+                        prefix="🧩 [GEMINI_PART]",
+                    )
 
                     if finish_reason_value == "ERROR":
                         logger.error(
