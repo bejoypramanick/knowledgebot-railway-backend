@@ -1,42 +1,56 @@
 """
-Centralized database initialization with retry logic for Railway deployment.
+Database Initialization with Retry Logic using Tenacity
 
-On Railway, PostgreSQL may be starting up during container restarts.
-This module provides reliable database connection with exponential backoff retry.
+Replaces manual retry loops with battle-tested Tenacity library.
+Handles PostgreSQL startup delays on Railway deployments with exponential backoff.
 
 Usage:
-    # Instead of:
-    # await init_database(database_url)
-
-    # Use:
     from shared.db_retry import initialize_database_with_retry
-    success = await initialize_database_with_retry(database_url)
+    success = await initialize_database_with_retry(database_url, service_name="my-service")
 """
 
-import asyncio
-import logging
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    RetryError,
+)
 from shared.otel_logger import get_otel_logger
-from typing import Optional
 from shared.sqlalchemy_db import init_database, validate_database
 
 logger = get_otel_logger(__name__, "shared")
 
 
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception_type(Exception),
+    reraise=True,
+)
+async def _init_database_with_retry(database_url: str) -> None:
+    """Internal database initialization with Tenacity retry decorator."""
+    await init_database(database_url)
+    is_valid = await validate_database()
+    if not is_valid:
+        raise RuntimeError("Database schema validation returned False")
+
+
 async def initialize_database_with_retry(
     database_url: str,
     max_retries: int = 5,
-    retry_delay: int = 2,
-    service_name: str = "unknown"
+    retry_delay: int = 2,  # Ignored when using Tenacity (kept for API compatibility)
+    service_name: str = "unknown",
 ) -> bool:
     """
-    Initialize database with retry logic for Railway deployments.
+    Initialize database with exponential backoff retry logic for Railway deployments.
 
-    Handles PostgreSQL startup delays during container restarts with exponential backoff.
+    Handles PostgreSQL startup delays during container restarts.
 
     Args:
         database_url: PostgreSQL connection URL
-        max_retries: Number of connection attempts (default: 5)
-        retry_delay: Delay between retries in seconds (default: 2)
+        max_retries: Number of connection attempts (default: 5, overridden by Tenacity config)
+        retry_delay: Ignored (kept for backward compatibility)
         service_name: Service name for logging context
 
     Returns:
@@ -49,8 +63,6 @@ async def initialize_database_with_retry(
             success = await initialize_database_with_retry(database_url, service_name="my-service")
             if success:
                 logger.info("Database ready")
-            else:
-                logger.warning("Database unavailable, but service started")
         ```
     """
     if not database_url:
@@ -58,39 +70,17 @@ async def initialize_database_with_retry(
         return False
 
     logger.info(f"💾 [{service_name}] Initializing SQLAlchemy database with retry logic...")
-    logger.info(f"   Max retries: {max_retries}, Retry delay: {retry_delay}s")
+    logger.info(f"   Retries: up to 5 with exponential backoff (2s-30s)")
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.info(f"🔄 [{service_name}] Database connection attempt {attempt}/{max_retries}")
-
-            # Try to initialize database
-            await init_database(database_url)
-            logger.info(f"✅ [{service_name}] SQLAlchemy engine initialized")
-
-            # Validate schema
-            is_valid = await validate_database()
-            if is_valid:
-                logger.info(f"✅ [{service_name}] Database schema validated successfully")
-                logger.info(f"✅ [{service_name}] Database is ready and operational")
-                return True
-            else:
-                logger.warning(f"⚠️ [{service_name}] Database schema validation returned False")
-
-                if attempt < max_retries:
-                    logger.info(f"⏳ [{service_name}] Retrying in {retry_delay}s...")
-                    await asyncio.sleep(retry_delay)
-                continue
-
-        except Exception as e:
-            logger.error(f"❌ [{service_name}] Database connection attempt {attempt} failed: {e}")
-
-            if attempt < max_retries:
-                logger.info(f"⏳ [{service_name}] Retrying in {retry_delay}s...")
-                await asyncio.sleep(retry_delay)
-            else:
-                logger.error(f"❌ [{service_name}] All {max_retries} connection attempts failed")
-                logger.warning(f"⚠️ [{service_name}] Service starting with database unavailable")
-                return False
-
-    return False
+    try:
+        await _init_database_with_retry(database_url)
+        logger.info(f"✅ [{service_name}] Database is ready and operational")
+        return True
+    except RetryError as e:
+        logger.error(f"❌ [{service_name}] All retry attempts failed: {e.last_attempt.exception()}")
+        logger.warning(f"⚠️ [{service_name}] Service starting with database unavailable")
+        return False
+    except Exception as e:
+        logger.error(f"❌ [{service_name}] Database initialization failed: {e}")
+        logger.warning(f"⚠️ [{service_name}] Service starting with database unavailable")
+        return False

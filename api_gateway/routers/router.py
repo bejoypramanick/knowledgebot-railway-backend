@@ -9,6 +9,8 @@ from typing import Dict, Any
 from httpx import AsyncClient
 import httpx
 import asyncio
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..core.firebase_auth import verify_firebase_token, get_user_by_uid as get_user_from_firebase
 from ..core.config import get_settings
@@ -16,6 +18,9 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("api_gateway.routers.router", "api-gateway")
 router = APIRouter()
+
+# Initialize SlowAPI rate limiter for request-count based limiting
+limiter = Limiter(key_func=get_remote_address)
 
 
 async def check_config_service_with_retry(config_service_url: str, max_retries: int = 2) -> Dict[str, Any]:
@@ -71,6 +76,7 @@ async def is_authorized_domain(referer: str = None, origin: str = None) -> bool:
 # =================================
 
 @router.get("/chatbot/validate-chat")
+@limiter.limit("100/minute")
 async def validate_chat_window_load(request: Request):
     """
     Window-load chat validation endpoint.
@@ -243,6 +249,7 @@ async def validate_chat_window_load(request: Request):
 # =================================
 
 @router.post("/auth/verify")
+@limiter.limit("100/minute")
 async def verify_auth_token(request: Request):
     """Verify Firebase authentication token"""
     try:
@@ -641,6 +648,7 @@ async def switch_user_role(request: Request):
 # =================================
 
 @router.post("/chatbot/chat/stream")
+@limiter.limit("50/minute")
 async def public_chat_stream(request: Request):
     """Public chat streaming endpoint - no authentication required for website visitors"""
     try:

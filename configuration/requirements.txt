@@ -14,6 +14,7 @@ sqlalchemy>=2.0.23  # Battle-tested ORM with robust connection pooling
 
 # Common utilities
 pydantic-settings>=2.5.0
+structlog>=24.4.0
 psutil>=6.1.0
 
 # Retry logic (used by core/db.py)

@@ -1,14 +1,10 @@
 """Configuration settings for Health Monitoring Service."""
 from typing import Optional
-from pydantic_settings import BaseSettings
+from shared.base_settings import BaseServiceSettings
 
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-
-    # Database Configuration
-    railway_postgres_url: Optional[str] = None
-    database_url: Optional[str] = None
+class Settings(BaseServiceSettings):
+    """Health Monitoring specific settings (extends common BaseServiceSettings)."""
 
     # Health Monitor Configuration
     health_monitor_enabled: bool = True  # Set to False via HEALTH_MONITOR_ENABLED=false to disable monitoring
@@ -54,11 +50,6 @@ class Settings(BaseSettings):
         logger.info(f"   - knowledgebase_ingestion: {self.knowledgebase_ingestion_url}")
         logger.info(f"   - website_crawling: {self.website_crawling_url}")
         logger.info(f"   - kreuzberg_api: {self.kreuzberg_api_url}")
-
-    model_config = {
-        'env_file': ".env",
-        'case_sensitive': False
-    }
 
 
 settings = Settings()

@@ -17,7 +17,12 @@ redis>=5.0.0
 
 # Common utilities
 pydantic-settings>=2.5.0
+structlog>=24.4.0
 psutil>=6.1.0
+
+# Rate limiting
+slowapi>=0.1.8
+limits>=3.5.0
 
 # Retry logic (used by core/db.py)
 tenacity>=8.2.2

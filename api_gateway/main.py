@@ -111,6 +111,18 @@ app = FastAPI(
 # Instrument FastAPI for OpenTelemetry immediately after app creation
 instrument_fastapi(app, "api-gateway")
 
+# Initialize SlowAPI rate limiting middleware
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, lambda request, exc: JSONResponse(
+    status_code=429,
+    content={"success": False, "message": "Rate limit exceeded", "detail": str(exc.detail)}
+))
+
 
 # Add middleware to app
 # IMPORTANT: Middleware execution order in Starlette/FastAPI is LIFO (Last In, First Out)

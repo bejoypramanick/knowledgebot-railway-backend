@@ -14,16 +14,13 @@ Redis Data Model:
 """
 import redis.asyncio as redis
 import json
-import os
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Set
 
 from shared.otel_logger import get_otel_logger
+from shared.redis_factory import create_async_redis_client
 
 logger = get_otel_logger(__name__, "shared")
-
-# Global Redis client for chat store (database 6)
-_chat_store_client: Optional[redis.Redis] = None
 
 # Key patterns
 SESSION_KEY = "chat:session:{}"
@@ -43,53 +40,16 @@ async def init_chat_store_redis() -> redis.Redis:
     Requires CHAT_STORE_REDIS_URL environment variable.
     Format: redis://default:<password>@redis.railway.internal:6379/6
     """
-    global _chat_store_client
-
-    if _chat_store_client is not None:
-        return _chat_store_client
-
-    redis_url = os.getenv('CHAT_STORE_REDIS_URL')
-
-    if not redis_url:
-        pubsub_url = os.getenv('PUBSUB_REDIS_URL', '')
-        if pubsub_url:
-            if '/' in pubsub_url.rsplit(':', 1)[-1]:
-                redis_url = pubsub_url.rsplit('/', 1)[0] + '/6'
-            else:
-                redis_url = pubsub_url + '/6'
-            logger.info("Derived CHAT_STORE_REDIS_URL from PUBSUB_REDIS_URL (DB 6)")
-        else:
-            raise RuntimeError(
-                "CHAT_STORE_REDIS_URL environment variable not set. "
-                "Format: redis://default:<password>@redis.railway.internal:6379/6"
-            )
-
-    try:
-        logger.info("Initializing Redis chat store client (database 6)...")
-
-        _chat_store_client = redis.from_url(
-            redis_url,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_keepalive=True,
-            health_check_interval=30
-        )
-
-        await _chat_store_client.ping()
-        logger.info("Redis chat store client initialized (db=6)")
-
-        return _chat_store_client
-
-    except redis.ConnectionError as e:
-        logger.error(f"Failed to connect to Redis chat store: {e}")
-        raise RuntimeError(f"Redis chat store connection failed: {e}")
+    return await create_async_redis_client(
+        primary_env_var="CHAT_STORE_REDIS_URL",
+        fallback_env_var="PUBSUB_REDIS_URL",
+        fallback_db_suffix="/6",
+    )
 
 
 async def get_chat_store_redis() -> redis.Redis:
     """Get async Redis chat store client, initializing if needed."""
-    if _chat_store_client is None:
-        return await init_chat_store_redis()
-    return _chat_store_client
+    return await init_chat_store_redis()
 
 
 class RedisChatStore:

@@ -10,16 +10,13 @@ Cache strategy:
 - Invalidated when websites are deleted
 """
 import redis.asyncio as redis
-import os
 import json
 from typing import Dict, List, Optional
 
 from shared.otel_logger import get_otel_logger
+from shared.redis_factory import create_async_redis_client
 
 logger = get_otel_logger(__name__, "shared")
-
-# Global Redis client (reuses agent cache DB 4)
-_citation_cache_client: Optional[redis.Redis] = None
 
 CACHE_KEY_PREFIX = "citation:url:"
 DEFAULT_TTL = 86400  # 24 hours
@@ -27,33 +24,11 @@ DEFAULT_TTL = 86400  # 24 hours
 
 async def _get_redis_client() -> redis.Redis:
     """Get or initialize async Redis client for citation cache (DB 4)."""
-    global _citation_cache_client
-
-    if _citation_cache_client is not None:
-        return _citation_cache_client
-
-    redis_url = os.getenv('AGENT_CACHE_REDIS_URL')
-
-    if not redis_url:
-        pubsub_url = os.getenv('PUBSUB_REDIS_URL', '')
-        if pubsub_url:
-            if '/' in pubsub_url.rsplit(':', 1)[-1]:
-                redis_url = pubsub_url.rsplit('/', 1)[0] + '/4'
-            else:
-                redis_url = pubsub_url + '/4'
-        else:
-            raise RuntimeError("AGENT_CACHE_REDIS_URL not set")
-
-    _citation_cache_client = redis.from_url(
-        redis_url,
-        decode_responses=True,
-        socket_connect_timeout=5,
-        socket_keepalive=True,
-        health_check_interval=30
+    return await create_async_redis_client(
+        primary_env_var="AGENT_CACHE_REDIS_URL",
+        fallback_env_var="PUBSUB_REDIS_URL",
+        fallback_db_suffix="/4",
     )
-    await _citation_cache_client.ping()
-    logger.info("✅ Redis citation cache client initialized (db=4)")
-    return _citation_cache_client
 
 
 async def get_cached_urls(titles: List[str]) -> Dict[str, Optional[str]]:

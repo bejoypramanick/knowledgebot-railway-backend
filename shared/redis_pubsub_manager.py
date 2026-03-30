@@ -1,78 +1,43 @@
 """
 Redis Pub/Sub Manager for Agent SSE Events
-Uses Redis database 4 for real-time event broadcasting
+Uses Redis database 3 for real-time event broadcasting
 Simplifies SSE architecture by replacing in-memory queues
 """
 import redis.asyncio as redis
 import json
 import logging
 from shared.otel_logger import get_otel_logger
-import os
+from shared.redis_factory import create_async_redis_client
 from typing import Dict, Any, Optional, AsyncIterator
 import asyncio
 
 logger = get_otel_logger(__name__, "shared")
 
-# Global Redis client for Pub/Sub (database 4)
-_pubsub_redis_client: Optional[redis.Redis] = None
-
 
 async def init_pubsub_redis() -> redis.Redis:
     """
     Initialize async Redis client for Pub/Sub on database 3.
-    
+
     Uses DATABASE 3 for Pub/Sub (SSE events)
     Requires PUBSUB_REDIS_URL environment variable with explicit database number
     Format: redis://default:<password>@redis.railway.internal:6379/3
-    
+
     Returns:
         Async Redis client connected to database 3
-    
+
     Raises:
         RuntimeError if Redis is not configured
     """
-    global _pubsub_redis_client
-    
-    if _pubsub_redis_client is not None:
-        return _pubsub_redis_client
-    
-    redis_url = os.getenv('PUBSUB_REDIS_URL')
-    
-    if not redis_url:
-        raise RuntimeError(
-            "PUBSUB_REDIS_URL environment variable not set. "
-            "Redis Pub/Sub is required for agent SSE events. "
-            "Format: redis://default:<password>@redis.railway.internal:6379/3"
-        )
-    
-    try:
-        logger.info(f"🔌 Initializing async Redis Pub/Sub client (database 3)...")
-        
-        _pubsub_redis_client = redis.from_url(
-            redis_url,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_keepalive=True,
-            health_check_interval=30
-        )
-        
-        # Test connection (async)
-        await _pubsub_redis_client.ping()
-        logger.info("✅ Async Redis Pub/Sub client initialized successfully (db=3)")
-        
-        return _pubsub_redis_client
-        
-    except redis.ConnectionError as e:
-        logger.error(f"❌ Failed to connect to Redis for Pub/Sub: {e}")
-        raise RuntimeError(f"Redis Pub/Sub connection failed: {e}")
-
+    return await create_async_redis_client(
+        primary_env_var="PUBSUB_REDIS_URL",
+        fallback_env_var="",  # No fallback for Pub/Sub - must be explicit
+        fallback_db_suffix="",
+    )
 
 
 async def get_pubsub_redis() -> redis.Redis:
     """Get async Redis Pub/Sub client, initializing if needed"""
-    if _pubsub_redis_client is None:
-        return await init_pubsub_redis()
-    return _pubsub_redis_client
+    return await init_pubsub_redis()
 
 
 class AgentEventBroadcaster:

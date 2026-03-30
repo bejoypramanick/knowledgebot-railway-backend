@@ -71,35 +71,33 @@ async def process_file_content(
     processed_content_s3_key = None
 
     async def get_file_details_by_task_id(celery_task_id: str) -> Optional[Dict[str, Any]]:
-        """Query database to get file details using celery_task_id"""
+        """Query database to get file details using celery_task_id with Tenacity retry."""
         from dao.fileupload_dao import FileUploadDAO
+        from tenacity import retry, stop_after_attempt, wait_exponential
+
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=0.5, min=0.5, max=5),
+            reraise=True,
+        )
+        async def _query_file_details() -> Optional[Dict[str, Any]]:
+            dao = FileUploadDAO()
+            record = await dao.get_file_by_task_id(celery_task_id)
+            if record:
+                logger.info(f"✅ [DB_QUERY_SUCCESS] Found file record for task_id: {celery_task_id}")
+                logger.info(f"   File ID: {record['id']}, S3 Key: {record['s3_key']}")
+                return {
+                    "file_id": str(record["id"]),
+                    "original_filename": record["original_filename"],
+                    "file_display_name": record["display_name"],
+                    "s3_key": record["s3_key"],
+                    "file_size": record["file_size"]
+                }
+            logger.warning(f"⚠️ [DB_QUERY_EMPTY] No file record found for task_id: {celery_task_id}")
+            return None
 
         try:
-            dao = FileUploadDAO()
-            # Add retry logic for database connection issues
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    record = await dao.get_file_by_task_id(celery_task_id)
-                    if record:
-                        logger.info(f"✅ [DB_QUERY_SUCCESS] Found file record for task_id: {celery_task_id}")
-                        logger.info(f"   File ID: {record['id']}, S3 Key: {record['s3_key']}")
-                        return {
-                            "file_id": str(record["id"]),
-                            "original_filename": record["original_filename"],
-                            "file_display_name": record["display_name"],
-                            "s3_key": record["s3_key"],
-                            "file_size": record["file_size"]
-                        }
-                    logger.warning(f"⚠️ [DB_QUERY_EMPTY] No file record found for task_id: {celery_task_id}")
-                    return None
-                except Exception as conn_err:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"⚠️ [DB_RETRY] Connection error (attempt {attempt + 1}/{max_retries}): {conn_err}")
-                        await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
-                        continue
-                    else:
-                        raise
+            return await _query_file_details()
         except Exception as e:
             logger.error(f"❌ Error querying file details by task_id: {e}")
             return None

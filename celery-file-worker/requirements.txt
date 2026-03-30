@@ -2,6 +2,7 @@
 pydantic[email]>=2.12.0
 python-dotenv>=1.2.0
 pydantic-settings>=2.5.0
+structlog>=24.4.0
 psutil>=6.1.0
 tenacity>=8.2.2
 # Database (common for most services)
