@@ -524,9 +524,8 @@ class CachedGoogleModel(GoogleModel):
                 config_dict = cast(dict[str, Any], config)
                 config_dict.pop("system_instruction", None)
                 
-                # THE WORKAROUND IS REMOVED.
-                # We now trust that our root-cause fixes in converters.py (types/descriptions)
-                # and cache_manager.py (removing tool_config) allow Gemini to cache tools.
+                # UNCONDITIONAL STRIP (User requested removal of workarounds)
+                # We trust that the simplified Tool schema resolves the caching issue.
                 logger.info("🛡️ Cache active - stripping system_instruction, tools, and tool_config from request")
                 config_dict.pop("tools", None)
                 config_dict.pop("tool_config", None)
@@ -742,6 +741,23 @@ class CachedGoogleModel(GoogleModel):
             if not _is_cache_error(e):
                 raise
 
+            # If it's a 403 "Not Found" error, it's often a propagation race condition.
+            # Try a single sub-retry with a small delay before triggering a full rebuild.
+            is_new_cache_race = "not found" in str(e).lower() or "403" in str(e)
+            if is_new_cache_race and not getattr(self, '_cache_retry_attempted', False):
+                self._cache_retry_attempted = True
+                logger.warning(
+                    f"⚠️ [CACHE_RACE] Gemini cache ID not yet visible (403/404). Waiting 1.5s... cache={cache_ref}"
+                )
+                await asyncio.sleep(1.5)
+                # Note: We call super()._generate_content directly to retry the EXACT same request
+                return await super()._generate_content(
+                    messages, stream, model_settings, model_request_parameters
+                )
+            
+            # Reset race-retry flag if we got past it but still failed
+            self._cache_retry_attempted = False
+            
             logger.warning(f"Gemini cached content rejected: {cache_ref} error={e}")
             logger.warning(
                 "🚨 [CACHE_REJECTED] "

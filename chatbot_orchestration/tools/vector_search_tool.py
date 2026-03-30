@@ -125,10 +125,6 @@ async def search_knowledge_base(
         str,
         "The search query. IMPORTANT: For complex/multi-part questions, SPLIT the query into multiple search terms joined by ' | '. Example: 'weather in NYC | population of Tokyo | GDP of USA'. Try to find all answers in ONE tool call by combining multiple search concepts with ' | ' separator.",
     ],
-    greeting_flag: Annotated[
-        Optional[bool],
-        "Set to true only when the latest user message is a pure greeting with no information request. Set to false for all other messages.",
-    ] = None,
 ) -> str:
     """
     Advanced Knowledge Base Search with Hybrid Search, Reranking, Compression, and Caching.
@@ -149,20 +145,6 @@ async def search_knowledge_base(
     """
     # Tool call limit removed
     ctx.deps.search_tool_calls += 1
-
-    if greeting_flag is True:
-        logger.info(
-            "👋 [GREETING_BYPASS] Greeting flag=true, skipping pgvector retrieval"
-        )
-        response = (
-            "Greeting-only message detected. Do not use knowledge base facts. "
-            "Respond briefly, warmly, and directly to the user without citations."
-        )
-        logger.info(
-            f"🔎 [DEBUG] Tool Result: status=success payload_size_bytes={len(response.encode('utf-8'))} "
-            f"preview={response[:500]!r}"
-        )
-        return response
 
     import time
 
