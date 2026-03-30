@@ -666,6 +666,13 @@ class CachedGoogleModel(GoogleModel):
                             cache_ref=model_settings.get("google_cached_content"),
                             model_name=self.model_name,
                         )
+                        await self._maybe_run_noncached_control_probe(
+                            messages=messages,
+                            stream=stream,
+                            model_settings=model_settings,
+                            model_request_parameters=model_request_parameters,
+                            force=True,
+                        )
 
                     if finish_reason_value == "ERROR" and not (parts or []):
                         raise UnexpectedModelBehavior(
@@ -851,11 +858,12 @@ class CachedGoogleModel(GoogleModel):
         stream: bool,
         model_settings: GoogleModelSettings,
         model_request_parameters: ModelRequestParameters,
+        force: bool = False,
     ) -> None:
         """Optionally run a non-cached control request to compare with cached mode."""
         if stream:
             return
-        if not os.getenv("GEMINI_DEBUG_CONTROL_NONCACHED", "").lower() in {"1", "true", "yes"}:
+        if not force and not os.getenv("GEMINI_DEBUG_CONTROL_NONCACHED", "").lower() in {"1", "true", "yes"}:
             return
         if not model_settings.get("google_cached_content"):
             return
@@ -867,7 +875,7 @@ class CachedGoogleModel(GoogleModel):
         logger.info(
             "🧪 [GEMINI_CONTROL] starting non-cached control probe "
             f"model={self.model_name} stripped_cache_ref={cache_ref} "
-            f"message_count={len(messages)}"
+            f"message_count={len(messages)} force={force}"
         )
         try:
             control_response = await super()._generate_content(
