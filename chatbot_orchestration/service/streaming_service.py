@@ -419,25 +419,21 @@ class StreamingService:
             try:
 
                 # PG18: Pydantic AI (especially v1.70+) often merges system prompts 
-                # into the first user ModelRequest. Strip ONLY the SystemPromptPart 
-                # to satisfy Gemini caching rules without losing the user's prompt.
+                # into the first user ModelRequest. Create a NEW ModelRequest with 
+                # the stripped parts to satisfy Gemini caching rules WITHOUT mutating 
+                # the agent's actual internal history state.
                 sanitized_history = []
                 for msg in pydantic_messages:
                     if isinstance(msg, ModelRequest):
-                        before = len(msg.parts)
-                        msg.parts = [p for p in msg.parts if not isinstance(p, SystemPromptPart)]
-                        removed = before - len(msg.parts)
-                        if removed:
-                            logger.info(f"🛡️ Stripped {removed} SystemPromptPart(s) from ModelRequest (cache active)")
-                        if msg.parts:
-                            sanitized_history.append(msg)
+                        filtered_parts = [p for p in msg.parts if not isinstance(p, SystemPromptPart)]
+                        if len(filtered_parts) < len(msg.parts):
+                            logger.info(f"🛡️ Stripped {len(msg.parts) - len(filtered_parts)} SystemPromptPart(s) from a ModelRequest (cache active)")
+                        
+                        if filtered_parts:
+                            # Create a new ModelRequest with the filtered parts
+                            sanitized_history.append(ModelRequest(parts=filtered_parts))
                         else:
-                            logger.warning("🗑️ Stripped empty ModelRequest (all parts were system prompts)")
-                    elif hasattr(msg, "kind") and getattr(msg, "kind") == "response" and getattr(msg, "status", None) == "error":
-                        # Strip transient error responses (e.g. 403 Cache Rejection) so they don't pollute history
-                        # and confuse pydantic-ai's retry/validation logic.
-                        logger.warning("🛡️ Deep strip: Removed ModelResponse(status='error') from history")
-                        continue
+                            logger.info("🗑️ Ignored empty ModelRequest (all parts were system prompts)")
                     else:
                         sanitized_history.append(msg)
                 
