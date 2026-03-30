@@ -65,6 +65,10 @@ async def _log_stream_chunks_on_error(
             content = getattr(candidate, "content", None) if candidate else None
             parts = getattr(content, "parts", None) if content is not None else None
             part_count = len(parts or []) if parts is not None else None
+            logger.info(
+                "🔎 [DEBUG] Gemini Finish Reason: "
+                f"{finish_reason_value} cache_ref={cache_ref} model={model_name} part_count={part_count}"
+            )
 
             if finish_reason_value == "ERROR":
                 logger.error(
@@ -328,7 +332,27 @@ class CachedGoogleModel(GoogleModel):
                 logger.info(f"🔍 [DEBUG_PAYLOAD] Pydantic msg kind: {getattr(last_msg, 'kind', 'unknown')} type: {type(last_msg).__name__}")
                 if hasattr(last_msg, 'parts'):
                     for i, p in enumerate(last_msg.parts):
-                        logger.info(f"   part {i}: {type(p).__name__} = {repr(p)[:200]}...")
+                        part_type = type(p).__name__
+                        log_line = f"   part {i}: {part_type}"
+                        tool_name = getattr(p, "tool_name", None)
+                        if tool_name:
+                            log_line += f" tool={tool_name}"
+                            if part_type in ("ToolCallPart", "BuiltinToolCallPart"):
+                                args_str = str(getattr(p, "args", None))
+                                logger.info(
+                                    f"🔎 [DEBUG] Tool Call: name='{tool_name}' args={args_str[:1000]}"
+                                )
+                        args = getattr(p, "args", None)
+                        if args is not None:
+                            args_str = str(args)
+                            log_line += f" args_len={len(args_str)} args={args_str[:400]}"
+                        content = getattr(p, "content", None)
+                        if isinstance(content, str):
+                            compact = content.replace("\n", " ")
+                            log_line += (
+                                f" content_len={len(content)} content_preview={compact[:400]}"
+                            )
+                        logger.info(log_line)
                 else:
                     logger.info("   last_msg has no parts attribute.")
         except Exception as e:

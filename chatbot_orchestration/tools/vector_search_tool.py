@@ -154,10 +154,15 @@ async def search_knowledge_base(
         logger.info(
             "👋 [GREETING_BYPASS] Greeting flag=true, skipping pgvector retrieval"
         )
-        return (
+        response = (
             "Greeting-only message detected. Do not use knowledge base facts. "
             "Respond briefly, warmly, and directly to the user without citations."
         )
+        logger.info(
+            f"🔎 [DEBUG] Tool Result: status=success payload_size_bytes={len(response.encode('utf-8'))} "
+            f"preview={response[:500]!r}"
+        )
+        return response
 
     import time
 
@@ -267,7 +272,12 @@ async def search_knowledge_base(
                 logger.info(
                     f"🧭 [RAG_EARLY_RETURN] reason=no_rows session_id={ctx.deps.session_id or 'none'} query='{effective_query[:120]}'"
                 )
-                return "I don't have any information on this topic."
+                response = "I don't have any information on this topic."
+                logger.info(
+                    f"🔎 [DEBUG] Tool Result: status=success payload_size_bytes={len(response.encode('utf-8'))} "
+                    f"preview={response[:500]!r}"
+                )
+                return response
 
             # --- STEP 2: Reranking ---
             chunks = [dict(row) for row in rows]
@@ -442,8 +452,30 @@ async def search_knowledge_base(
                     "🧭 [RAG_STATE_WRITE] skipped: missing session_id on tool context"
                 )
 
+            try:
+                preview = response[:800].replace("\n", " ")
+                logger.info(
+                    f"🧰 [TOOL_RETURN] tool=search_knowledge_base query_len={len(effective_query or '')} "
+                    f"response_len={len(response)} citations={len(citation_urls)} "
+                    f"rows={len(rows)} top_chunks={len(top_chunks)} preview={preview}"
+                )
+                logger.info(
+                    f"🔎 [DEBUG] Tool Result: status=success payload_size_bytes={len(response.encode('utf-8'))} "
+                    f"preview={response[:500]!r}"
+                )
+            except Exception:
+                pass
+
             return response
 
     except Exception as e:
         logger.error(f"❌ Advanced RAG error: {e}", exc_info=True)
-        return f"An error occurred during search: {str(e)}"
+        response = f"An error occurred during search: {str(e)}"
+        try:
+            logger.info(
+                f"🔎 [DEBUG] Tool Result: status=fail payload_size_bytes={len(response.encode('utf-8'))} "
+                f"preview={response[:500]!r}"
+            )
+        except Exception:
+            pass
+        return response
