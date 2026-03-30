@@ -2,6 +2,7 @@
 Token Usage Tracker
 Tracks and accumulates token usage from Gemini API responses.
 """
+
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -13,23 +14,27 @@ from chatbot_orchestration.core.token_metrics import track_token_metrics
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
+
 @dataclass
 class TokenUsageData:
     """Data class for token usage information"""
+
     session_id: Optional[str] = None
     message_id: Optional[str] = None
-    provider: str = 'gemini'
-    model: str = 'gemini-2.5-flash-lite'
+    provider: str = "gemini"
+    model: str = "gemini-2.5-flash-lite"
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
-    api_call_type: str = 'rag'
+    api_call_type: str = "rag"
     request_metadata: Optional[Dict[str, Any]] = None
+
 
 # Global service instance for connection pooling
 _token_service: Optional[TokenService] = None
+
 
 def get_token_service() -> TokenService:
     """Get or create token service instance for connection pooling"""
@@ -37,6 +42,7 @@ def get_token_service() -> TokenService:
     if _token_service is None:
         _token_service = TokenService()
     return _token_service
+
 
 async def log_async(message: str, level: str = "info") -> None:
     """Async logging to avoid blocking"""
@@ -50,27 +56,52 @@ async def log_async(message: str, level: str = "info") -> None:
     except Exception:
         pass  # Never let logging fail the main function
 
+
 @track_token_metrics("track_token_usage")
-async def track_token_usage(session_id: str, message_id: str, provider: str, model: str, 
-                          prompt_tokens: int, completion_tokens: int, total_tokens: int, 
-                          api_call_type: str, request_metadata: Optional[Dict[str, Any]] = None) -> bool:
+async def track_token_usage(
+    session_id: str,
+    message_id: str,
+    provider: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    api_call_type: str,
+    request_metadata: Optional[Dict[str, Any]] = None,
+) -> bool:
     """Track token usage using the TokenService
-    
+
     Returns:
         bool: True if tracking succeeded, False otherwise
     """
-    logger.info(f"🔍 track_token_usage called - session: {session_id}, total_tokens: {total_tokens}")
-    
-    if not all(isinstance(x, int) and x >= 0 for x in [prompt_tokens, completion_tokens, total_tokens]):
-        await log_async("Invalid token counts: must be non-negative integers", "error")
-        raise ValueError("Invalid token counts: must be non-negative integers")
-        
+    logger.info(
+        f"🔍 track_token_usage called - session: {session_id}, total_tokens: {total_tokens}"
+    )
+
+    # Defensive: convert None to 0
+    prompt_tokens = prompt_tokens or 0
+    completion_tokens = completion_tokens or 0
+    total_tokens = total_tokens or 0
+
+    if not all(
+        isinstance(x, (int, float)) and x >= 0
+        for x in [prompt_tokens, completion_tokens, total_tokens]
+    ):
+        await log_async("Invalid token counts: must be non-negative numbers", "error")
+        raise ValueError("Invalid token counts: must be non-negative numbers")
+
     try:
         token_service = get_token_service()  # Use pooled service instance
         result = await token_service.track_token_usage(
-            session_id, message_id, provider, model,
-            prompt_tokens, completion_tokens, total_tokens,
-            api_call_type, request_metadata
+            session_id,
+            message_id,
+            provider,
+            model,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            api_call_type,
+            request_metadata,
         )
         logger.info(f"✅ track_token_usage completed - result: {result}")
         return result
@@ -82,14 +113,15 @@ async def track_token_usage(session_id: str, message_id: str, provider: str, mod
         raise
 
 
-
-
-
-
 @track_token_metrics("track_gemini_usage")
-async def track_gemini_usage(prompt_tokens: int, candidates_tokens: int, session_id: Optional[str] = None, 
-                          message_id: Optional[str] = None, api_call_type: str = 'rag', 
-                          model: str = 'gemini-2.5-flash-lite') -> bool:
+async def track_gemini_usage(
+    prompt_tokens: int,
+    candidates_tokens: int,
+    session_id: Optional[str] = None,
+    message_id: Optional[str] = None,
+    api_call_type: str = "rag",
+    model: str = "gemini-2.5-flash-lite",
+) -> bool:
     """
     Track Gemini token usage and update llm_providers and token_usage_log tables.
 
@@ -100,7 +132,7 @@ async def track_gemini_usage(prompt_tokens: int, candidates_tokens: int, session
         message_id: UUID of the chat message (optional)
         api_call_type: Type of API call ('rag', 'search', etc.)
         model: Specific model used (default: gemini-2.5-flash-lite)
-        
+
     Returns:
         bool: True if tracking succeeded, False otherwise
     """
@@ -112,7 +144,7 @@ async def track_gemini_usage(prompt_tokens: int, candidates_tokens: int, session
         session_id=session_id,
         message_id=message_id,
         api_call_type=api_call_type,
-        model=model
+        model=model,
     )
 
 
@@ -125,51 +157,73 @@ async def track_gemini_usage_detailed(
     cache_write_tokens: int = 0,
     session_id: Optional[str] = None,
     message_id: Optional[str] = None,
-    api_call_type: str = 'rag',
-    model: str = 'gemini-2.5-flash-lite'
+    api_call_type: str = "rag",
+    model: str = "gemini-2.5-flash-lite",
 ) -> bool:
     """Track detailed Gemini token usage using TokenService
-    
+
     Returns:
         bool: True if tracking succeeded, False otherwise
     """
+    # Defensive: convert None to 0
+    prompt_tokens = prompt_tokens or 0
+    completion_tokens = completion_tokens or 0
+    total_tokens = total_tokens or 0
+    cache_read_tokens = cache_read_tokens or 0
+    cache_write_tokens = cache_write_tokens or 0
+
     # Validate input
-    if not all(isinstance(x, int) and x >= 0 for x in [prompt_tokens, completion_tokens, total_tokens, cache_read_tokens, cache_write_tokens]):
-        await log_async("Invalid token counts: must be non-negative integers", "error")
-        raise ValueError("Invalid token counts: must be non-negative integers")
-    
+    if not all(
+        isinstance(x, (int, float)) and x >= 0
+        for x in [
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+        ]
+    ):
+        await log_async("Invalid token counts: must be non-negative numbers", "error")
+        raise ValueError("Invalid token counts: must be non-negative numbers")
+
     # Calculate total if not provided
     if total_tokens <= 0:
-        total_tokens = prompt_tokens + completion_tokens + cache_read_tokens + cache_write_tokens
+        total_tokens = (
+            prompt_tokens + completion_tokens + cache_read_tokens + cache_write_tokens
+        )
 
     if total_tokens <= 0:
         await log_async("No tokens to track - skipping", "warning")
         return True  # Not an error, just nothing to track
 
     try:
-        await log_async(f"Starting token tracking for session: {session_id}, message: {message_id}, total_tokens: {total_tokens}")
-        
+        await log_async(
+            f"Starting token tracking for session: {session_id}, message: {message_id}, total_tokens: {total_tokens}"
+        )
+
         token_service = get_token_service()  # Use pooled service instance
-        
+
         # Use TokenService for both provider updates and detailed logging
         await token_service.track_token_usage(
             session_id=session_id,
             message_id=message_id,
-            provider='gemini',
+            provider="gemini",
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             api_call_type=api_call_type,
             request_metadata={
-                'cache_read_tokens': cache_read_tokens,
-                'cache_write_tokens': cache_write_tokens
-            }
+                "cache_read_tokens": cache_read_tokens,
+                "cache_write_tokens": cache_write_tokens,
+            },
         )
-        
-        await log_async(f"Successfully tracked Gemini usage: {total_tokens} tokens for session {session_id}")
+
+        await log_async(
+            f"Successfully tracked Gemini usage: {total_tokens} tokens for session {session_id}"
+        )
         return True
-        
+
     except ConnectionError as e:
         await log_async(f"Database connection error in detailed tracking: {e}", "error")
         raise
@@ -179,24 +233,32 @@ async def track_gemini_usage_detailed(
 
 
 @track_token_metrics("track_gemini_usage_from_response")
-async def track_gemini_usage_from_response(usage_obj: Any, session_id: Optional[str] = None, 
-                                         message_id: Optional[str] = None, api_call_type: str = 'rag', 
-                                         model: str = 'gemini-2.5-flash-lite') -> bool:
+async def track_gemini_usage_from_response(
+    usage_obj: Any,
+    session_id: Optional[str] = None,
+    message_id: Optional[str] = None,
+    api_call_type: str = "rag",
+    model: str = "gemini-2.5-flash-lite",
+) -> bool:
     """
     Track Gemini token usage from API response usage object.
-    
+
     Args:
         usage_obj: Gemini API response usage object
         session_id: UUID of the chat session (optional)
         message_id: UUID of the chat message (optional)
         api_call_type: Type of API call ('rag', 'search', etc.)
         model: Specific model used (default: gemini-2.5-flash-lite)
-        
+
     Returns:
         bool: True if tracking succeeded, False otherwise
     """
-    logger.info(f"🔍 track_gemini_usage_from_response called - session: {session_id}, model: {model}")
-    logger.info(f"🔍 usage_obj type: {type(usage_obj)}, has attributes: {dir(usage_obj) if usage_obj else 'None'}")
+    logger.info(
+        f"🔍 track_gemini_usage_from_response called - session: {session_id}, model: {model}"
+    )
+    logger.info(
+        f"🔍 usage_obj type: {type(usage_obj)}, has attributes: {dir(usage_obj) if usage_obj else 'None'}"
+    )
 
     if not usage_obj:
         await log_async("Gemini usage object is None or empty", "warning")
@@ -205,30 +267,30 @@ async def track_gemini_usage_from_response(usage_obj: Any, session_id: Optional[
     try:
         # Extract detailed token breakdown from Gemini usage_metadata object
         prompt_tokens = (
-            getattr(usage_obj, 'promptTokenCount', 0) or
-            getattr(usage_obj, 'prompt_token_count', 0) or
-            getattr(usage_obj, 'input_tokens', 0) or
-            getattr(usage_obj, 'prompt_tokens', 0) or
-            0
-        )
+            getattr(usage_obj, "promptTokenCount", 0)
+            or getattr(usage_obj, "prompt_token_count", 0)
+            or getattr(usage_obj, "input_tokens", 0)
+            or getattr(usage_obj, "prompt_tokens", 0)
+            or 0
+        ) or 0
 
         completion_tokens = (
-            getattr(usage_obj, 'candidatesTokenCount', 0) or
-            getattr(usage_obj, 'candidates_token_count', 0) or
-            getattr(usage_obj, 'output_tokens', 0) or
-            getattr(usage_obj, 'completion_tokens', 0) or
-            0
-        )
+            getattr(usage_obj, "candidatesTokenCount", 0)
+            or getattr(usage_obj, "candidates_token_count", 0)
+            or getattr(usage_obj, "output_tokens", 0)
+            or getattr(usage_obj, "completion_tokens", 0)
+            or 0
+        ) or 0
 
         total_tokens = (
-            getattr(usage_obj, 'totalTokenCount', 0) or
-            getattr(usage_obj, 'total_token_count', 0) or
-            getattr(usage_obj, 'total_tokens', 0) or
-            (prompt_tokens + completion_tokens)
-        )
+            getattr(usage_obj, "totalTokenCount", 0)
+            or getattr(usage_obj, "total_token_count", 0)
+            or getattr(usage_obj, "total_tokens", 0)
+            or (prompt_tokens + completion_tokens)
+        ) or 0
 
-        cache_read_tokens = getattr(usage_obj, 'cache_read_tokens', 0) or 0
-        cache_write_tokens = getattr(usage_obj, 'cache_write_tokens', 0) or 0
+        cache_read_tokens = getattr(usage_obj, "cache_read_tokens", 0) or 0
+        cache_write_tokens = getattr(usage_obj, "cache_write_tokens", 0) or 0
 
         if total_tokens > 0 or prompt_tokens > 0:
             return await track_gemini_usage_detailed(
@@ -240,27 +302,36 @@ async def track_gemini_usage_from_response(usage_obj: Any, session_id: Optional[
                 session_id=session_id,
                 message_id=message_id,
                 api_call_type=api_call_type,
-                model=model
+                model=model,
             )
         else:
             await log_async("No tokens found in Gemini usage object", "warning")
             return True
-            
+
     except AttributeError as e:
-        await log_async(f"Error extracting attributes from Gemini usage object: {e}", "error")
+        await log_async(
+            f"Error extracting attributes from Gemini usage object: {e}", "error"
+        )
         raise
     except Exception as e:
-        await log_async(f"Unexpected error extracting Gemini usage from response: {e}", "error")
+        await log_async(
+            f"Unexpected error extracting Gemini usage from response: {e}", "error"
+        )
         raise
 
 
 @track_token_metrics("track_gemini_usage_with_db")
-async def track_gemini_usage_with_db(run_usage: Any, session_id: Optional[str] = None, 
-                                       message_id: Optional[str] = None, api_call_type: str = 'rag', 
-                                       model: str = 'gemini-2.5-flash-lite', db_connection=None) -> bool:
+async def track_gemini_usage_with_db(
+    run_usage: Any,
+    session_id: Optional[str] = None,
+    message_id: Optional[str] = None,
+    api_call_type: str = "rag",
+    model: str = "gemini-2.5-flash-lite",
+    db_connection=None,
+) -> bool:
     """
     Track Gemini token usage using an existing database connection.
-    
+
     Args:
         run_usage: RunUsage object with token information
         session_id: UUID of the chat session (optional)
@@ -268,19 +339,31 @@ async def track_gemini_usage_with_db(run_usage: Any, session_id: Optional[str] =
         api_call_type: Type of API call ('rag', 'search', etc.)
         model: Specific model used (default: gemini-2.5-flash-lite)
         db_connection: Existing database connection (optional)
-        
+
     Returns:
         bool: True if tracking succeeded, False otherwise
     """
     try:
         # Extract token counts from RunUsage object
-        prompt_tokens = getattr(run_usage, 'input_tokens', 0)
-        completion_tokens = getattr(run_usage, 'output_tokens', 0)
-        cache_read_tokens = getattr(run_usage, 'details', {}).get('accepted_prediction_tokens', 0)
-        cache_write_tokens = getattr(run_usage, 'details', {}).get('rejected_prediction_tokens', 0)
+        prompt_tokens = getattr(run_usage, "input_tokens", 0)
+        completion_tokens = getattr(run_usage, "output_tokens", 0)
+        cache_read_tokens = getattr(run_usage, "details", {}).get(
+            "accepted_prediction_tokens", 0
+        )
+        cache_write_tokens = getattr(run_usage, "details", {}).get(
+            "rejected_prediction_tokens", 0
+        )
 
         # Validate token counts
-        if not all(isinstance(x, (int, float)) and x >= 0 for x in [prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens]):
+        if not all(
+            isinstance(x, (int, float)) and x >= 0
+            for x in [
+                prompt_tokens,
+                completion_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+            ]
+        ):
             await log_async("Invalid token counts in run_usage object", "error")
             raise ValueError("Invalid token counts in run_usage object")
 
@@ -288,37 +371,47 @@ async def track_gemini_usage_with_db(run_usage: Any, session_id: Optional[str] =
             await log_async("No tokens to track in run_usage object", "warning")
             return True
 
-        total_tokens = int(prompt_tokens + completion_tokens + (cache_read_tokens or 0) + (cache_write_tokens or 0))
+        total_tokens = int(
+            prompt_tokens
+            + completion_tokens
+            + (cache_read_tokens or 0)
+            + (cache_write_tokens or 0)
+        )
 
         # Use TokenService for consistency
         token_service = get_token_service()
-        
+
         await token_service.track_token_usage(
             session_id=session_id,
             message_id=message_id,
-            provider='gemini',
+            provider="gemini",
             model=model,
             prompt_tokens=int(prompt_tokens),
             completion_tokens=int(completion_tokens),
             total_tokens=total_tokens,
             api_call_type=api_call_type,
             request_metadata={
-                'cache_read_tokens': int(cache_read_tokens or 0),
-                'cache_write_tokens': int(cache_write_tokens or 0),
-                'db_connection_provided': db_connection is not None
-            }
+                "cache_read_tokens": int(cache_read_tokens or 0),
+                "cache_write_tokens": int(cache_write_tokens or 0),
+                "db_connection_provided": db_connection is not None,
+            },
         )
 
-        await log_async(f"Successfully tracked Gemini usage with DB: {total_tokens} tokens for session {session_id}")
+        await log_async(
+            f"Successfully tracked Gemini usage with DB: {total_tokens} tokens for session {session_id}"
+        )
         return True
-        
+
     except AttributeError as e:
-        await log_async(f"Error extracting attributes from run_usage object: {e}", "error")
+        await log_async(
+            f"Error extracting attributes from run_usage object: {e}", "error"
+        )
         raise
     except ValueError as e:
         await log_async(f"Validation error in track_gemini_usage_with_db: {e}", "error")
         raise
     except Exception as e:
-        await log_async(f"Unexpected error tracking Gemini usage with provided DB: {e}", "error")
+        await log_async(
+            f"Unexpected error tracking Gemini usage with provided DB: {e}", "error"
+        )
         raise
-
