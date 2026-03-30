@@ -267,11 +267,33 @@ class CachedGoogleModel(GoogleModel):
         model_settings: GoogleModelSettings,
         model_request_parameters: ModelRequestParameters,
     ) -> GenerateContentResponse | Awaitable[AsyncIterator[GenerateContentResponse]]:
-        """Fail-fast Gemini call path, except for one stale-cache rebuild attempt."""
+        """Fail-fast Gemini call path with exactly ONE cache rebuild attempt.
+
+        If the rebuilt cache also fails, raises a non-retryable RuntimeError
+        to prevent pydantic-ai from looping back into more rebuilds.
+        """
+        # Guard: if we already tried rebuilding in this agent iteration, don't do it again.
+        # pydantic-ai retries call _generate_content repeatedly — this flag prevents the loop.
+        if getattr(self, '_cache_rebuild_attempted', False):
+            cache_ref = model_settings.get("google_cached_content")
+            logger.error(
+                f"🚫 [CACHE_GUARD] Skipping rebuild — already attempted this iteration. "
+                f"cache_ref={cache_ref}"
+            )
+            # Raise a RuntimeError (NOT a cache error) so pydantic-ai stops retrying
+            raise RuntimeError(
+                "Gemini cache rebuild already attempted and failed. "
+                "The newly created cache was also rejected by Google. "
+                "This may indicate an API key permission issue, model mismatch, or propagation delay."
+            )
+
         try:
-            return await super()._generate_content(
+            result = await super()._generate_content(
                 messages, stream, model_settings, model_request_parameters
             )
+            # Success — reset the guard flag
+            self._cache_rebuild_attempted = False
+            return result
         except Exception as e:
             # ==================== DIAGNOSTIC LOGGING ====================
             import os as _os
@@ -289,7 +311,6 @@ class CachedGoogleModel(GoogleModel):
                 f"  message_count={len(messages)}\n"
                 f"  stream={stream}"
             )
-            # Check for nested/cause exceptions
             if e.__cause__:
                 logger.error(f"🔍 [DIAG] __cause__: type={type(e.__cause__).__name__} str={str(e.__cause__)[:300]}")
             if hasattr(e, 'status_code'):
@@ -302,6 +323,11 @@ class CachedGoogleModel(GoogleModel):
                 raise
 
             logger.warning(f"Gemini cached content rejected: {cache_ref} error={e}")
+
+            # ==================== SINGLE REBUILD ATTEMPT ====================
+            # Set the guard flag BEFORE rebuilding so that if pydantic-ai retries
+            # after our rebuilt cache also fails, we don't enter the rebuild loop.
+            self._cache_rebuild_attempted = True
 
             from .cache_manager import REDIS_CACHE_METADATA_KEY, gemini_cache_manager
 
@@ -332,17 +358,49 @@ class CachedGoogleModel(GoogleModel):
                     "Gemini cached content failed and remote cache rebuild returned no cache id"
                 ) from e
 
-            retry_settings = cast(dict[str, Any], dict(model_settings))
-            retry_settings["google_cached_content"] = rebuilt_cache_name
             logger.info(
                 f"Rebuilt Gemini cache after stale cache error: old={cache_ref} new={rebuilt_cache_name}"
             )
-            return await super()._generate_content(
-                messages,
-                stream,
-                cast(GoogleModelSettings, retry_settings),
-                model_request_parameters,
-            )
+
+            # Retry ONCE with the rebuilt cache
+            retry_settings = cast(dict[str, Any], dict(model_settings))
+            retry_settings["google_cached_content"] = rebuilt_cache_name
+
+            try:
+                result = await super()._generate_content(
+                    messages,
+                    stream,
+                    cast(GoogleModelSettings, retry_settings),
+                    model_request_parameters,
+                )
+                # Rebuilt cache worked! Reset the guard flag.
+                self._cache_rebuild_attempted = False
+                logger.info(f"✅ Rebuilt cache {rebuilt_cache_name} succeeded on retry")
+                return result
+            except Exception as retry_error:
+                # The REBUILT cache also failed. Log everything for diagnosis.
+                logger.error(
+                    f"🔍 [DIAG] REBUILT cache also failed!\n"
+                    f"  rebuilt_cache_ref={rebuilt_cache_name}\n"
+                    f"  old_cache_ref={cache_ref}\n"
+                    f"  retry_exception_type={type(retry_error).__name__}\n"
+                    f"  retry_exception_str={str(retry_error)[:500]}\n"
+                    f"  is_cache_error={_is_cache_error(retry_error)}\n"
+                    f"  model_name={self.model_name}\n"
+                    f"  api_key={api_key_info}"
+                )
+                if hasattr(retry_error, 'status_code'):
+                    logger.error(f"🔍 [DIAG] retry status_code={retry_error.status_code}")
+                if hasattr(retry_error, 'body'):
+                    logger.error(f"🔍 [DIAG] retry body={retry_error.body}")
+
+                # Raise a NON-cache RuntimeError so pydantic-ai won't trigger another
+                # rebuild cycle. The guard flag is already set as additional protection.
+                raise RuntimeError(
+                    f"Gemini cache rebuild failed: both old cache ({cache_ref}) and "
+                    f"rebuilt cache ({rebuilt_cache_name}) were rejected by Google with 403. "
+                    f"Retry error: {retry_error}"
+                ) from retry_error
 
     async def _try_fallback_model(
         self,
