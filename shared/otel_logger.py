@@ -4,6 +4,7 @@ Unified OpenTelemetry Logging Utilities with Structlog Backend
 Provides structured logging with OTel span context integration using structlog as the underlying engine.
 All context variables and public APIs are preserved from the original implementation.
 """
+
 import logging
 import sys
 from typing import Dict, Any, Optional
@@ -19,7 +20,9 @@ session_id_ctx_var: ContextVar[Optional[str]] = ContextVar("session_id", default
 request_id_ctx_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
 
 # Admin context variables for audit trail logging
-admin_session_id_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_session_id", default=None)
+admin_session_id_ctx_var: ContextVar[Optional[str]] = ContextVar(
+    "admin_session_id", default=None
+)
 admin_email_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_email", default=None)
 admin_role_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_role", default=None)
 
@@ -247,7 +250,7 @@ class OpenTelemetryLogger:
             {
                 "file_path": file_info["file_path"],
                 "line_number": file_info["line_number"],
-                "method_name": file_info["method_name"],
+                "func_name": file_info["method_name"],
             }
         )
 
@@ -265,11 +268,11 @@ class OpenTelemetryLogger:
         if span and span.is_recording():
             span_context = span.get_span_context()
             trace_id = (
-                format(span_context.trace_id, "032x")
-                if span_context.trace_id
-                else "0"
+                format(span_context.trace_id, "032x") if span_context.trace_id else "0"
             )
-            span_id = format(span_context.span_id, "016x") if span_context.span_id else "0"
+            span_id = (
+                format(span_context.span_id, "016x") if span_context.span_id else "0"
+            )
 
         # Add span attributes if span exists
         if span and span.is_recording():
@@ -343,7 +346,11 @@ class OpenTelemetryLogger:
         self.debug(f"🔍 DB Executing: {query}{param_str}")
 
     def log_db_query(
-        self, query: str, params: Any = None, result: Any = None, error: Exception = None
+        self,
+        query: str,
+        params: Any = None,
+        result: Any = None,
+        error: Exception = None,
     ):
         """Log database query AFTER execution with result or error"""
         span = trace.get_current_span()
