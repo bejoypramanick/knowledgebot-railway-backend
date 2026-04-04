@@ -8,6 +8,7 @@ from typing import Dict, Any
 
 from celery_app import celery_app
 from shared.otel_logger import get_otel_logger, set_task_id
+from shared.tenant_context import tenant_context
 
 logger = get_otel_logger("celery_tasks", "celery-web-worker")
 
@@ -86,14 +87,20 @@ def scrape_website_task(
             asyncio.set_event_loop(loop)
         
         # Run the async function
-        loop.run_until_complete(
-            website_service.process_website_async(
-                website_id=website_id,
-                url=url,
-                options=options,
-                celery_task_id=task_id
+        with tenant_context(
+            tenant_id=options.get("tenant_id"),
+            tenant_slug=options.get("tenant_slug"),
+            user_role_id=options.get("user_role_id"),
+            user_email=options.get("user_email"),
+        ):
+            loop.run_until_complete(
+                website_service.process_website_async(
+                    website_id=website_id,
+                    url=url,
+                    options=options,
+                    celery_task_id=task_id
+                )
             )
-        )
 
         logger.info("=" * 80)
         logger.info("✅ [CELERY_TASK_COMPLETE] Website scraping completed successfully")
@@ -149,13 +156,19 @@ def scrape_website_task(
                     asyncio.set_event_loop(loop)
                 
                 # Run the async function
-                loop.run_until_complete(
-                    dao.update_website_status(
-                        website_id,
-                        "failed",
-                        f"Processing failed after {self.max_retries} retries: {str(e)}"
+                with tenant_context(
+                    tenant_id=options.get("tenant_id"),
+                    tenant_slug=options.get("tenant_slug"),
+                    user_role_id=options.get("user_role_id"),
+                    user_email=options.get("user_email"),
+                ):
+                    loop.run_until_complete(
+                        dao.update_website_status(
+                            website_id,
+                            "failed",
+                            f"Processing failed after {self.max_retries} retries: {str(e)}"
+                        )
                     )
-                )
                 logger.info(f"✅ [DB_UPDATE] Website status updated to failed for ID {website_id}")
             except Exception as dao_err:
                 logger.error(f"❌ [DB_UPDATE] Failed to update website status to failed: {dao_err}")

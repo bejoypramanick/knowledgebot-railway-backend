@@ -15,6 +15,7 @@ from typing import Optional
 
 from shared.otel_logger import get_otel_logger
 from shared.redis_chat_store import get_chat_store, RedisChatStore
+from shared.tenant_context import tenant_context
 
 logger = get_otel_logger(__name__, "shared")
 
@@ -118,157 +119,162 @@ class ChatWriteThroughService:
             return
 
         try:
-            async with get_db_session() as db:
-                # Step 1: Ensure session row exists in PG
-                # PG18: session_uuid IS the UUIDv7 PK — always use it as db_id
-                db_id = session_uuid
-                if not session_data.get("pg_synced") or session_data.get("pg_synced") == "false":
-                    # Parse ISO string timestamps back to datetime objects for asyncpg
-                    started_at_str = session_data.get("started_at")
-                    if isinstance(started_at_str, str):
-                        try:
-                            started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00'))
-                        except (ValueError, AttributeError):
-                            started_at = None
-                    else:
-                        started_at = started_at_str
-
-                    last_activity_str = session_data.get("last_activity_at")
-                    if isinstance(last_activity_str, str):
-                        try:
-                            last_activity_at = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
-                        except (ValueError, AttributeError):
-                            last_activity_at = None
-                    else:
-                        last_activity_at = last_activity_str
-
-                    # PG18: id IS the UUIDv7 PK — use MERGE with RETURNING to track action
-                    # MERGE provides better semantics: returns merge_action() ('INSERT' or 'UPDATE')
-                    # Enables diagnostics: log "session created vs re-used" for write-through performance tracking
-                    result = await db.execute(
-                        text("""
-                            MERGE INTO chat_sessions AS target
-                            USING (VALUES (CAST(:id AS UUID), CAST(:started_at AS TIMESTAMPTZ), CAST(:last_activity_at AS TIMESTAMPTZ)))
-                                  AS source(id, started_at, last_activity_at)
-                            ON target.id = source.id
-                            WHEN MATCHED THEN
-                                UPDATE SET last_activity_at = source.last_activity_at, updated_at = NOW()
-                            WHEN NOT MATCHED THEN
-                                INSERT (id, is_active, archive_status, started_at, last_activity_at, message_count)
-                                VALUES (source.id, true, 'active', source.started_at, source.last_activity_at, 0)
-                            RETURNING merge_action() AS action, target.id
-                        """),
-                        {
-                            "id": session_uuid,
-                            "started_at": started_at,
-                            "last_activity_at": last_activity_at
-                        }
-                    )
-                    row = result.fetchone()
-                    db_id = str(row.id)
-                    action = row.action
-                    await db.commit()
-
-                    logger.info(f"Write-through: PG session {action} {session_uuid}")
-
-                # Step 2: Batch insert unsynced messages
-                if unsynced:
-                    batch = unsynced[:self._batch_size]
-                    max_index = 0
-
-                    for msg in batch:
-                        # Parse ISO string timestamp back to datetime object for asyncpg
-                        created_at_str = msg.get("created_at")
-                        if isinstance(created_at_str, str):
+            with tenant_context(
+                tenant_id=session_data.get("tenant_id") or None,
+                tenant_slug=session_data.get("tenant_slug") or None,
+                user_role_id=session_data.get("user_role_id") or None,
+            ):
+                async with get_db_session() as db:
+                    # Step 1: Ensure session row exists in PG
+                    # PG18: session_uuid IS the UUIDv7 PK — always use it as db_id
+                    db_id = session_uuid
+                    if not session_data.get("pg_synced") or session_data.get("pg_synced") == "false":
+                        # Parse ISO string timestamps back to datetime objects for asyncpg
+                        started_at_str = session_data.get("started_at")
+                        if isinstance(started_at_str, str):
                             try:
-                                created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                                started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00'))
                             except (ValueError, AttributeError):
-                                created_at = None
+                                started_at = None
                         else:
-                            created_at = created_at_str
+                            started_at = started_at_str
 
-                        # Compute character_count and word_count from message content
-                        msg_content = msg.get("content", "")
-                        char_count = len(msg_content)
-                        word_count = len(msg_content.split()) if msg_content.strip() else 0
+                        last_activity_str = session_data.get("last_activity_at")
+                        if isinstance(last_activity_str, str):
+                            try:
+                                last_activity_at = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
+                            except (ValueError, AttributeError):
+                                last_activity_at = None
+                        else:
+                            last_activity_at = last_activity_str
+
+                        # PG18: id IS the UUIDv7 PK — use MERGE with RETURNING to track action
+                        # MERGE provides better semantics: returns merge_action() ('INSERT' or 'UPDATE')
+                        # Enables diagnostics: log "session created vs re-used" for write-through performance tracking
+                        result = await db.execute(
+                            text("""
+                                MERGE INTO chat_sessions AS target
+                                USING (VALUES (CAST(:id AS UUID), CAST(:started_at AS TIMESTAMPTZ), CAST(:last_activity_at AS TIMESTAMPTZ)))
+                                      AS source(id, started_at, last_activity_at)
+                                ON target.id = source.id
+                                WHEN MATCHED THEN
+                                    UPDATE SET last_activity_at = source.last_activity_at, updated_at = NOW()
+                                WHEN NOT MATCHED THEN
+                                    INSERT (id, is_active, archive_status, started_at, last_activity_at, message_count)
+                                    VALUES (source.id, true, 'active', source.started_at, source.last_activity_at, 0)
+                                RETURNING merge_action() AS action, target.id
+                            """),
+                            {
+                                "id": session_uuid,
+                                "started_at": started_at,
+                                "last_activity_at": last_activity_at,
+                            },
+                        )
+                        row = result.fetchone()
+                        db_id = str(row.id)
+                        action = row.action
+                        await db.commit()
+
+                        logger.info(f"Write-through: PG session {action} {session_uuid}")
+
+                    # Step 2: Batch insert unsynced messages
+                    if unsynced:
+                        batch = unsynced[:self._batch_size]
+                        max_index = 0
+
+                        for msg in batch:
+                            # Parse ISO string timestamp back to datetime object for asyncpg
+                            created_at_str = msg.get("created_at")
+                            if isinstance(created_at_str, str):
+                                try:
+                                    created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                                except (ValueError, AttributeError):
+                                    created_at = None
+                            else:
+                                created_at = created_at_str
+
+                            # Compute character_count and word_count from message content
+                            msg_content = msg.get("content", "")
+                            char_count = len(msg_content)
+                            word_count = len(msg_content.split()) if msg_content.strip() else 0
+
+                            await db.execute(
+                                text("""
+                                    INSERT INTO chat_messages (session_id, role, content, character_count, word_count, created_at, updated_at)
+                                    VALUES (:session_id, :role, :content, :character_count, :word_count, :created_at, NOW())
+                                """),
+                                {
+                                    "session_id": db_id,
+                                    "role": msg["role"],
+                                    "content": msg_content,
+                                    "character_count": char_count,
+                                    "word_count": word_count,
+                                    "created_at": created_at,
+                                },
+                            )
+                            max_index = msg.get("_index", max_index)
+
+                        # Step 3: Update session metadata
+                        # Parse last_activity_at timestamp
+                        last_activity_str = session_data.get("last_activity_at")
+                        if isinstance(last_activity_str, str):
+                            try:
+                                last_activity_at = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
+                            except (ValueError, AttributeError):
+                                last_activity_at = None
+                        else:
+                            last_activity_at = last_activity_str
 
                         await db.execute(
                             text("""
-                                INSERT INTO chat_messages (session_id, role, content, character_count, word_count, created_at, updated_at)
-                                VALUES (:session_id, :role, :content, :character_count, :word_count, :created_at, NOW())
+                                UPDATE chat_sessions
+                                SET message_count = (SELECT COUNT(*) FROM chat_messages WHERE session_id = :db_id),
+                                    last_activity_at = CAST(:last_activity AS TIMESTAMPTZ),
+                                    updated_at = NOW()
+                                WHERE id = :db_id
                             """),
                             {
-                                "session_id": db_id,
-                                "role": msg["role"],
-                                "content": msg_content,
-                                "character_count": char_count,
-                                "word_count": word_count,
-                                "created_at": created_at
-                            }
+                                "db_id": db_id,
+                                "last_activity": last_activity_at,
+                            },
                         )
-                        max_index = msg.get("_index", max_index)
 
-                    # Step 3: Update session metadata
-                    # Parse last_activity_at timestamp
-                    last_activity_str = session_data.get("last_activity_at")
-                    if isinstance(last_activity_str, str):
-                        try:
-                            last_activity_at = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
-                        except (ValueError, AttributeError):
-                            last_activity_at = None
+                        await db.commit()
+
+                        # Step 4: Update sync index in Redis
+                        # +1 because sync_index represents "flush from this index onwards"
+                        await self._store.mark_synced(session_uuid, max_index + 1)
+
+                        logger.info(f"Write-through: flushed {len(batch)} messages for {session_uuid} (up to index {max_index})")
+
+                        # If we flushed all unsynced, remove from dirty
+                        if len(batch) >= len(unsynced):
+                            await self._store.remove_from_dirty(session_uuid)
                     else:
-                        last_activity_at = last_activity_str
+                        # No messages to sync, just update session metadata
+                        # Parse last_activity_at timestamp
+                        last_activity_str = session_data.get("last_activity_at")
+                        if isinstance(last_activity_str, str):
+                            try:
+                                last_activity_at = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
+                            except (ValueError, AttributeError):
+                                last_activity_at = None
+                        else:
+                            last_activity_at = last_activity_str
 
-                    await db.execute(
-                        text("""
-                            UPDATE chat_sessions
-                            SET message_count = (SELECT COUNT(*) FROM chat_messages WHERE session_id = :db_id),
-                                last_activity_at = CAST(:last_activity AS TIMESTAMPTZ),
-                                updated_at = NOW()
-                            WHERE id = :db_id
-                        """),
-                        {
-                            "db_id": db_id,
-                            "last_activity": last_activity_at
-                        }
-                    )
-
-                    await db.commit()
-
-                    # Step 4: Update sync index in Redis
-                    # +1 because sync_index represents "flush from this index onwards"
-                    await self._store.mark_synced(session_uuid, max_index + 1)
-
-                    logger.info(f"Write-through: flushed {len(batch)} messages for {session_uuid} (up to index {max_index})")
-
-                    # If we flushed all unsynced, remove from dirty
-                    if len(batch) >= len(unsynced):
+                        await db.execute(
+                            text("""
+                                UPDATE chat_sessions
+                                SET last_activity_at = CAST(:last_activity AS TIMESTAMPTZ), updated_at = NOW()
+                                WHERE id = :db_id
+                            """),
+                            {
+                                "db_id": db_id,
+                                "last_activity": last_activity_at,
+                            },
+                        )
+                        await db.commit()
                         await self._store.remove_from_dirty(session_uuid)
-                else:
-                    # No messages to sync, just update session metadata
-                    # Parse last_activity_at timestamp
-                    last_activity_str = session_data.get("last_activity_at")
-                    if isinstance(last_activity_str, str):
-                        try:
-                            last_activity_at = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
-                        except (ValueError, AttributeError):
-                            last_activity_at = None
-                    else:
-                        last_activity_at = last_activity_str
-
-                    await db.execute(
-                        text("""
-                            UPDATE chat_sessions
-                            SET last_activity_at = CAST(:last_activity AS TIMESTAMPTZ), updated_at = NOW()
-                            WHERE id = :db_id
-                        """),
-                        {
-                            "db_id": db_id,
-                            "last_activity": last_activity_at
-                        }
-                    )
-                    await db.commit()
-                    await self._store.remove_from_dirty(session_uuid)
 
         except Exception as e:
             logger.error(f"Write-through PG flush failed for {session_uuid}: {e}")

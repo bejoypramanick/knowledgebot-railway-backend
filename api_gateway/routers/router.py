@@ -23,7 +23,11 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
 
-async def check_config_service_with_retry(config_service_url: str, max_retries: int = 2) -> Dict[str, Any]:
+async def check_config_service_with_retry(
+    config_service_url: str,
+    headers: Dict[str, str] = None,
+    max_retries: int = 2,
+) -> Dict[str, Any]:
     """
     Check configuration service with retry logic for connection failures.
     Returns config dict or None if all attempts fail.
@@ -35,6 +39,7 @@ async def check_config_service_with_retry(config_service_url: str, max_retries: 
             async with httpx.AsyncClient(timeout=3.0) as client:
                 response = await client.get(
                     f"{config_service_url}/api/v1/configuration/widgetConfig",
+                    headers=headers,
                     timeout=3.0
                 )
                 
@@ -100,6 +105,13 @@ async def validate_chat_window_load(request: Request):
 
         correlation_id = str(uuid.uuid4())
         logger.info(f"[{correlation_id}] Chat validation request from window load")
+        tenant_id = request.headers.get("X-Tenant-ID") or request.query_params.get("tenant_id")
+        tenant_slug = request.headers.get("X-Tenant-Slug") or request.query_params.get("tenant_slug")
+        tenant_headers = {}
+        if tenant_id:
+            tenant_headers["X-Tenant-ID"] = tenant_id
+        if tenant_slug:
+            tenant_headers["X-Tenant-Slug"] = tenant_slug
 
         # Step 1: Check domain authorization
         referer = request.headers.get("referer")
@@ -119,18 +131,18 @@ async def validate_chat_window_load(request: Request):
         logger.info(f"[{correlation_id}] ✅ Domain authorized")
 
         # Step 2: Check chat enabled status (Redis cache first, then config service)
-        chat_enabled = await get_display_chatbot()
+        chat_enabled = await get_display_chatbot(tenant_id=tenant_id or tenant_slug)
 
         if chat_enabled is None:
             # Cache miss - fetch from config service
             logger.info(f"[{correlation_id}] Cache MISS for display_chatbot, fetching from config service...")
             config_service_url = "http://configuration.railway.internal:8080"
-            config = await check_config_service_with_retry(config_service_url)
+            config = await check_config_service_with_retry(config_service_url, headers=tenant_headers or None)
 
             if config:
                 chat_enabled = config.get("display_chatbot", True)
                 # Cache the result
-                await set_display_chatbot(chat_enabled)
+                await set_display_chatbot(chat_enabled, tenant_id=tenant_id or tenant_slug)
                 logger.info(f"[{correlation_id}] ✅ Config service returned display_chatbot={chat_enabled}, cached")
             else:
                 # Fail open if config service unavailable
@@ -189,7 +201,8 @@ async def validate_chat_window_load(request: Request):
             async with httpx.AsyncClient(timeout=10.0) as client:
                 session_response = await client.post(
                     f"{settings.chatbot_orchestration_url}/api/v1/chatbot/chat/session",
-                    json={"agent_id": "default"}
+                    json={"agent_id": "default"},
+                    headers=tenant_headers or None,
                 )
 
                 if session_response.status_code != 200:
@@ -294,6 +307,17 @@ def _prepare_sse_proxy_headers(request: Request) -> dict:
         headers.pop(h, None)
     # Force identity encoding (no compression) for SSE
     headers["accept-encoding"] = "identity"
+    _inject_identity_headers(request, headers)
+
+    return headers
+
+
+def _inject_identity_headers(request: Request, headers: Dict[str, str]) -> None:
+    """Forward authenticated user and active tenant context to internal services."""
+    request_tenant_id = getattr(request.state, "tenant_id", None) or request.headers.get("X-Tenant-ID")
+    request_tenant_slug = getattr(request.state, "tenant_slug", None) or request.headers.get("X-Tenant-Slug")
+    request_user_role_id = getattr(request.state, "user_role_id", None) or request.headers.get("X-User-Role-ID")
+    request_user_email = getattr(request.state, "user_email", None) or request.headers.get("X-User-Email")
 
     # Forward auth context if available
     if hasattr(request.state, 'user'):
@@ -301,8 +325,16 @@ def _prepare_sse_proxy_headers(request: Request) -> dict:
         headers['X-User-Email'] = request.state.user.get('email', '')
         headers['X-User-Name'] = request.state.user.get('name', '')
         headers['X-User-Role'] = request.state.user.get('role', '')
+        request_user_email = request.state.user.get("email", "") or request_user_email
 
-    return headers
+    if request_tenant_id:
+        headers["X-Tenant-ID"] = request_tenant_id
+    if request_tenant_slug:
+        headers["X-Tenant-Slug"] = request_tenant_slug
+    if request_user_role_id:
+        headers["X-User-Role-ID"] = request_user_role_id
+    if request_user_email:
+        headers["X-User-Email"] = request_user_email
 
 
 @router.get("/configuration/admin/events")
@@ -472,6 +504,9 @@ async def proxy_agent_message(request: Request):
                 headers={
                     "X-User-Email": user_email,
                     "X-User-Role": getattr(request.state, "user_role", ""),
+                    "X-User-Role-ID": getattr(request.state, "user_role_id", ""),
+                    "X-Tenant-ID": getattr(request.state, "tenant_id", "") or request.headers.get("X-Tenant-ID", ""),
+                    "X-Tenant-Slug": getattr(request.state, "tenant_slug", "") or request.headers.get("X-Tenant-Slug", ""),
                     "Content-Type": "application/json"
                 }
             )
@@ -561,7 +596,7 @@ async def switch_user_role(request: Request):
             from sqlalchemy import text
             from shared.sqlalchemy_db import get_db_session
 
-            user_id = int(uid)
+            user_id = uid
 
             async with get_db_session() as session:
                 # Step 1: Get user's current roles
@@ -569,7 +604,9 @@ async def switch_user_role(request: Request):
                     SELECT r.role_name, r.id as role_id
                     FROM user_role_mapping urm
                     JOIN roles r ON urm.role_id = r.id
-                    WHERE urm.user_id = :user_id AND urm.is_active = true
+                    WHERE urm.user_id = CAST(:user_id AS UUID)
+                      AND urm.is_active = true
+                      AND urm.tenant_id = current_tenant_id_optional()
                 """)
                 result = await session.execute(get_roles_query, {"user_id": user_id})
                 current_roles = result.fetchall()
@@ -585,7 +622,9 @@ async def switch_user_role(request: Request):
                     remove_query = text("""
                         UPDATE user_role_mapping
                         SET is_active = false, updated_at = NOW()
-                        WHERE user_id = :user_id AND role_id = :role_id
+                        WHERE user_id = CAST(:user_id AS UUID)
+                          AND role_id = :role_id
+                          AND tenant_id = current_tenant_id_optional()
                     """)
                     await session.execute(remove_query, {
                         "user_id": user_id,
@@ -608,9 +647,9 @@ async def switch_user_role(request: Request):
 
                 # Step 4: Add new role
                 add_query = text("""
-                    INSERT INTO user_role_mapping (user_id, role_id, is_active, created_at, updated_at)
-                    VALUES (:user_id, :role_id, true, NOW(), NOW())
-                    ON CONFLICT (user_id, role_id) DO UPDATE
+                    INSERT INTO user_role_mapping (user_id, role_id, tenant_id, is_active, created_at, updated_at)
+                    VALUES (CAST(:user_id AS UUID), :role_id, current_tenant_id_optional(), true, NOW(), NOW())
+                    ON CONFLICT (user_id, role_id, tenant_id) DO UPDATE
                     SET is_active = true, updated_at = NOW()
                 """)
                 await session.execute(add_query, {
@@ -788,9 +827,11 @@ async def get_widget_config(request: Request):
         full_url = f"{config_service_url}/api/v1/configuration/widgetConfig"
 
         logger.info(f"🔄 Proxying widget config request to: {full_url}")
+        forward_headers: Dict[str, str] = {}
+        _inject_identity_headers(request, forward_headers)
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(full_url)
+            response = await client.get(full_url, headers=forward_headers or None)
 
             if response.status_code == 200:
                 config_data = response.json()
@@ -836,9 +877,11 @@ async def get_admin_widget_config(request: Request):
         full_url = f"{config_service_url}/api/v1/configuration/widgetConfig"
 
         logger.info(f"🔄 Proxying admin widget config request to: {full_url}")
+        forward_headers: Dict[str, str] = {}
+        _inject_identity_headers(request, forward_headers)
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(full_url)
+            response = await client.get(full_url, headers=forward_headers or None)
 
             if response.status_code == 200:
                 config_data = response.json()
@@ -885,12 +928,14 @@ async def save_admin_widget_config(request: Request):
         content_type = request.headers.get("content-type", "application/json")
 
         logger.info(f"🔄 Proxying admin widget config save request to: {full_url} (content-type: {content_type[:50]})")
+        forward_headers: Dict[str, str] = {"Content-Type": content_type}
+        _inject_identity_headers(request, forward_headers)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 full_url,
                 content=body,
-                headers={"Content-Type": content_type}
+                headers=forward_headers
             )
 
             if response.status_code in [200, 201]:
@@ -1072,16 +1117,7 @@ async def generic_proxy_handler(request: Request, path: str):
         headers = dict(request.headers)
         headers.pop("host", None)
         headers = add_correlation_id_headers(headers, correlation_id)
-
-        # Do not log forwarded headers in production (may contain PII/secrets).
-        
-        # Forward user data from request state
-        if hasattr(request.state, 'user'):
-            headers['X-User-UID'] = request.state.user.get('uid', '')
-            headers['X-User-Email'] = request.state.user.get('email', '')
-            headers['X-User-Name'] = request.state.user.get('name', '')
-            headers['X-User-Role'] = request.state.user.get('role', '')
-            # Do not log user dict (contains PII).
+        _inject_identity_headers(request, headers)
         
         # Make HTTP request to service
         # Use longer timeout for batch operations (file uploads/deletes) and complex queries

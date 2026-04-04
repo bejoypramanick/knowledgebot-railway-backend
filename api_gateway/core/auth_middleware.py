@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from api_gateway.core.firebase_auth import verify_firebase_token
 from api_gateway.core.logging_config import get_railway_logger
 from shared.log_sanitizer import hash_pii
+from shared.tenant_context import reset_tenant_context, set_tenant_context
 
 logger = get_railway_logger(__name__)
 
@@ -159,13 +160,25 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         request.state.user_uid = session_data["uid"]
         request.state.user_email = session_data["email"]
         request.state.user_name = session_data["name"]
+        request.state.user_role = session_data.get("role")
+        request.state.user_role_id = session_data.get("active_user_role_id")
+        request.state.tenant_id = session_data.get("active_tenant_id")
+        request.state.tenant_slug = session_data.get("active_tenant_slug")
 
         logger.debug(f"✅ Authenticated via session cookie: user_hash={hash_pii(session_data.get('email'))} path={path}")
 
         # Continue to next middleware/endpoint
-        response = await call_next(request)
-
-        return response
+        tokens = set_tenant_context(
+            tenant_id=session_data.get("active_tenant_id"),
+            tenant_slug=session_data.get("active_tenant_slug"),
+            user_role_id=session_data.get("active_user_role_id"),
+            user_email=session_data.get("email"),
+        )
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            reset_tenant_context(tokens)
 
 
 def get_current_user(request: Request):

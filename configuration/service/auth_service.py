@@ -11,6 +11,14 @@ from ..dao.auth_dao import AuthDAO
 
 logger = get_otel_logger("auth_service", "configuration")
 
+
+def _role_priority(role_name: str) -> int:
+    if role_name == "admin":
+        return 0
+    if role_name == "human_agent":
+        return 1
+    return 2
+
 class AuthService:
     """Service layer for authentication"""
     
@@ -18,25 +26,128 @@ class AuthService:
         self.auth_dao = AuthDAO()  # Service manages its own DAO
     
     
-    async def get_user_role(self, email: str) -> dict:
-        """Get user role (admin, human_agent, or user) for a given email"""
+    async def get_user_role(
+        self,
+        email: str,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+    ) -> dict:
+        """Get the active tenant role context for a given email."""
         try:
-            # Get all roles for the user in a single database call
-            user_roles_data = await self.auth_dao.get_user_roles(email)
+            memberships = await self.auth_dao.get_user_memberships(email)
+            tenant_memberships = self._group_memberships(memberships)
+            active_membership = self._select_active_membership(
+                tenant_memberships,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+            )
 
-            # Extract role names from the results
-            roles = [role_data['role_name'] for role_data in user_roles_data]
+            active_roles = active_membership.get("roles", []) if active_membership else []
+            if not active_roles:
+                active_roles = ["user"]
 
-            # Return all roles or default to user
-            if not roles:
-                roles = ["user"]
+            primary_role = active_membership.get("primary_role") if active_membership else "user"
+            active_user_role_id = active_membership.get("active_user_role_id") if active_membership else None
 
-            return {"email": email, "roles": roles}
+            active_tenant = None
+            if active_membership:
+                active_tenant = {
+                    "tenant_id": active_membership["tenant_id"],
+                    "tenant_slug": active_membership["tenant_slug"],
+                    "tenant_name": active_membership["tenant_name"],
+                }
+            elif tenant_id or tenant_slug:
+                tenant = await self.auth_dao.get_tenant_by_identifier(
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
+                )
+                if tenant:
+                    active_tenant = {
+                        "tenant_id": str(tenant["id"]),
+                        "tenant_slug": tenant["slug"],
+                        "tenant_name": tenant["name"],
+                    }
+
+            return {
+                "email": email,
+                "roles": active_roles,
+                "primary_role": primary_role,
+                "active_user_role_id": active_user_role_id,
+                "active_tenant": active_tenant,
+                "tenant_memberships": tenant_memberships,
+            }
         except Exception as e:
             exc_type = type(e).__name__
             exc_msg = str(e) if str(e) else f"({exc_type})"
             logger.error(f"Error getting user role for {email}: {exc_type}: {exc_msg}")
             raise
+
+    def _group_memberships(self, memberships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        grouped: Dict[str, Dict[str, Any]] = {}
+
+        for membership in memberships:
+            tenant_id = str(membership["tenant_id"])
+            tenant_entry = grouped.setdefault(
+                tenant_id,
+                {
+                    "tenant_id": tenant_id,
+                    "tenant_slug": membership["tenant_slug"],
+                    "tenant_name": membership["tenant_name"],
+                    "roles": [],
+                    "role_memberships": [],
+                    "primary_role": "user",
+                    "active_user_role_id": None,
+                },
+            )
+
+            role_name = membership["role_name"]
+            tenant_entry["roles"].append(role_name)
+            tenant_entry["role_memberships"].append(
+                {
+                    "role": role_name,
+                    "user_role_id": str(membership["user_role_id"]),
+                }
+            )
+
+        memberships_by_tenant = list(grouped.values())
+        for tenant_entry in memberships_by_tenant:
+            tenant_entry["roles"] = sorted(set(tenant_entry["roles"]), key=_role_priority)
+            tenant_entry["role_memberships"].sort(key=lambda item: _role_priority(item["role"]))
+            tenant_entry["primary_role"] = tenant_entry["roles"][0] if tenant_entry["roles"] else "user"
+            tenant_entry["active_user_role_id"] = (
+                tenant_entry["role_memberships"][0]["user_role_id"]
+                if tenant_entry["role_memberships"]
+                else None
+            )
+
+        memberships_by_tenant.sort(
+            key=lambda item: (
+                0 if item["tenant_slug"] == "default" else 1,
+                item["tenant_name"],
+            )
+        )
+        return memberships_by_tenant
+
+    def _select_active_membership(
+        self,
+        memberships: List[Dict[str, Any]],
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not memberships:
+            return None
+
+        if tenant_id:
+            for membership in memberships:
+                if membership["tenant_id"] == tenant_id:
+                    return membership
+
+        if tenant_slug:
+            for membership in memberships:
+                if membership["tenant_slug"] == tenant_slug:
+                    return membership
+
+        return memberships[0]
 
     async def remove_admin(self, email: str, current_user_email: str) -> dict:
         """Remove an admin. Only admins can remove other admins."""

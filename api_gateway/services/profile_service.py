@@ -48,7 +48,12 @@ class ProfileService:
         retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError)),
         reraise=True
     )
-    async def fetch_user_profile(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def fetch_user_profile(
+        self,
+        user_data: Dict[str, Any],
+        preferred_tenant_id: Optional[str] = None,
+        preferred_tenant_slug: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Fetch user profile from configuration service with retry logic.
         
@@ -66,6 +71,10 @@ class ProfileService:
             'X-User-Email': user_data.get('email', ''),
             'X-User-Name': user_data.get('name', user_data.get('email', '')),
         }
+        if preferred_tenant_id:
+            headers["X-Tenant-ID"] = preferred_tenant_id
+        if preferred_tenant_slug:
+            headers["X-Tenant-Slug"] = preferred_tenant_slug
         
         try:
             response = await self.client.get(
@@ -79,7 +88,12 @@ class ProfileService:
                 
                 return {
                     'role': profile_data.get('role', 'user'),
-                    'roles': profile_data.get('roles', ['user'])
+                    'roles': profile_data.get('roles', ['user']),
+                    'active_user_role_id': profile_data.get('active_user_role_id'),
+                    'tenant_id': profile_data.get('tenant_id'),
+                    'tenant_slug': profile_data.get('tenant_slug'),
+                    'tenant_name': profile_data.get('tenant_name'),
+                    'tenant_memberships': profile_data.get('tenant_memberships', []),
                 }
             else:
                 logger.warning(
@@ -99,7 +113,12 @@ class ProfileService:
         logger.info("🔄 Using fallback profile (role=user)")
         return {
             'role': 'user',
-            'roles': ['user']
+            'roles': ['user'],
+            'active_user_role_id': None,
+            'tenant_id': None,
+            'tenant_slug': None,
+            'tenant_name': None,
+            'tenant_memberships': [],
         }
 
 

@@ -6,6 +6,7 @@ from fastapi import Request, HTTPException
 from shared.otel_logger import get_otel_logger
 from shared.sqlalchemy_db import get_db_session
 from shared.log_sanitizer import hash_pii
+from shared.tenant_context import get_current_user_role_id
 
 logger = get_otel_logger("auth", "knowledgebase-ingestion")
 
@@ -48,6 +49,10 @@ async def get_user_role_id_from_email(user_email: str) -> Optional[str]:
         user_role_id if found, None otherwise
     """
     try:
+        current_user_role_id = get_current_user_role_id()
+        if current_user_role_id:
+            return current_user_role_id
+
         from sqlalchemy import text
 
         query = """

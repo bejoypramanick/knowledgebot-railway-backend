@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import text
 from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
+from shared.tenant_context import get_current_tenant_id
 
 logger = get_otel_logger("auth_dao", "configuration")
 
@@ -34,6 +35,9 @@ class AuthDAO:
         self._cache[key] = (value, time.time())
         logger.debug(f"💾 Cached {key}")
 
+    def _tenant_cache_key(self, base_key: str) -> str:
+        return f"{base_key}:{get_current_tenant_id() or 'unscoped'}"
+
     async def check_user_exists(self, email: str) -> Optional[Dict[str, Any]]:
         """Check if user exists for given email."""
         query = text("""
@@ -56,11 +60,13 @@ class AuthDAO:
     async def check_user_has_role(self, email: str, role_name: str) -> Optional[Dict[str, Any]]:
         """Check if user has specific role and return user role mapping."""
         query = text("""
-            SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.created_at,
-                   u.email, u.display_name, r.role_name, r.role_description
+            SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.tenant_id, urm.created_at,
+                   u.email, u.display_name, r.role_name, r.role_description,
+                   t.slug AS tenant_slug, t.name AS tenant_name
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
+            JOIN tenants t ON urm.tenant_id = t.id
             WHERE u.email = :email AND r.role_name = :role_name
         """)
         params = {"email": email, "role_name": role_name}
@@ -84,19 +90,42 @@ class AuthDAO:
         result = await self.check_user_has_role(email, 'human_agent')
         return result is not None
 
-    async def get_user_roles(self, email: str) -> List[Dict[str, Any]]:
+    async def get_user_roles(
+        self,
+        email: str,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Get all roles for a user."""
         query = text("""
-            SELECT urm.user_role_id, r.role_name, r.role_description, urm.created_at
+            SELECT
+                urm.user_role_id,
+                urm.user_id,
+                urm.role_id,
+                urm.tenant_id,
+                r.role_name,
+                r.role_description,
+                urm.created_at,
+                t.slug AS tenant_slug,
+                t.name AS tenant_name,
+                t.is_active AS tenant_is_active
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
+            JOIN tenants t ON urm.tenant_id = t.id
             WHERE u.email = :email
             AND u.is_active = true
             AND urm.is_active = true
+            AND t.is_active = true
+            AND (:tenant_id IS NULL OR urm.tenant_id = CAST(:tenant_id AS UUID))
+            AND (:tenant_slug IS NULL OR t.slug = :tenant_slug)
             ORDER BY r.role_name
         """)
-        params = {"email": email}
+        params = {
+            "email": email,
+            "tenant_id": tenant_id,
+            "tenant_slug": tenant_slug,
+        }
         try:
             logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
@@ -108,15 +137,90 @@ class AuthDAO:
             logger.log_db_query(str(query), params, error=e)
             raise  # ← Raise exception instead of returning []
 
-    async def get_user_by_role_id(self, user_role_id: str) -> Optional[Dict[str, Any]]:
-        """Get user and role information by user_role_id."""
+    async def get_user_memberships(self, email: str) -> List[Dict[str, Any]]:
+        """Get all active tenant memberships for a user."""
         query = text("""
-            SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.created_at,
-                   u.email, u.is_active, u.created_at as user_created_at,
-                   r.role_name, r.role_description
+            SELECT
+                urm.user_role_id,
+                urm.user_id,
+                urm.role_id,
+                urm.tenant_id,
+                urm.created_at,
+                r.role_name,
+                r.role_description,
+                t.slug AS tenant_slug,
+                t.name AS tenant_name,
+                t.is_active AS tenant_is_active
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
+            JOIN tenants t ON urm.tenant_id = t.id
+            WHERE u.email = :email
+            AND u.is_active = true
+            AND urm.is_active = true
+            AND t.is_active = true
+            ORDER BY
+                CASE WHEN t.slug = 'default' THEN 0 ELSE 1 END,
+                t.name,
+                CASE r.role_name
+                    WHEN 'admin' THEN 0
+                    WHEN 'human_agent' THEN 1
+                    ELSE 2
+                END,
+                r.role_name
+        """)
+        params = {"email": email}
+        try:
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                results = await session.execute(query, params)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), params, rows)
+                return [dict(row._mapping) for row in rows]
+        except Exception as e:
+            logger.log_db_query(str(query), params, error=e)
+            raise
+
+    async def get_tenant_by_identifier(
+        self,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get tenant metadata by ID or slug."""
+        query = text("""
+            SELECT id, slug, name, is_active, metadata, created_at, updated_at
+            FROM tenants
+            WHERE is_active = true
+            AND (
+                (:tenant_id IS NOT NULL AND id = CAST(:tenant_id AS UUID))
+                OR (:tenant_slug IS NOT NULL AND slug = :tenant_slug)
+            )
+            ORDER BY CASE WHEN slug = 'default' THEN 0 ELSE 1 END, name
+            LIMIT 1
+        """)
+        params = {"tenant_id": tenant_id, "tenant_slug": tenant_slug}
+        try:
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                row = result.fetchone()
+                logger.log_db_query(str(query), params, row)
+                return dict(row._mapping) if row else None
+        except Exception as e:
+            logger.log_db_query(str(query), params, error=e)
+            raise
+
+    async def get_user_by_role_id(self, user_role_id: str) -> Optional[Dict[str, Any]]:
+        """Get user and role information by user_role_id."""
+        query = text("""
+            SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.tenant_id, urm.created_at,
+                   u.email, u.is_active, u.created_at as user_created_at,
+                   r.role_name, r.role_description,
+                   t.slug AS tenant_slug, t.name AS tenant_name
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            JOIN tenants t ON urm.tenant_id = t.id
             WHERE urm.user_role_id = :user_role_id
         """)
         params = {"user_role_id": user_role_id}
@@ -131,7 +235,12 @@ class AuthDAO:
             logger.log_db_query(str(query), params, error=e)
             return None
 
-    async def add_user_role(self, email: str, role_name: str) -> Optional[Dict[str, Any]]:
+    async def add_user_role(
+        self,
+        email: str,
+        role_name: str,
+        tenant_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Add a role to a user. Creates user if doesn't exist."""
         # First, ensure user exists
         user = await self.check_user_exists(email)
@@ -175,12 +284,20 @@ class AuthDAO:
 
         # Add user role mapping
         mapping_query = text("""
-            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
-            VALUES (:user_id, :role_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (user_id, role_id) DO NOTHING
-            RETURNING user_role_id, user_id, role_id, created_at, updated_at
+            INSERT INTO user_role_mapping (user_id, role_id, tenant_id, is_active, created_at, updated_at)
+            VALUES (
+                :user_id,
+                :role_id,
+                COALESCE(CAST(:tenant_id AS UUID), current_tenant_id_optional()),
+                true,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            )
+            ON CONFLICT (user_id, role_id, tenant_id)
+            DO UPDATE SET is_active = true, updated_at = CURRENT_TIMESTAMP
+            RETURNING user_role_id, user_id, role_id, tenant_id, created_at, updated_at
         """)
-        params = {"user_id": user['id'], "role_id": role_id}
+        params = {"user_id": user['id'], "role_id": role_id, "tenant_id": tenant_id}
         try:
             logger.log_db_operation(str(mapping_query), params)
             async with get_db_session() as session:
@@ -194,14 +311,20 @@ class AuthDAO:
             logger.log_db_query(str(mapping_query), params, error=e)
             return None
 
-    async def remove_user_role(self, email: str, role_name: str) -> bool:
+    async def remove_user_role(
+        self,
+        email: str,
+        role_name: str,
+        tenant_id: Optional[str] = None,
+    ) -> bool:
         """Remove a role from a user."""
         query = text("""
             DELETE FROM user_role_mapping
             WHERE user_id = (SELECT id FROM users WHERE email = :email)
             AND role_id = (SELECT id FROM roles WHERE role_name = :role_name)
+            AND tenant_id = COALESCE(CAST(:tenant_id AS UUID), current_tenant_id_optional())
         """)
-        params = {"email": email, "role_name": role_name}
+        params = {"email": email, "role_name": role_name, "tenant_id": tenant_id}
         try:
             logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
@@ -216,7 +339,8 @@ class AuthDAO:
     async def get_admins(self) -> List[Dict[str, Any]]:
         """Get all users with admin role (cached for 60s)."""
         # Check cache first
-        cached = self._get_cached('admins')
+        cache_key = self._tenant_cache_key("admins")
+        cached = self._get_cached(cache_key)
         if cached is not None:
             return cached
         
@@ -235,7 +359,9 @@ class AuthDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                return [dict(row._mapping) for row in rows]
+                admins = [dict(row._mapping) for row in rows]
+                self._set_cache(cache_key, admins)
+                return admins
         except Exception as e:
             logger.log_db_query(str(query), None, error=e)
             return []

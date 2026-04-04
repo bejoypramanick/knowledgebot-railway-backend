@@ -562,6 +562,8 @@ async def upload_file_async(
         # Extract authenticated user information
         logger.info("🔐 [AUTH] Extracting user information from request")
         user_email, user_id = extract_user_from_request(request)
+        tenant_id = getattr(request.state, "tenant_id", None)
+        tenant_slug = getattr(request.state, "tenant_slug", None)
         logger.info(f"   User: user_hash={hash_pii(user_email)} user_id={user_id}")
         
         # Look up user_role_id from database using email
@@ -728,7 +730,10 @@ async def upload_file_async(
                 'tasks.process_file_upload_task',
                 args=[
                     file_id,  # Pass file_id instead of individual parameters
-                    user_email  # Keep user_email for logging context
+                    user_email,  # Keep user_email for logging context
+                    tenant_id,
+                    tenant_slug,
+                    user_role_id,
                 ],
                 queue='file_processing'
             )

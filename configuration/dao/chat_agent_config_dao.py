@@ -240,9 +240,10 @@ class ChatAgentConfigDAO:
 
                 # Add user role mapping
                 mapping_query = text("""
-                    INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
-                    VALUES (:user_id, :role_id, NOW(), NOW())
-                    ON CONFLICT (user_id, role_id) DO NOTHING
+                    INSERT INTO user_role_mapping (user_id, role_id, tenant_id, is_active, created_at, updated_at)
+                    VALUES (:user_id, :role_id, current_tenant_id_optional(), true, NOW(), NOW())
+                    ON CONFLICT (user_id, role_id, tenant_id) DO UPDATE
+                    SET is_active = true, updated_at = NOW()
                     RETURNING user_role_id
                 """)
                 params = {"user_id": user_id, "role_id": role_id}
@@ -264,6 +265,7 @@ class ChatAgentConfigDAO:
                 DELETE FROM user_role_mapping
                 WHERE user_id = (SELECT id FROM users WHERE email = :email)
                 AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')
+                AND tenant_id = current_tenant_id_optional()
             """)
             params = {"email": email}
             logger.log_db_operation(str(query), params)
@@ -283,6 +285,7 @@ class ChatAgentConfigDAO:
                 DELETE FROM user_role_mapping
                 WHERE user_id = CAST(:user_id AS UUID)
                 AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')
+                AND tenant_id = current_tenant_id_optional()
             """)
             params = {"user_id": user_id}
             logger.log_db_operation(str(query), params)
@@ -332,9 +335,10 @@ class ChatAgentConfigDAO:
 
                 # Add user role mapping
                 mapping_query = text("""
-                    INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
-                    VALUES (:user_id, :role_id, NOW(), NOW())
-                    ON CONFLICT (user_id, role_id) DO NOTHING
+                    INSERT INTO user_role_mapping (user_id, role_id, tenant_id, is_active, created_at, updated_at)
+                    VALUES (:user_id, :role_id, current_tenant_id_optional(), true, NOW(), NOW())
+                    ON CONFLICT (user_id, role_id, tenant_id) DO UPDATE
+                    SET is_active = true, updated_at = NOW()
                     RETURNING user_role_id
                 """)
                 params = {"user_id": user_id, "role_id": role_id}
@@ -356,6 +360,7 @@ class ChatAgentConfigDAO:
                 DELETE FROM user_role_mapping
                 WHERE user_id = (SELECT id FROM users WHERE email = :email)
                 AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')
+                AND tenant_id = current_tenant_id_optional()
             """)
             params = {"email": email}
             logger.log_db_operation(str(query), params)
@@ -375,6 +380,7 @@ class ChatAgentConfigDAO:
                 DELETE FROM user_role_mapping
                 WHERE user_id = CAST(:user_id AS UUID)
                 AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')
+                AND tenant_id = current_tenant_id_optional()
             """)
             params = {"user_id": user_id}
             logger.log_db_operation(str(query), params)

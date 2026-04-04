@@ -26,6 +26,7 @@ from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.routers import fileupload_router, webcrawl_router
 from knowledgebase_ingestion.utils.middleware import log_requests_middleware
 from shared.sqlalchemy_db import init_database, validate_database, close_database
+from shared.tenant_middleware import tenant_context_middleware
 from knowledgebase_ingestion.core.config import settings
 from knowledgebase_ingestion.core.utils import (log_endpoint_request,
                           register_fastapi_exception_handlers,
@@ -164,6 +165,7 @@ instrument_fastapi(app, "knowledgebase-ingestion")
 register_fastapi_exception_handlers(app, "knowledgebase_ingestion")
 
 # Middleware
+app.middleware("http")(tenant_context_middleware)
 app.middleware("http")(log_requests_middleware)
 app.add_middleware(CorrelationIDMiddleware)
 

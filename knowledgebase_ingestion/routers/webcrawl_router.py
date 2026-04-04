@@ -256,6 +256,8 @@ async def scrape_website_async_endpoint(request: Request = None):
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
+        tenant_id = getattr(request.state, "tenant_id", None)
+        tenant_slug = getattr(request.state, "tenant_slug", None)
         logger.info(f"🔐 [AUTH] User: user_hash={hash_pii(user_email)} user_id={user_id}")
         
         # Look up user_role_id from database using email
@@ -279,7 +281,10 @@ async def scrape_website_async_endpoint(request: Request = None):
             max_pages=validation_result.get('max_pages', 100),
             max_concurrent=validation_result.get('max_concurrent', 10),
             delay_between_requests=validation_result.get('delay_between_requests', 0.0),
-            replace_existing=validation_result.get('replace_existing', False)
+            replace_existing=validation_result.get('replace_existing', False),
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            user_email=user_email,
         )
         
         if result.get('success'):

@@ -43,6 +43,7 @@ except Exception as e:
 
 # Import core utilities
 from shared.sqlalchemy_db import init_database, validate_database, close_database, health_check as db_health_check
+from shared.tenant_middleware import tenant_context_middleware
 from configuration.core.utils import (
     validate_environment,
     wait_for_railway_network,
@@ -211,6 +212,8 @@ app = FastAPI(
 
 # Instrument FastAPI for OpenTelemetry immediately after app creation
 instrument_fastapi(app, "configuration")
+
+app.middleware("http")(tenant_context_middleware)
 
 # CORS middleware
 app.add_middleware(

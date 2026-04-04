@@ -42,12 +42,43 @@ from sqlalchemy import text
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from shared.otel_logger import get_otel_logger
+from shared.tenant_context import (
+    get_current_tenant_id,
+    get_current_tenant_slug,
+    get_current_user_email,
+    get_current_user_role_id,
+)
 
 logger = get_otel_logger("sqlalchemy_db", "shared")
 
 # Global engine and session factory
 _engine = None
 _async_session_maker = None
+
+
+async def _apply_request_context(conn_or_session) -> None:
+    tenant_id = get_current_tenant_id() or ""
+    tenant_slug = get_current_tenant_slug() or ""
+    user_role_id = get_current_user_role_id() or ""
+    user_email = get_current_user_email() or ""
+
+    await conn_or_session.execute(
+        text(
+            """
+            SELECT
+                set_config('app.current_tenant_id', :tenant_id, true),
+                set_config('app.current_tenant_slug', :tenant_slug, true),
+                set_config('app.current_user_role_id', :user_role_id, true),
+                set_config('app.current_user_email', :user_email, true)
+            """
+        ),
+        {
+            "tenant_id": tenant_id,
+            "tenant_slug": tenant_slug,
+            "user_role_id": user_role_id,
+            "user_email": user_email,
+        },
+    )
 
 
 async def init_database(database_url: Optional[str] = None, max_retries: int = 5) -> None:
@@ -277,6 +308,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     try:
         session = _async_session_maker()
         async with session:
+            await _apply_request_context(session)
             yield session
             
         # Log slow session usage (held for more than 5 seconds)
@@ -318,6 +350,7 @@ async def get_db_connection():
 
     # Get raw asyncpg connection from SQLAlchemy's async engine pool
     async with _engine.connect() as sa_conn:
+        await _apply_request_context(sa_conn)
         raw_conn = await sa_conn.get_raw_connection()
         yield raw_conn.dbapi_connection.driver_connection
 
@@ -416,6 +449,7 @@ async def execute_autocommit(sql: str) -> None:
 
     async with _engine.connect() as conn:
         conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+        await _apply_request_context(conn)
         await conn.execute(text(sql))
 
 

@@ -29,6 +29,12 @@ class CreateSessionRequest(BaseModel):
     context: Optional[str] = "admin"  # "admin" or "widget"
 
 
+class SwitchTenantRequest(BaseModel):
+    """Request body for switching the active tenant inside an existing session."""
+    tenant_id: Optional[str] = None
+    tenant_slug: Optional[str] = None
+
+
 # Dependency injection helpers
 def get_session_service_dep() -> SessionService:
     """Dependency for SessionService"""
@@ -101,7 +107,13 @@ async def create_session_endpoint(
         # Step 2: Fetch user profile (role) from configuration service
         logger.info("[FLOW] Step 3: Fetch user profile from configuration service")
         try:
-            profile = await profile_service.fetch_user_profile(user_data)
+            preferred_tenant_id = req.headers.get("X-Tenant-ID")
+            preferred_tenant_slug = req.headers.get("X-Tenant-Slug")
+            profile = await profile_service.fetch_user_profile(
+                user_data,
+                preferred_tenant_id=preferred_tenant_id,
+                preferred_tenant_slug=preferred_tenant_slug,
+            )
             user_data.update(profile)
             logger.info(f"[RESULT] Profile fetched: role={profile['role']}, roles={profile['roles']}")
         except Exception as e:
@@ -146,8 +158,15 @@ async def create_session_endpoint(
                 "uid": user_data.get("uid"),
                 "email": user_data.get("email"),
                 "name": user_data.get("name", user_data.get("email")),
-                "picture": user_data.get("picture")
-            }
+                "picture": user_data.get("picture"),
+            },
+            "tenant": {
+                "tenant_id": user_data.get("tenant_id"),
+                "tenant_slug": user_data.get("tenant_slug"),
+                "tenant_name": user_data.get("tenant_name"),
+                "active_user_role_id": user_data.get("active_user_role_id"),
+            },
+            "tenant_memberships": user_data.get("tenant_memberships", []),
         }
         
     except HTTPException:
@@ -238,7 +257,14 @@ async def get_current_user(
                 "email": session_data["email"],
                 "name": session_data["name"],
                 "picture": session_data["picture"]
-            }
+            },
+            "tenant": {
+                "tenant_id": session_data.get("active_tenant_id"),
+                "tenant_slug": session_data.get("active_tenant_slug"),
+                "tenant_name": session_data.get("active_tenant_name"),
+                "active_user_role_id": session_data.get("active_user_role_id"),
+            },
+            "tenant_memberships": session_data.get("tenant_memberships", []),
         }
         
     except HTTPException:
@@ -295,6 +321,69 @@ async def refresh_session(
     except Exception as e:
         logger.error(f"❌ Session refresh failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to refresh session")
+
+
+@router.post("/auth/switch-tenant")
+async def switch_tenant(
+    body: SwitchTenantRequest,
+    request: Request,
+    session_service: SessionService = Depends(get_session_service_dep),
+):
+    """Switch the active tenant on an existing authenticated session."""
+    settings = get_settings()
+
+    session_id = request.cookies.get(settings.session_cookie_name)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    session_data = session_service.get_session(
+        session_id,
+        request.client.host if request.client else None,
+        request.headers.get("user-agent"),
+        validate_security=True,
+    )
+    if not session_data:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    memberships = session_data.get("tenant_memberships", [])
+    selected_membership = None
+
+    for membership in memberships:
+        if body.tenant_id and membership.get("tenant_id") == body.tenant_id:
+            selected_membership = membership
+            break
+        if body.tenant_slug and membership.get("tenant_slug") == body.tenant_slug:
+            selected_membership = membership
+            break
+
+    if not selected_membership:
+        raise HTTPException(status_code=404, detail="Tenant membership not found")
+
+    updated_session = session_service.update_session_fields(
+        session_id,
+        {
+            "role": selected_membership.get("primary_role", "user"),
+            "roles": selected_membership.get("roles", ["user"]),
+            "active_tenant_id": selected_membership.get("tenant_id"),
+            "active_tenant_slug": selected_membership.get("tenant_slug"),
+            "active_tenant_name": selected_membership.get("tenant_name"),
+            "active_user_role_id": selected_membership.get("active_user_role_id"),
+        },
+    )
+    if not updated_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return {
+        "success": True,
+        "tenant": {
+            "tenant_id": updated_session.get("active_tenant_id"),
+            "tenant_slug": updated_session.get("active_tenant_slug"),
+            "tenant_name": updated_session.get("active_tenant_name"),
+            "active_user_role_id": updated_session.get("active_user_role_id"),
+        },
+        "roles": updated_session.get("roles", ["user"]),
+        "role": updated_session.get("role", "user"),
+    }
 
 
 def _is_allowed_origin(origin: str, allowed_origins: list) -> bool:

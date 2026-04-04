@@ -10,12 +10,18 @@ from typing import Optional
 
 from shared.otel_logger import get_otel_logger
 from shared.redis_factory import create_async_redis_client
+from shared.tenant_context import DEFAULT_TENANT_ID, get_current_tenant_id, get_current_tenant_slug
 
 logger = get_otel_logger(__name__, "shared")
 
 CACHE_KEY_PREFIX = "widget:config:"
 DISPLAY_CHATBOT_KEY = f"{CACHE_KEY_PREFIX}display_chatbot"
 DEFAULT_TTL = 86400  # 24 hours
+
+
+def _display_chatbot_key(tenant_id: Optional[str] = None) -> str:
+    scoped_tenant_key = tenant_id or get_current_tenant_id() or get_current_tenant_slug() or DEFAULT_TENANT_ID
+    return f"{DISPLAY_CHATBOT_KEY}:tenant:{scoped_tenant_key}"
 
 
 async def init_widget_config_cache_redis() -> redis.Redis:
@@ -40,7 +46,7 @@ async def get_widget_config_cache_redis() -> redis.Redis:
     return await init_widget_config_cache_redis()
 
 
-async def get_display_chatbot() -> Optional[bool]:
+async def get_display_chatbot(tenant_id: Optional[str] = None) -> Optional[bool]:
     """
     Get the display_chatbot configuration from Redis cache.
 
@@ -49,20 +55,21 @@ async def get_display_chatbot() -> Optional[bool]:
     """
     try:
         client = await get_widget_config_cache_redis()
-        value = await client.get(DISPLAY_CHATBOT_KEY)
+        cache_key = _display_chatbot_key(tenant_id)
+        value = await client.get(cache_key)
         if value is not None:
             bool_value = value.lower() == 'true'
-            logger.debug(f"✅ Cache HIT: display_chatbot={bool_value}")
+            logger.debug(f"✅ Cache HIT: {cache_key}={bool_value}")
             return bool_value
         else:
-            logger.debug(f"❌ Cache MISS: display_chatbot (no value)")
+            logger.debug(f"❌ Cache MISS: {cache_key} (no value)")
             return None
     except Exception as e:
         logger.warning(f"⚠️ Cache GET failed for display_chatbot: {e}")
         return None
 
 
-async def set_display_chatbot(enabled: bool, ttl: int = DEFAULT_TTL) -> bool:
+async def set_display_chatbot(enabled: bool, ttl: int = DEFAULT_TTL, tenant_id: Optional[str] = None) -> bool:
     """
     Cache the display_chatbot configuration.
 
@@ -75,16 +82,17 @@ async def set_display_chatbot(enabled: bool, ttl: int = DEFAULT_TTL) -> bool:
     """
     try:
         client = await get_widget_config_cache_redis()
+        cache_key = _display_chatbot_key(tenant_id)
         value = "true" if enabled else "false"
-        await client.set(DISPLAY_CHATBOT_KEY, value, ex=ttl)
-        logger.info(f"✅ Cache SET: display_chatbot={value} (TTL: {ttl}s)")
+        await client.set(cache_key, value, ex=ttl)
+        logger.info(f"✅ Cache SET: {cache_key}={value} (TTL: {ttl}s)")
         return True
     except Exception as e:
         logger.warning(f"⚠️ Cache SET failed for display_chatbot: {e}")
         return False
 
 
-async def invalidate_display_chatbot() -> bool:
+async def invalidate_display_chatbot(tenant_id: Optional[str] = None) -> bool:
     """
     Remove the display_chatbot configuration from Redis cache.
 
@@ -93,8 +101,9 @@ async def invalidate_display_chatbot() -> bool:
     """
     try:
         client = await get_widget_config_cache_redis()
-        await client.delete(DISPLAY_CHATBOT_KEY)
-        logger.info(f"🗑️ Cache INVALIDATED: display_chatbot")
+        cache_key = _display_chatbot_key(tenant_id)
+        await client.delete(cache_key)
+        logger.info(f"🗑️ Cache INVALIDATED: {cache_key}")
         return True
     except Exception as e:
         logger.warning(f"⚠️ Cache INVALIDATE failed for display_chatbot: {e}")

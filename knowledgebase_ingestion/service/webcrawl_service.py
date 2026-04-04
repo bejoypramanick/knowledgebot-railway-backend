@@ -95,7 +95,10 @@ async def queue_website_for_scraping(
     max_pages: int = 100,
     max_concurrent: int = 10,
     delay_between_requests: float = 0.0,
-    replace_existing: bool = False
+    replace_existing: bool = False,
+    tenant_id: str = None,
+    tenant_slug: str = None,
+    user_email: str = None,
 ) -> Dict[str, Any]:
     """
     Queue website for scraping via Celery.
@@ -169,7 +172,10 @@ async def queue_website_for_scraping(
             'max_pages': max_pages,
             'max_concurrent': max_concurrent,
             'delay_between_requests': delay_between_requests,
-            'user_role_id': user_role_id
+            'user_role_id': user_role_id,
+            'tenant_id': tenant_id,
+            'tenant_slug': tenant_slug,
+            'user_email': user_email,
         }
         logger.info(f"✅ [OPTIONS] Built options dict: {options}")
 

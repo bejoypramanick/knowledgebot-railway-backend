@@ -65,6 +65,11 @@ class SessionService:
             "picture": user_data.get("picture"),
             "role": user_data.get("role", "user"),
             "roles": user_data.get("roles", ["user"]),
+            "active_tenant_id": user_data.get("tenant_id"),
+            "active_tenant_slug": user_data.get("tenant_slug"),
+            "active_tenant_name": user_data.get("tenant_name"),
+            "active_user_role_id": user_data.get("active_user_role_id"),
+            "tenant_memberships": user_data.get("tenant_memberships", []),
             "created_at": int(time.time()),
             "expires_at": int(time.time()) + SESSION_MAX_AGE,
             # Security: Bind session to IP and User-Agent
@@ -84,6 +89,17 @@ class SessionService:
         )
         
         return session_id
+
+    def update_session_fields(self, session_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update selected session fields and persist the session."""
+        session_data = self.store.get(session_id)
+        if not session_data:
+            return None
+
+        session_data.update(updates)
+        ttl = self._remaining_ttl(session_data)
+        self.store.create(session_id, session_data, ttl)
+        return session_data
     
     @trace_service(span_name="service.SessionService.get_session")
     def get_session(
@@ -175,6 +191,12 @@ class SessionService:
         
         logger.info(f"✅ Session refreshed for user_hash={hash_pii(session_data.get('email'))}")
         return True
+
+    def _remaining_ttl(self, session_data: Dict[str, Any]) -> int:
+        expires_at = session_data.get("expires_at")
+        if not expires_at:
+            return SESSION_MAX_AGE
+        return max(int(expires_at) - int(time.time()), 1)
     
     def _validate_session_security(
         self,

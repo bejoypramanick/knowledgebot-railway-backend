@@ -12,6 +12,7 @@ from shared.telemetry import setup_telemetry, instrument_fastapi
 from shared.sqlalchemy_db import close_database, health_check as db_health_check
 from shared.db_retry import initialize_database_with_retry
 from shared.middleware import CorrelationIDMiddleware
+from shared.tenant_middleware import tenant_context_middleware
 
 # Initialize Telemetry
 # Use default behavior (span exporter disabled by default via env var)
@@ -97,6 +98,8 @@ app = FastAPI(
 
 # Instrument FastAPI for OpenTelemetry immediately after app creation
 instrument_fastapi(app, "chatbot-orchestration")
+
+app.middleware("http")(tenant_context_middleware)
 
 # Correlation IDs (X-Correlation-ID) for end-to-end tracing/logging
 app.add_middleware(CorrelationIDMiddleware)

@@ -17,6 +17,7 @@ from typing import Optional
 import redis.asyncio as redis
 
 from shared.otel_logger import get_otel_logger
+from shared.tenant_context import DEFAULT_TENANT_ID, get_current_tenant_id, get_current_tenant_slug
 
 logger = get_otel_logger(__name__, "shared")
 
@@ -37,6 +38,31 @@ TTL_LONG = 86400      # 24 hours — config screens (invalidated explicitly on m
 TTL_WIDGET = 86400    # 24 hours — widget config (presigned URLs valid 7 days, regenerated on invalidation)
 TTL_MEDIUM = 600      # 10 minutes — knowledge base
 TTL_SHORT = 300       # 5 minutes — performance/token usage
+
+
+def _is_already_scoped(key: str) -> bool:
+    return ":tenant:" in key
+
+
+def _is_tenant_scoped_key(key: str) -> bool:
+    if key in {CHAT_AGENT_CONFIG_KEY, WIDGET_CONFIG_KEY, PERFORMANCE_METRICS_KEY}:
+        return True
+    return key.startswith(TOKEN_USAGE_KEY_PREFIX) or key.startswith(KB_FILES_KEY_PREFIX)
+
+
+def normalize_cache_key(key: str, tenant_id: Optional[str] = None) -> str:
+    if not key or _is_already_scoped(key) or not _is_tenant_scoped_key(key):
+        return key
+
+    if key.startswith(TOKEN_USAGE_KEY_PREFIX):
+        suffix = key[len(TOKEN_USAGE_KEY_PREFIX):]
+        return f"{scope_cache_prefix(TOKEN_USAGE_KEY_PREFIX, tenant_id)}{suffix}"
+
+    if key.startswith(KB_FILES_KEY_PREFIX):
+        suffix = key[len(KB_FILES_KEY_PREFIX):]
+        return f"{scope_cache_prefix(KB_FILES_KEY_PREFIX, tenant_id)}{suffix}"
+
+    return scope_cache_key(key, tenant_id)
 
 
 async def init_ui_cache_redis() -> redis.Redis:
@@ -85,6 +111,7 @@ async def get_ui_cache_redis() -> redis.Redis:
 async def cache_get(key: str) -> Optional[dict]:
     """Get a cached value. Returns None on miss or error."""
     try:
+        key = normalize_cache_key(key)
         client = await get_ui_cache_redis()
         value = await client.get(key)
         if value is not None:
@@ -100,6 +127,7 @@ async def cache_get(key: str) -> Optional[dict]:
 async def cache_set(key: str, data, ttl: int) -> bool:
     """Cache a value as JSON with TTL. Returns True on success."""
     try:
+        key = normalize_cache_key(key)
         client = await get_ui_cache_redis()
         await client.set(key, json.dumps(data, default=str), ex=ttl)
         logger.info(f"✅ Cache SET: {key} (TTL: {ttl}s)")
@@ -112,6 +140,7 @@ async def cache_set(key: str, data, ttl: int) -> bool:
 async def cache_invalidate(key: str) -> bool:
     """Delete a specific cache key. Returns True on success."""
     try:
+        key = normalize_cache_key(key)
         client = await get_ui_cache_redis()
         await client.delete(key)
         logger.info(f"🗑️ Cache INVALIDATED: {key}")
@@ -137,22 +166,6 @@ async def cache_invalidate_pattern(pattern: str) -> int:
         return 0
 
 
-async def invalidate_kb_caches() -> int:
-    """
-    Invalidate all knowledge base related UI caches (active and inactive).
-    Called whenever a file or website is added, deleted, or status changes.
-    """
-    try:
-        pattern = f"{KB_FILES_KEY_PREFIX}*"
-        count = await cache_invalidate_pattern(pattern)
-        if count:
-            logger.info(f"🧹 Knowledge base UI caches invalidated ({count} keys)")
-        return count
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to invalidate KB caches: {e}")
-        return 0
-
-
 async def close_ui_cache_redis():
     """Close the Redis UI cache client on shutdown."""
     global _ui_cache_client
@@ -160,3 +173,28 @@ async def close_ui_cache_redis():
         await _ui_cache_client.close()
         _ui_cache_client = None
         logger.info("🛑 Redis UI cache client closed")
+
+
+def scope_cache_key(key: str, tenant_id: Optional[str] = None) -> str:
+    scoped_tenant_key = tenant_id or get_current_tenant_id() or get_current_tenant_slug() or DEFAULT_TENANT_ID
+    return f"{key}:tenant:{scoped_tenant_key}"
+
+
+def scope_cache_prefix(prefix: str, tenant_id: Optional[str] = None) -> str:
+    scoped_tenant_key = tenant_id or get_current_tenant_id() or get_current_tenant_slug() or DEFAULT_TENANT_ID
+    return f"{prefix}tenant:{scoped_tenant_key}:"
+
+
+async def invalidate_kb_caches(tenant_id: Optional[str] = None) -> int:
+    """
+    Invalidate knowledge base UI caches for the active tenant only.
+    """
+    try:
+        pattern = f"{scope_cache_prefix(KB_FILES_KEY_PREFIX, tenant_id)}*"
+        count = await cache_invalidate_pattern(pattern)
+        if count:
+            logger.info(f"🧹 Knowledge base UI caches invalidated ({count} keys)")
+        return count
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to invalidate KB caches: {e}")
+        return 0

@@ -19,6 +19,10 @@ from typing import Optional, List, Dict, Any, Set
 
 from shared.otel_logger import get_otel_logger
 from shared.redis_factory import create_async_redis_client
+from shared.tenant_context import (
+    get_current_tenant_id,
+    get_current_tenant_slug,
+)
 
 logger = get_otel_logger(__name__, "shared")
 
@@ -72,7 +76,9 @@ class RedisChatStore:
         self,
         session_uuid: str,
         user_role_id: str = None,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
+        tenant_id: str = None,
+        tenant_slug: str = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get existing session from Redis or create a new one.
@@ -89,6 +95,15 @@ class RedisChatStore:
             # Check if session already exists in Redis
             existing = await self._client.hgetall(session_key)
             if existing:
+                if (tenant_id or get_current_tenant_id()) and not existing.get("tenant_id"):
+                    await self._client.hset(
+                        session_key,
+                        mapping={
+                            "tenant_id": tenant_id or get_current_tenant_id() or "",
+                            "tenant_slug": tenant_slug or get_current_tenant_slug() or "",
+                        },
+                    )
+                    existing = await self._client.hgetall(session_key)
                 logger.debug(f"Redis session HIT: {session_uuid}")
                 return self._deserialize_session(existing)
 
@@ -98,6 +113,8 @@ class RedisChatStore:
             session_data = {
                 "session_uuid": session_uuid,
                 "user_role_id": user_role_id if user_role_id else "",
+                "tenant_id": tenant_id or get_current_tenant_id() or "",
+                "tenant_slug": tenant_slug or get_current_tenant_slug() or "",
                 "started_at": now,
                 "last_activity_at": now,
                 "is_active": "true",

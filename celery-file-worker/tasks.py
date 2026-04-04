@@ -11,6 +11,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 
 from celery_app import celery_app
 from shared.otel_logger import get_otel_logger, set_task_id
+from shared.tenant_context import tenant_context
 
 logger = get_otel_logger("celery_tasks", "celery-file-worker")
 
@@ -19,7 +20,10 @@ logger = get_otel_logger("celery_tasks", "celery-file-worker")
 def process_file_upload_task(
     self,
     file_id: str,
-    user_email: str
+    user_email: str,
+    tenant_id: str = None,
+    tenant_slug: str = None,
+    user_role_id: str = None,
 ):
     """
     Celery task for async file processing.
@@ -81,13 +85,19 @@ def process_file_upload_task(
             asyncio.set_event_loop(loop)
         
         # Run the async function
-        result = loop.run_until_complete(
-            process_file_content(
-                file_id=file_id,
-                user_email=user_email,
-                celery_task_id=task_id
+        with tenant_context(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            user_role_id=user_role_id,
+            user_email=user_email,
+        ):
+            result = loop.run_until_complete(
+                process_file_content(
+                    file_id=file_id,
+                    user_email=user_email,
+                    celery_task_id=task_id
+                )
             )
-        )
 
         logger.info("=" * 80)
         logger.info("✅ [CELERY_TASK_COMPLETE] File processing completed successfully")
@@ -118,9 +128,15 @@ def process_file_upload_task(
             dao = FileUploadDAO()
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(
-                dao.update_file_status(file_id, "failed", "Processing timeout (35 minutes)")
-            )
+            with tenant_context(
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                user_role_id=user_role_id,
+                user_email=user_email,
+            ):
+                loop.run_until_complete(
+                    dao.update_file_status(file_id, "failed", "Processing timeout (35 minutes)")
+                )
             logger.info(f"✅ [DB_UPDATE] Marked file {file_id} as failed due to timeout")
         except Exception as db_err:
             logger.error(f"❌ [DB_UPDATE] Failed to update file status: {db_err}")

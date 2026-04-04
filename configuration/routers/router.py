@@ -2108,7 +2108,7 @@ async def get_feedback():
 # =================================
 
 @router.get("/users/profile")
-async def get_user_profile(user: dict = Depends(get_current_user)):
+async def get_user_profile(request: Request, user: dict = Depends(get_current_user)):
     """Get user profile information"""
     import time
     start_time = time.time()
@@ -2127,11 +2127,20 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         logger.info("[FLOW] Calling auth_service.get_user_role()")
         # Don't catch exceptions - let them propagate so the endpoint returns 503
         # If database is unavailable, client should know immediately, not get fake data
-        role_result = await auth_service.get_user_role(user_email)
+        requested_tenant_id = request.headers.get("X-Tenant-ID") or getattr(request.state, "tenant_id", None)
+        requested_tenant_slug = request.headers.get("X-Tenant-Slug") or getattr(request.state, "tenant_slug", None)
+        role_result = await auth_service.get_user_role(
+            user_email,
+            tenant_id=requested_tenant_id,
+            tenant_slug=requested_tenant_slug,
+        )
         logger.info(f"[RESULT] Role result retrieved: {role_result}")
 
         user_roles = role_result.get("roles", ["user"])
         logger.info(f"[RESULT] User roles: {user_roles}")
+        active_tenant = role_result.get("active_tenant")
+        tenant_memberships = role_result.get("tenant_memberships", [])
+        active_user_role_id = role_result.get("active_user_role_id")
         
         # If user has no roles, they might not be in user_role_mapping table
         # This is OK - they're a regular user
@@ -2140,7 +2149,9 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         
         # Determine primary role (admin > human_agent > user)
         logger.info("[TRANSFORM] Determining primary role")
-        primary_role = "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
+        primary_role = role_result.get("primary_role") or (
+            "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
+        )
         logger.info(f"[RESULT] Primary role determined: {primary_role}")
         
         # Get numeric user ID from database (used for authorization, not display)
@@ -2156,6 +2167,11 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
             "photo_url": user.get("picture"),  # Frontend expects photo_url
             "role": primary_role,
             "roles": user_roles,  # Include all roles for frontend
+            "active_user_role_id": active_user_role_id,
+            "tenant_id": active_tenant.get("tenant_id") if active_tenant else None,
+            "tenant_slug": active_tenant.get("tenant_slug") if active_tenant else None,
+            "tenant_name": active_tenant.get("tenant_name") if active_tenant else None,
+            "tenant_memberships": tenant_memberships,
             "preferences": {
                 "theme": "light",
                 "notifications": True

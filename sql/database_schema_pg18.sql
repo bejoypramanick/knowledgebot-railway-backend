@@ -511,3 +511,7 @@ CREATE INDEX IF NOT EXISTS idx_document_chunks_document_type ON public.document_
 ALTER TABLE public.document_chunks OWNER TO postgres;
 GRANT ALL ON TABLE public.document_chunks TO postgres;
 GRANT ALL ON TABLE public.document_chunks TO pg_database_owner;
+
+-- NOTE:
+-- Apply sql/migrations/024_multitenant_isolation.sql after this base schema to
+-- enable tenant-aware role memberships, tenant columns, and row-level isolation.
