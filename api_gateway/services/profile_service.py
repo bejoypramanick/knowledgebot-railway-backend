@@ -13,6 +13,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from api_gateway.core.config import get_settings
 from api_gateway.core.logging_config import get_railway_logger
+from shared.internal_request_auth import add_internal_request_signature
+from shared.redis_tenant_auth_cache import get_cached_user_profile, set_cached_user_profile
 from shared.tracing_decorator import trace_service
 
 logger = get_railway_logger(__name__)
@@ -66,15 +68,31 @@ class ProfileService:
         Raises:
             httpx.HTTPError: If all retries fail
         """
+        user_email = user_data.get("email", "")
+        cached_profile = await get_cached_user_profile(
+            user_email,
+            tenant_id=preferred_tenant_id,
+            tenant_slug=preferred_tenant_slug,
+        )
+        if cached_profile is not None:
+            logger.info(f"✅ Profile cache hit for {user_email}")
+            return cached_profile
+
         headers = {
             'X-User-UID': user_data.get('uid', ''),
-            'X-User-Email': user_data.get('email', ''),
+            'X-User-Email': user_email,
             'X-User-Name': user_data.get('name', user_data.get('email', '')),
         }
         if preferred_tenant_id:
             headers["X-Tenant-ID"] = preferred_tenant_id
         if preferred_tenant_slug:
             headers["X-Tenant-Slug"] = preferred_tenant_slug
+        add_internal_request_signature(
+            headers=headers,
+            method="GET",
+            path_or_url=self.profile_endpoint,
+            caller="api-gateway",
+        )
         
         try:
             response = await self.client.get(
@@ -85,8 +103,8 @@ class ProfileService:
             if response.status_code == 200:
                 profile_result = response.json()
                 profile_data = profile_result.get('data', {})
-                
-                return {
+
+                profile = {
                     'role': profile_data.get('role', 'user'),
                     'roles': profile_data.get('roles', ['user']),
                     'active_user_role_id': profile_data.get('active_user_role_id'),
@@ -95,6 +113,13 @@ class ProfileService:
                     'tenant_name': profile_data.get('tenant_name'),
                     'tenant_memberships': profile_data.get('tenant_memberships', []),
                 }
+                await set_cached_user_profile(
+                    user_email,
+                    profile,
+                    tenant_id=preferred_tenant_id,
+                    tenant_slug=preferred_tenant_slug,
+                )
+                return profile
             else:
                 logger.warning(
                     f"⚠️ Profile fetch failed with status {response.status_code}: {response.text[:200]}"

@@ -4,16 +4,17 @@ Tenant-aware request middleware for internal services.
 from __future__ import annotations
 
 from fastapi import Request
+from fastapi.responses import JSONResponse
 
 from shared.tenant_context import (
-    DEFAULT_TENANT_ID,
-    DEFAULT_TENANT_SLUG,
     reset_tenant_context,
     set_tenant_context,
 )
+from shared.internal_request_auth import has_identity_headers, verify_internal_request
+from shared.widget_access import extract_widget_access_token, verify_widget_access_token
 
 
-PUBLIC_TENANT_FALLBACK_PATHS = (
+PUBLIC_WIDGET_ACCESS_PATHS = (
     "/api/v1/configuration/widgetConfig",
     "/api/v1/knowledgebase/files",
     "/api/v1/chatbot/chat/stream",
@@ -21,34 +22,40 @@ PUBLIC_TENANT_FALLBACK_PATHS = (
 )
 
 
-def _should_use_public_fallback(request: Request) -> bool:
+def _supports_public_widget_access(request: Request) -> bool:
     path = request.url.path
-    return any(path.startswith(prefix) for prefix in PUBLIC_TENANT_FALLBACK_PATHS)
+    return any(path.startswith(prefix) for prefix in PUBLIC_WIDGET_ACCESS_PATHS)
 
 
 async def tenant_context_middleware(request: Request, call_next):
-    tenant_id = (
-        request.headers.get("X-Tenant-ID")
-        or request.query_params.get("tenant_id")
-        or getattr(request.state, "tenant_id", None)
-    )
-    tenant_slug = (
-        request.headers.get("X-Tenant-Slug")
-        or request.query_params.get("tenant_slug")
-        or getattr(request.state, "tenant_slug", None)
-    )
-    user_role_id = (
-        request.headers.get("X-User-Role-ID")
-        or getattr(request.state, "user_role_id", None)
-    )
-    user_email = (
-        request.headers.get("X-User-Email")
-        or getattr(request.state, "user_email", None)
-    )
+    internal_request_verified = verify_internal_request(request)
+    request.state.internal_request_verified = internal_request_verified
+    request.state.widget_access_verified = False
+    request.state.widget_access_claims = None
 
-    if not tenant_id and _should_use_public_fallback(request):
-        tenant_id = DEFAULT_TENANT_ID
-        tenant_slug = tenant_slug or DEFAULT_TENANT_SLUG
+    if has_identity_headers(request.headers) and not internal_request_verified:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Unsigned identity headers are not allowed"},
+        )
+
+    tenant_id = getattr(request.state, "tenant_id", None)
+    tenant_slug = getattr(request.state, "tenant_slug", None)
+    user_role_id = getattr(request.state, "user_role_id", None)
+    user_email = getattr(request.state, "user_email", None)
+
+    if internal_request_verified:
+        tenant_id = request.headers.get("X-Tenant-ID") or tenant_id
+        tenant_slug = request.headers.get("X-Tenant-Slug") or tenant_slug
+        user_role_id = request.headers.get("X-User-Role-ID") or user_role_id
+        user_email = request.headers.get("X-User-Email") or user_email
+    elif _supports_public_widget_access(request):
+        widget_access_claims = verify_widget_access_token(extract_widget_access_token(request))
+        if widget_access_claims:
+            tenant_id = widget_access_claims.get("tenant_id") or tenant_id
+            tenant_slug = widget_access_claims.get("tenant_slug") or tenant_slug
+            request.state.widget_access_verified = True
+            request.state.widget_access_claims = widget_access_claims
 
     request.state.tenant_id = tenant_id
     request.state.tenant_slug = tenant_slug

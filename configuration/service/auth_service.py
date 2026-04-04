@@ -6,6 +6,14 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from shared.otel_logger import get_otel_logger
+from shared.redis_tenant_auth_cache import (
+    get_cached_role_directory,
+    get_cached_user_memberships,
+    get_cached_user_profile,
+    set_cached_role_directory,
+    set_cached_user_memberships,
+    set_cached_user_profile,
+)
 
 from ..dao.auth_dao import AuthDAO
 
@@ -34,8 +42,20 @@ class AuthService:
     ) -> dict:
         """Get the active tenant role context for a given email."""
         try:
-            memberships = await self.auth_dao.get_user_memberships(email)
-            tenant_memberships = self._group_memberships(memberships)
+            cached_profile = await get_cached_user_profile(
+                email,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+            )
+            if cached_profile is not None:
+                return cached_profile
+
+            tenant_memberships = await get_cached_user_memberships(email)
+            if tenant_memberships is None:
+                memberships = await self.auth_dao.get_user_memberships(email)
+                tenant_memberships = self._group_memberships(memberships)
+                await set_cached_user_memberships(email, tenant_memberships)
+
             active_membership = self._select_active_membership(
                 tenant_memberships,
                 tenant_id=tenant_id,
@@ -56,19 +76,8 @@ class AuthService:
                     "tenant_slug": active_membership["tenant_slug"],
                     "tenant_name": active_membership["tenant_name"],
                 }
-            elif tenant_id or tenant_slug:
-                tenant = await self.auth_dao.get_tenant_by_identifier(
-                    tenant_id=tenant_id,
-                    tenant_slug=tenant_slug,
-                )
-                if tenant:
-                    active_tenant = {
-                        "tenant_id": str(tenant["id"]),
-                        "tenant_slug": tenant["slug"],
-                        "tenant_name": tenant["name"],
-                    }
 
-            return {
+            result = {
                 "email": email,
                 "roles": active_roles,
                 "primary_role": primary_role,
@@ -76,6 +85,13 @@ class AuthService:
                 "active_tenant": active_tenant,
                 "tenant_memberships": tenant_memberships,
             }
+            await set_cached_user_profile(
+                email,
+                result,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+            )
+            return result
         except Exception as e:
             exc_type = type(e).__name__
             exc_msg = str(e) if str(e) else f"({exc_type})"
@@ -147,6 +163,11 @@ class AuthService:
                 if membership["tenant_slug"] == tenant_slug:
                     return membership
 
+        if tenant_id or tenant_slug:
+            logger.warning(
+                "Requested tenant did not match any active membership; falling back to the first membership"
+            )
+
         return memberships[0]
 
     async def remove_admin(self, email: str, current_user_email: str) -> dict:
@@ -192,7 +213,13 @@ class AuthService:
     async def get_admins(self) -> List[Dict[str, Any]]:
         """Get all admins"""
         try:
-            return await self.auth_dao.get_admins()
+            cached = await get_cached_role_directory("admin")
+            if cached is not None:
+                return cached
+
+            admins = await self.auth_dao.get_admins()
+            await set_cached_role_directory("admin", admins)
+            return admins
         except Exception as e:
             logger.error(f"Error fetching admins: {e}")
             raise
@@ -200,7 +227,13 @@ class AuthService:
     async def get_human_agents(self) -> List[Dict[str, Any]]:
         """Get all human agents"""
         try:
-            return await self.auth_dao.get_human_agents()
+            cached = await get_cached_role_directory("human_agent")
+            if cached is not None:
+                return cached
+
+            agents = await self.auth_dao.get_human_agents()
+            await set_cached_role_directory("human_agent", agents)
+            return agents
         except Exception as e:
             logger.error(f"Error fetching human agents: {e}")
             raise

@@ -81,6 +81,29 @@ async def _apply_request_context(conn_or_session) -> None:
     )
 
 
+async def _verify_runtime_role_respects_rls(conn) -> None:
+    allow_insecure_role = os.getenv("ALLOW_INSECURE_DB_ROLE", "false").lower() == "true"
+    result = await conn.execute(
+        text(
+            """
+            SELECT rolsuper, rolbypassrls
+            FROM pg_roles
+            WHERE rolname = current_user
+            """
+        )
+    )
+    role_flags = result.mappings().first() or {}
+    if role_flags.get("rolsuper") or role_flags.get("rolbypassrls"):
+        message = (
+            "Current database role can bypass row-level security. "
+            "Use a dedicated application role without SUPERUSER/BYPASSRLS."
+        )
+        if allow_insecure_role:
+            logger.warning(f"⚠️ {message} ALLOW_INSECURE_DB_ROLE=true is set, continuing anyway.")
+            return
+        raise RuntimeError(message)
+
+
 async def init_database(database_url: Optional[str] = None, max_retries: int = 5) -> None:
     """
     Initialize SQLAlchemy async engine with exponential backoff for cold starts.
@@ -243,6 +266,7 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
                 # Test connection with timeout
                 async with _engine.begin() as conn:
                     await conn.execute(text("SELECT 1"))
+                    await _verify_runtime_role_respects_rls(conn)
 
             logger.info("✅ SQLAlchemy engine initialized successfully")
             logger.info(f"📊 Production pool: min={pool_size}, max={pool_size + pool_max_overflow}, "

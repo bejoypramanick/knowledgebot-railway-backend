@@ -11,6 +11,7 @@ import asyncio
 
 from shared.otel_logger import get_otel_logger, clear_admin_context
 from shared.admin_audit import audit_action
+from shared.widget_access import issue_widget_access_token
 from configuration.core.railway_storage import railway_storage
 from ..service.configuration_service import ConfigurationService
 from ..dao.admin_session_dao import AdminSessionDAO
@@ -81,7 +82,6 @@ async def test_endpoint():
 async def get_current_user(request: Request):
     """Get current user from request state or headers (set by API Gateway middleware)"""
     logger.info("🔍 get_current_user called")
-    logger.info(f"🔍 Request headers: {dict(request.headers)}")
     
     # First try request.state (direct API Gateway access)
     if hasattr(request.state, 'user'):
@@ -89,6 +89,10 @@ async def get_current_user(request: Request):
         return request.state.user
     
     # Then try headers (proxied from API Gateway)
+    if not getattr(request.state, "internal_request_verified", False):
+        logger.error("🔍 Rejecting unsigned header-based identity")
+        raise HTTPException(status_code=401, detail="Trusted internal identity is required")
+
     user_uid = request.headers.get('X-User-UID')
     user_email = request.headers.get('X-User-Email')
     user_name = request.headers.get('X-User-Name')
@@ -414,28 +418,93 @@ async def generate_widget_embed_script(request: Request):
     try:
         body = await request.json()
         embed_type = body.get("embedType", "bubble")
-        base_url = body.get("baseUrl", "https://your-widget-url.com")
+        base_url = body.get("baseUrl", "https://your-widget-url.com").rstrip("/")
+        tenant_id = getattr(request.state, "tenant_id", None)
+        tenant_slug = getattr(request.state, "tenant_slug", None)
+
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="Active tenant context is required to generate embed code")
+
+        widget_token = issue_widget_access_token(tenant_id=tenant_id, tenant_slug=tenant_slug)
+        iframe_src = f"{base_url}/widget?widgetMode=true&widgetToken={widget_token}"
 
         if embed_type == "iframe":
             # For iframe, generate a simple embed
             script = f'''<!-- Knowledgebot Widget - Iframe Embed -->
 <iframe
-    src="{base_url}/widget?widgetMode=true"
+    src="{iframe_src}"
     style="width: 100%; height: 600px; border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"
     title="Chat Widget"
     allow="microphone"
     allowfullscreen
 ></iframe>'''
         else:
-            # Bubble embed - reference the global embed script from bubble domain
-            script = f'''<!-- Knowledgebot Widget - Bubble Embed -->
-<!-- This script loads the chat bubble widget dynamically -->
-<script src="https://dailogue-bubble.globistaan.com/widget-embed.js" type="module"></script>'''
+            script = f'''<!-- Knowledgebot Widget - Secure Bubble Embed -->
+<script>
+(function() {{
+  var iframeUrl = {iframe_src!r};
+  var buttonColor = {body.get("primaryColor", "#3b82f6")!r};
+  var buttonText = {body.get("displayName", "Chat")!r};
+  var iframeId = 'knowledgebot-widget-frame';
+  var buttonId = 'knowledgebot-widget-toggle';
+
+  if (document.getElementById(buttonId)) {{
+    return;
+  }}
+
+  var iframe = document.createElement('iframe');
+  iframe.id = iframeId;
+  iframe.src = iframeUrl;
+  iframe.title = 'Knowledgebot Chat Widget';
+  iframe.allow = 'microphone';
+  iframe.style.position = 'fixed';
+  iframe.style.right = '24px';
+  iframe.style.bottom = '88px';
+  iframe.style.width = 'min(420px, calc(100vw - 32px))';
+  iframe.style.height = 'min(680px, calc(100vh - 120px))';
+  iframe.style.border = '0';
+  iframe.style.borderRadius = '18px';
+  iframe.style.boxShadow = '0 18px 45px rgba(15, 23, 42, 0.28)';
+  iframe.style.background = '#ffffff';
+  iframe.style.overflow = 'hidden';
+  iframe.style.zIndex = '2147483646';
+  iframe.style.display = 'none';
+
+  var button = document.createElement('button');
+  button.id = buttonId;
+  button.type = 'button';
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-controls', iframeId);
+  button.textContent = buttonText;
+  button.style.position = 'fixed';
+  button.style.right = '24px';
+  button.style.bottom = '24px';
+  button.style.border = '0';
+  button.style.borderRadius = '999px';
+  button.style.padding = '14px 18px';
+  button.style.font = '600 14px/1.2 -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
+  button.style.color = '#ffffff';
+  button.style.background = buttonColor;
+  button.style.boxShadow = '0 16px 32px rgba(15, 23, 42, 0.24)';
+  button.style.cursor = 'pointer';
+  button.style.zIndex = '2147483647';
+
+  button.addEventListener('click', function() {{
+    var isOpen = iframe.style.display === 'block';
+    iframe.style.display = isOpen ? 'none' : 'block';
+    button.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+  }});
+
+  document.body.appendChild(iframe);
+  document.body.appendChild(button);
+}})();
+</script>'''
 
         return {
             "success": True,
             "script": script,
-            "embedType": embed_type
+            "embedType": embed_type,
+            "widgetToken": widget_token,
         }
     except Exception as e:
         logger.error(f"Error generating embed script: {e}")
@@ -2127,8 +2196,8 @@ async def get_user_profile(request: Request, user: dict = Depends(get_current_us
         logger.info("[FLOW] Calling auth_service.get_user_role()")
         # Don't catch exceptions - let them propagate so the endpoint returns 503
         # If database is unavailable, client should know immediately, not get fake data
-        requested_tenant_id = request.headers.get("X-Tenant-ID") or getattr(request.state, "tenant_id", None)
-        requested_tenant_slug = request.headers.get("X-Tenant-Slug") or getattr(request.state, "tenant_slug", None)
+        requested_tenant_id = getattr(request.state, "tenant_id", None)
+        requested_tenant_slug = getattr(request.state, "tenant_slug", None)
         role_result = await auth_service.get_user_role(
             user_email,
             tenant_id=requested_tenant_id,

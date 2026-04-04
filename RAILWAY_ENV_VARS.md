@@ -301,10 +301,11 @@ With Migration 1 (Redis Factory), the following Redis databases are used:
 | 4 | Agent Cache + Widget Config | `AGENT_CACHE_REDIS_URL` | derived from PUBSUB_REDIS_URL with /4 suffix |
 | 5 | Session UUID Cache | (internal) | derived from PUBSUB_REDIS_URL with /5 suffix |
 | 6 | Chat Store | `CHAT_STORE_REDIS_URL` | redis_chat_store (derived from PUBSUB_REDIS_URL with /6 suffix) |
+| 8 | Tenant Auth/Profile Cache | `TENANT_AUTH_CACHE_REDIS_URL` | shared auth/profile cache, derived from PUBSUB_REDIS_URL or SESSION_REDIS_URL with /8 suffix |
 
 **Strategy:**
 - Primary Redis URL: `PUBSUB_REDIS_URL=redis://default:password@redis.railway.internal:6379/3`
-- Other databases (4, 5, 6) are derived automatically by appending `/N` to base URL
+- Other databases (4, 5, 6, 8) are derived automatically by appending `/N` to base URL
 - This reduces configuration complexity from 7 env vars to 3 main ones
 
 ---

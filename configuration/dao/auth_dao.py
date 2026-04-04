@@ -2,41 +2,18 @@
 Authentication Data Access Object for Configuration Service
 Handles database operations for user authentication and role management
 """
-import time
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
+from shared.redis_tenant_auth_cache import invalidate_role_directory, invalidate_user_auth_cache
 from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
-from shared.tenant_context import get_current_tenant_id
 
 logger = get_otel_logger("auth_dao", "configuration")
 
 class AuthDAO:
     def __init__(self):
-        # Simple in-memory cache with TTL for rarely-changing data
-        self._cache = {}
-        self._cache_ttl = 60  # 60 seconds cache
-    
-    def _get_cached(self, key: str):
-        """Get cached value if not expired"""
-        if key in self._cache:
-            value, timestamp = self._cache[key]
-            if time.time() - timestamp < self._cache_ttl:
-                logger.debug(f"✅ Cache hit for {key}")
-                return value
-            else:
-                logger.debug(f"⏰ Cache expired for {key}")
-                del self._cache[key]
-        return None
-    
-    def _set_cache(self, key: str, value: Any):
-        """Set cached value with timestamp"""
-        self._cache[key] = (value, time.time())
-        logger.debug(f"💾 Cached {key}")
-
-    def _tenant_cache_key(self, base_key: str) -> str:
-        return f"{base_key}:{get_current_tenant_id() or 'unscoped'}"
+        pass
 
     async def check_user_exists(self, email: str) -> Optional[Dict[str, Any]]:
         """Check if user exists for given email."""
@@ -306,6 +283,9 @@ class AuthDAO:
                 logger.log_db_query(str(mapping_query), params, mapping_row)
                 if mapping_row:
                     await session.commit()
+                    await invalidate_user_auth_cache(email)
+                    if role_name in {"admin", "human_agent"}:
+                        await invalidate_role_directory(role_name)
                 return dict(mapping_row._mapping) if mapping_row else None
         except Exception as e:
             logger.log_db_query(str(mapping_query), params, error=e)
@@ -331,19 +311,17 @@ class AuthDAO:
                 result = await session.execute(query, params)
                 logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
                 await session.commit()
-                return True
+                if result.rowcount > 0:
+                    await invalidate_user_auth_cache(email)
+                    if role_name in {"admin", "human_agent"}:
+                        await invalidate_role_directory(role_name)
+                return result.rowcount > 0
         except Exception as e:
             logger.log_db_query(str(query), params, error=e)
             return False
 
     async def get_admins(self) -> List[Dict[str, Any]]:
-        """Get all users with admin role (cached for 60s)."""
-        # Check cache first
-        cache_key = self._tenant_cache_key("admins")
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return cached
-        
+        """Get all users with admin role for the active tenant."""
         query = text("""
             SELECT DISTINCT u.email
             FROM user_role_mapping urm
@@ -359,15 +337,13 @@ class AuthDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                admins = [dict(row._mapping) for row in rows]
-                self._set_cache(cache_key, admins)
-                return admins
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
             logger.log_db_query(str(query), None, error=e)
             return []
 
     async def get_human_agents(self) -> List[Dict[str, Any]]:
-        """Get all users with human_agent role."""
+        """Get all users with human_agent role for the active tenant."""
         query = text("""
             SELECT urm.user_role_id, u.email, u.created_at as user_created_at,
                    urm.created_at as role_assigned_at

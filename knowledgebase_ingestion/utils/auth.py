@@ -22,6 +22,10 @@ def extract_user_from_request(request: Request) -> Tuple[str, Optional[str]]:
         Tuple of (user_email, user_id)
     """
     try:
+        if not getattr(request.state, "internal_request_verified", False):
+            logger.warning("Missing verified internal request context")
+            raise HTTPException(status_code=401, detail="Trusted internal authentication required")
+
         # Extract user email from headers (set by API Gateway)
         user_email = request.headers.get("x-user-email")
         user_id = request.headers.get("x-user-id")
@@ -60,6 +64,7 @@ async def get_user_role_id_from_email(user_email: str) -> Optional[str]:
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             WHERE u.email = :email
+              AND urm.tenant_id = current_tenant_id_optional()
             LIMIT 1
         """
 

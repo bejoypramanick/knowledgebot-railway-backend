@@ -5,7 +5,7 @@ All API Gateway endpoints in one file for easier debugging
 
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
 from fastapi.responses import StreamingResponse, Response, JSONResponse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from httpx import AsyncClient
 import httpx
 import asyncio
@@ -15,12 +15,58 @@ from slowapi.util import get_remote_address
 from ..core.firebase_auth import verify_firebase_token, get_user_by_uid as get_user_from_firebase
 from ..core.config import get_settings
 from shared.otel_logger import get_otel_logger
+from shared.internal_request_auth import add_internal_request_signature
+from shared.widget_access import extract_widget_access_token, verify_widget_access_token
 
 logger = get_otel_logger("api_gateway.routers.router", "api-gateway")
 router = APIRouter()
 
 # Initialize SlowAPI rate limiter for request-count based limiting
 limiter = Limiter(key_func=get_remote_address)
+INTERNAL_CALLER_ID = "api-gateway"
+
+
+def _remove_untrusted_identity_headers(headers: Dict[str, str]) -> None:
+    for header_name in (
+        "X-User-UID",
+        "X-User-Email",
+        "X-User-Name",
+        "X-User-Role",
+        "X-User-Role-ID",
+        "X-Tenant-ID",
+        "X-Tenant-Slug",
+        "X-Widget-Access-Token",
+    ):
+        headers.pop(header_name, None)
+        headers.pop(header_name.lower(), None)
+
+
+def _sign_internal_headers(headers: Dict[str, str], method: str, path_or_url: str) -> Dict[str, str]:
+    return add_internal_request_signature(
+        headers=headers,
+        method=method,
+        path_or_url=path_or_url,
+        caller=INTERNAL_CALLER_ID,
+    )
+
+
+def _apply_public_widget_context(request: Request) -> Optional[Dict[str, Any]]:
+    widget_claims = verify_widget_access_token(extract_widget_access_token(request))
+    if not widget_claims:
+        return None
+
+    request.state.tenant_id = widget_claims.get("tenant_id")
+    request.state.tenant_slug = widget_claims.get("tenant_slug")
+    request.state.widget_access_verified = True
+    request.state.widget_access_claims = widget_claims
+    return widget_claims
+
+
+def _require_public_widget_context(request: Request) -> Dict[str, Any]:
+    widget_claims = _apply_public_widget_context(request)
+    if not widget_claims:
+        raise HTTPException(status_code=403, detail="Valid widget access token is required")
+    return widget_claims
 
 
 async def check_config_service_with_retry(
@@ -37,9 +83,15 @@ async def check_config_service_with_retry(
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
+                signed_headers = dict(headers or {})
+                _sign_internal_headers(
+                    signed_headers,
+                    method="GET",
+                    path_or_url=f"{config_service_url}/api/v1/configuration/widgetConfig",
+                )
                 response = await client.get(
                     f"{config_service_url}/api/v1/configuration/widgetConfig",
-                    headers=headers,
+                    headers=signed_headers or None,
                     timeout=3.0
                 )
                 
@@ -60,21 +112,6 @@ async def check_config_service_with_retry(
             return None
     
     return None
-
-# =================================
-# DOMAIN VALIDATION HELPER FUNCTIONS
-# =================================
-
-async def is_authorized_domain(referer: str = None, origin: str = None) -> bool:
-    """Check if the request is from an authorized domain"""
-    try:
-        # For now, allow all domains (authorized domains logic not implemented yet)
-        # TODO: Implement proper domain validation when authorized domains feature is ready
-        return True
-
-    except Exception as e:
-        logger.error(f"Error in domain validation: {e}")
-        return True  # Fail open for now
 
 # =================================
 # WINDOW-LOAD CHAT VALIDATION ENDPOINT
@@ -105,30 +142,16 @@ async def validate_chat_window_load(request: Request):
 
         correlation_id = str(uuid.uuid4())
         logger.info(f"[{correlation_id}] Chat validation request from window load")
-        tenant_id = request.headers.get("X-Tenant-ID") or request.query_params.get("tenant_id")
-        tenant_slug = request.headers.get("X-Tenant-Slug") or request.query_params.get("tenant_slug")
+        widget_claims = _require_public_widget_context(request)
+        tenant_id = widget_claims.get("tenant_id")
+        tenant_slug = widget_claims.get("tenant_slug")
         tenant_headers = {}
         if tenant_id:
             tenant_headers["X-Tenant-ID"] = tenant_id
         if tenant_slug:
             tenant_headers["X-Tenant-Slug"] = tenant_slug
 
-        # Step 1: Check domain authorization
-        referer = request.headers.get("referer")
-        origin = request.headers.get("origin")
-        domain_authorized = await is_authorized_domain(referer, origin)
-
-        if not domain_authorized:
-            logger.warning(f"[{correlation_id}] ❌ Domain not authorized: referer={referer}, origin={origin}")
-            return {
-                "ready": False,
-                "chat_enabled": False,
-                "domain_authorized": False,
-                "session_id": None,
-                "reason": "Widget embedding not authorized for this domain"
-            }
-
-        logger.info(f"[{correlation_id}] ✅ Domain authorized")
+        logger.info(f"[{correlation_id}] ✅ Widget access token authorized")
 
         # Step 2: Check chat enabled status (Redis cache first, then config service)
         chat_enabled = await get_display_chatbot(tenant_id=tenant_id or tenant_slug)
@@ -202,7 +225,11 @@ async def validate_chat_window_load(request: Request):
                 session_response = await client.post(
                     f"{settings.chatbot_orchestration_url}/api/v1/chatbot/chat/session",
                     json={"agent_id": "default"},
-                    headers=tenant_headers or None,
+                    headers=_sign_internal_headers(
+                        dict(tenant_headers),
+                        method="POST",
+                        path_or_url=f"{settings.chatbot_orchestration_url}/api/v1/chatbot/chat/session",
+                    ),
                 )
 
                 if session_response.status_code != 200:
@@ -252,7 +279,7 @@ async def validate_chat_window_load(request: Request):
         return {
             "ready": False,
             "chat_enabled": False,
-            "domain_authorized": True,
+            "domain_authorized": False,
             "session_id": None,
             "reason": f"Chat initialization failed: {str(e)}"
         }
@@ -305,6 +332,7 @@ def _prepare_sse_proxy_headers(request: Request) -> dict:
               "transfer-encoding", "upgrade", "sec-websocket-key",
               "sec-websocket-version", "sec-websocket-extensions"]:
         headers.pop(h, None)
+    _remove_untrusted_identity_headers(headers)
     # Force identity encoding (no compression) for SSE
     headers["accept-encoding"] = "identity"
     _inject_identity_headers(request, headers)
@@ -314,10 +342,11 @@ def _prepare_sse_proxy_headers(request: Request) -> dict:
 
 def _inject_identity_headers(request: Request, headers: Dict[str, str]) -> None:
     """Forward authenticated user and active tenant context to internal services."""
-    request_tenant_id = getattr(request.state, "tenant_id", None) or request.headers.get("X-Tenant-ID")
-    request_tenant_slug = getattr(request.state, "tenant_slug", None) or request.headers.get("X-Tenant-Slug")
-    request_user_role_id = getattr(request.state, "user_role_id", None) or request.headers.get("X-User-Role-ID")
-    request_user_email = getattr(request.state, "user_email", None) or request.headers.get("X-User-Email")
+    _remove_untrusted_identity_headers(headers)
+    request_tenant_id = getattr(request.state, "tenant_id", None)
+    request_tenant_slug = getattr(request.state, "tenant_slug", None)
+    request_user_role_id = getattr(request.state, "user_role_id", None)
+    request_user_email = getattr(request.state, "user_email", None)
 
     # Forward auth context if available
     if hasattr(request.state, 'user'):
@@ -351,6 +380,7 @@ async def proxy_admin_events_sse(request: Request):
         logger.info(f"🔄 Proxying SSE stream to: {full_url}")
 
         headers = _prepare_sse_proxy_headers(request)
+        _sign_internal_headers(headers, method="GET", path_or_url=full_url)
         if hasattr(request.state, 'user'):
             logger.info(f"✅ Forwarding user headers for SSE: {request.state.user.get('email')}")
         else:
@@ -414,6 +444,7 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
         logger.info(f"🔄 Proxying customer SSE stream to: {full_url} (session: {session_id})")
 
         headers = _prepare_sse_proxy_headers(request)
+        _sign_internal_headers(headers, method="GET", path_or_url=full_url)
 
         # Connection timeout 10s, but no read timeout (SSE streams indefinitely)
         sse_timeout = httpx.Timeout(connect=10.0, read=None, write=None, pool=None)
@@ -497,18 +528,24 @@ async def proxy_agent_message(request: Request):
             logger.warning(f"⚠️ [AGENT_MESSAGE_PROXY] No authenticated user email found in request state")
 
         # Forward to configuration service with authenticated user info
+        forward_headers = {
+            "X-User-Email": user_email,
+            "X-User-Role": getattr(request.state, "user_role", ""),
+            "X-User-Role-ID": getattr(request.state, "user_role_id", ""),
+            "X-Tenant-ID": getattr(request.state, "tenant_id", ""),
+            "X-Tenant-Slug": getattr(request.state, "tenant_slug", ""),
+            "Content-Type": "application/json",
+        }
+        _sign_internal_headers(
+            forward_headers,
+            method="POST",
+            path_or_url=f"{config_service_url}/api/v1/configuration/admin/chat-sessions/messages",
+        )
         async with AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{config_service_url}/api/v1/configuration/admin/chat-sessions/messages",
                 json=body,
-                headers={
-                    "X-User-Email": user_email,
-                    "X-User-Role": getattr(request.state, "user_role", ""),
-                    "X-User-Role-ID": getattr(request.state, "user_role_id", ""),
-                    "X-Tenant-ID": getattr(request.state, "tenant_id", "") or request.headers.get("X-Tenant-ID", ""),
-                    "X-Tenant-Slug": getattr(request.state, "tenant_slug", "") or request.headers.get("X-Tenant-Slug", ""),
-                    "Content-Type": "application/json"
-                }
+                headers=forward_headers,
             )
             
             logger.info(f"✅ [AGENT_MESSAGE_PROXY] Forwarded message to configuration service, status: {response.status_code}")
@@ -692,8 +729,9 @@ async def public_chat_stream(request: Request):
     """Public chat streaming endpoint - no authentication required for website visitors"""
     try:
         import httpx
-        import json
         from ..core.config import get_settings
+
+        _require_public_widget_context(request)
 
         # Get request body - just pass it through as-is
         # Client should NOT send session_id (comes from cookie) or use_rag (defaults to true)
@@ -728,7 +766,9 @@ async def public_chat_stream(request: Request):
         headers = dict(request.headers)
         headers.pop("host", None)
         headers.pop("authorization", None)
+        _remove_untrusted_identity_headers(headers)
         headers = add_correlation_id_headers(headers, correlation_id)
+        _inject_identity_headers(request, headers)
 
         # Make request to chatbot service — streaming SSE proxy
         # No read timeout: first chunk can take a while (RAG search + AI inference)
@@ -738,6 +778,7 @@ async def public_chat_stream(request: Request):
         # the admin/customer SSE proxies at lines 151-158).
         sse_timeout = httpx.Timeout(connect=10.0, read=None, write=None, pool=None)
         stream_url = f"{chatbot_service_url}/api/v1/chatbot/chat/stream"
+        _sign_internal_headers(headers, method=request.method, path_or_url=stream_url)
 
         from fastapi.responses import StreamingResponse
 
@@ -822,6 +863,7 @@ async def get_widget_config(request: Request):
     No authentication required - public endpoint - allows all origins.
     """
     try:
+        _require_public_widget_context(request)
         settings = get_settings()
         config_service_url = settings.configuration_service_url
         full_url = f"{config_service_url}/api/v1/configuration/widgetConfig"
@@ -829,6 +871,7 @@ async def get_widget_config(request: Request):
         logger.info(f"🔄 Proxying widget config request to: {full_url}")
         forward_headers: Dict[str, str] = {}
         _inject_identity_headers(request, forward_headers)
+        _sign_internal_headers(forward_headers, method="GET", path_or_url=full_url)
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(full_url, headers=forward_headers or None)
@@ -879,6 +922,7 @@ async def get_admin_widget_config(request: Request):
         logger.info(f"🔄 Proxying admin widget config request to: {full_url}")
         forward_headers: Dict[str, str] = {}
         _inject_identity_headers(request, forward_headers)
+        _sign_internal_headers(forward_headers, method="GET", path_or_url=full_url)
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(full_url, headers=forward_headers or None)
@@ -930,6 +974,7 @@ async def save_admin_widget_config(request: Request):
         logger.info(f"🔄 Proxying admin widget config save request to: {full_url} (content-type: {content_type[:50]})")
         forward_headers: Dict[str, str] = {"Content-Type": content_type}
         _inject_identity_headers(request, forward_headers)
+        _sign_internal_headers(forward_headers, method="POST", path_or_url=full_url)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -971,11 +1016,14 @@ async def save_admin_widget_config(request: Request):
 async def public_widget(request: Request):
     """Public widget endpoint - serves HTML page with chat widget for iframe embedding"""
     try:
+        _require_public_widget_context(request)
+
         # Get query parameters
         widget_mode = request.query_params.get("widgetMode", "true")
         theme = request.query_params.get("theme", "light")
         primary_color = request.query_params.get("primaryColor", "#3b82f6")
         display_name = request.query_params.get("displayName", "AI Assistant")
+        widget_token = extract_widget_access_token(request)
         
         # Generate HTML page with embedded chat widget
         html_content = f"""
@@ -1007,7 +1055,8 @@ async def public_widget(request: Request):
             widgetMode: {widget_mode},
             theme: "{theme}",
             primaryColor: "{primary_color}",
-            displayName: "{display_name}"
+            displayName: "{display_name}",
+            widgetToken: "{widget_token}"
         }};
         
         // Load the chat widget
@@ -1116,8 +1165,10 @@ async def generic_proxy_handler(request: Request, path: str):
         # Prepare headers
         headers = dict(request.headers)
         headers.pop("host", None)
+        _remove_untrusted_identity_headers(headers)
         headers = add_correlation_id_headers(headers, correlation_id)
         _inject_identity_headers(request, headers)
+        _sign_internal_headers(headers, method=request.method, path_or_url=full_url)
         
         # Make HTTP request to service
         # Use longer timeout for batch operations (file uploads/deletes) and complex queries

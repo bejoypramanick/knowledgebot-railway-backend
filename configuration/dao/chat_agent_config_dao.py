@@ -5,6 +5,12 @@ Handles database operations for admin and agent configuration management
 from typing import Dict, List, Any, Optional
 
 from sqlalchemy import text
+from shared.redis_tenant_auth_cache import (
+    get_cached_role_directory,
+    invalidate_role_directory,
+    invalidate_user_auth_cache,
+    set_cached_role_directory,
+)
 from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
@@ -13,6 +19,14 @@ logger = get_otel_logger("chatbot_dao", "configuration")
 class ChatAgentConfigDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
+
+    async def _get_user_email_by_id(self, user_id: str) -> Optional[str]:
+        query = text("SELECT email FROM users WHERE id = CAST(:user_id AS UUID)")
+        params = {"user_id": user_id}
+        async with get_db_session() as session:
+            result = await session.execute(query, params)
+            row = result.fetchone()
+            return row.email if row else None
 
     async def get_security_settings(self) -> List[Dict[str, Any]]:
         """Get security settings."""
@@ -71,6 +85,10 @@ class ChatAgentConfigDAO:
 
     async def get_human_agents(self) -> List[Dict[str, Any]]:
         """Get all human agents with id and email."""
+        cached = await get_cached_role_directory("human_agent")
+        if cached is not None:
+            return cached
+
         query = text("""
             SELECT DISTINCT u.id, u.email
             FROM user_role_mapping urm
@@ -86,13 +104,19 @@ class ChatAgentConfigDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                return [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
+                agents = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
+                await set_cached_role_directory("human_agent", agents)
+                return agents
         except Exception as e:
             logger.error(f"Error fetching human agents: {type(e).__name__}")
             raise
 
     async def get_admins(self) -> List[Dict[str, Any]]:
         """Get all admins with id and email."""
+        cached = await get_cached_role_directory("admin")
+        if cached is not None:
+            return cached
+
         query = text("""
             SELECT DISTINCT u.id, u.email
             FROM user_role_mapping urm
@@ -108,7 +132,9 @@ class ChatAgentConfigDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                return [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
+                admins = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
+                await set_cached_role_directory("admin", admins)
+                return admins
         except Exception as e:
             logger.error(f"Error fetching admin emails: {type(e).__name__}")
             raise
@@ -253,6 +279,9 @@ class ChatAgentConfigDAO:
                 logger.log_db_query(str(mapping_query), params, mapping_row)
 
                 await session.commit()
+                if mapping_row is not None:
+                    await invalidate_user_auth_cache(email)
+                    await invalidate_role_directory("human_agent")
                 return mapping_row is not None
         except Exception as e:
             logger.log_db_query("add_human_agent", {"email": email}, error=e)
@@ -273,6 +302,9 @@ class ChatAgentConfigDAO:
                 result = await session.execute(query, params)
                 logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
                 await session.commit()
+                if result.rowcount > 0:
+                    await invalidate_user_auth_cache(email)
+                    await invalidate_role_directory("human_agent")
                 return result.rowcount > 0
         except Exception as e:
             logger.log_db_query("remove_human_agent", {"email": email}, error=e)
@@ -281,6 +313,7 @@ class ChatAgentConfigDAO:
     async def remove_human_agent_by_id(self, user_id: str) -> bool:
         """Remove human_agent role from a user by user ID."""
         try:
+            email = await self._get_user_email_by_id(user_id)
             query = text("""
                 DELETE FROM user_role_mapping
                 WHERE user_id = CAST(:user_id AS UUID)
@@ -293,6 +326,10 @@ class ChatAgentConfigDAO:
                 result = await session.execute(query, params)
                 logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
                 await session.commit()
+                if result.rowcount > 0:
+                    await invalidate_role_directory("human_agent")
+                    if email:
+                        await invalidate_user_auth_cache(email)
                 return result.rowcount > 0
         except Exception as e:
             logger.log_db_query("remove_human_agent_by_id", {"user_id": user_id}, error=e)
@@ -348,6 +385,9 @@ class ChatAgentConfigDAO:
                 logger.log_db_query(str(mapping_query), params, mapping_row)
 
                 await session.commit()
+                if mapping_row is not None:
+                    await invalidate_user_auth_cache(email)
+                    await invalidate_role_directory("admin")
                 return mapping_row is not None
         except Exception as e:
             logger.log_db_query("add_admin", {"email": email}, error=e)
@@ -368,6 +408,9 @@ class ChatAgentConfigDAO:
                 result = await session.execute(query, params)
                 logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
                 await session.commit()
+                if result.rowcount > 0:
+                    await invalidate_user_auth_cache(email)
+                    await invalidate_role_directory("admin")
                 return result.rowcount > 0
         except Exception as e:
             logger.log_db_query("remove_admin", {"email": email}, error=e)
@@ -376,6 +419,7 @@ class ChatAgentConfigDAO:
     async def remove_admin_by_id(self, user_id: str) -> bool:
         """Remove admin role from a user by user ID."""
         try:
+            email = await self._get_user_email_by_id(user_id)
             query = text("""
                 DELETE FROM user_role_mapping
                 WHERE user_id = CAST(:user_id AS UUID)
@@ -388,6 +432,10 @@ class ChatAgentConfigDAO:
                 result = await session.execute(query, params)
                 logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
                 await session.commit()
+                if result.rowcount > 0:
+                    await invalidate_role_directory("admin")
+                    if email:
+                        await invalidate_user_auth_cache(email)
                 return result.rowcount > 0
         except Exception as e:
             logger.log_db_query("remove_admin_by_id", {"user_id": user_id}, error=e)
