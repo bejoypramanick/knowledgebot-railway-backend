@@ -886,7 +886,7 @@ async def public_chat_stream(request: Request):
         import httpx
         from ..core.config import get_settings
 
-        is_authenticated_session = _apply_authenticated_session_context(request)
+        is_authenticated_session = hasattr(request.state, "user") or _apply_authenticated_session_context(request)
         if not is_authenticated_session:
             _require_public_widget_context(
                 request,

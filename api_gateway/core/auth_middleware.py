@@ -87,6 +87,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         """Process request and verify authentication"""
         path = request.url.path
+        is_chat_stream_path = path == "/api/v1/gateway/chatbot/chat/stream"
 
         # Skip authentication for OPTIONS requests (CORS preflight)
         if request.method == "OPTIONS":
@@ -112,6 +113,8 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
 
         # Skip authentication for excluded paths (anonymous customers, public endpoints)
         is_excluded = self.is_excluded_path(path)
+        if is_chat_stream_path and request.cookies.get("session"):
+            is_excluded = False
         if is_excluded:
             logger.debug(f"✅ Path is excluded from auth: {path}")
             return await call_next(request)
