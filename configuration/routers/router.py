@@ -520,6 +520,8 @@ async def generate_widget_embed_script(request: Request):
             "widgetToken": widget_token,
             "allowedOrigins": allowed_origins,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error generating embed script: {e}")
         raise HTTPException(status_code=500, detail=str(e))
