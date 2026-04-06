@@ -58,7 +58,7 @@ class WidgetConfigService:
                 "primary_color": widget_config.get("primary_color", "#3b82f6"),
                 "use_primary_for_header": widget_config.get("use_primary_for_header", True),
                 "chat_bubble_color": widget_config.get("chat_bubble_color", "#f3f4f6"),
-                "align_bubble": widget_config.get("align_bubble", "bottom-right"),
+                "align_bubble": widget_config.get("align_bubble", "right"),
                 "profile_picture_url": profile_url,
                 "chat_icon_url": chat_icon_url,
                 "chat_header": widget_config.get("chat_header", ""),
