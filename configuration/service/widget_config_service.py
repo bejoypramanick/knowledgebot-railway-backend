@@ -4,6 +4,7 @@ Provides business logic layer for widget configuration operations
 """
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
+from fastapi import HTTPException
 
 from shared.otel_logger import get_otel_logger
 from shared.widget_access import normalize_widget_allowed_origins
@@ -34,7 +35,7 @@ class WidgetConfigService:
             )
 
             if not widget_config:
-                widget_config = {}
+                raise HTTPException(status_code=404, detail="Widget configuration not found")
 
             allowed_origins = normalize_widget_allowed_origins(widget_config.get("allowed_origins"))
 
@@ -50,23 +51,23 @@ class WidgetConfigService:
 
             # Transform configuration for frontend
             transformed_config = {
-                "display_name": widget_config.get("display_name", "Chat Assistant"),
-                "initial_message": widget_config.get("initial_message", "Hello! How can I help you today?"),
-                "auto_show_duration": widget_config.get("auto_show_duration", 5),
-                "keep_showing_suggested": widget_config.get("keep_showing_suggested", True),
-                "theme": widget_config.get("theme", "light"),
-                "primary_color": widget_config.get("primary_color", "#3b82f6"),
-                "use_primary_for_header": widget_config.get("use_primary_for_header", True),
-                "chat_bubble_color": widget_config.get("chat_bubble_color", "#f3f4f6"),
-                "align_bubble": widget_config.get("align_bubble", "right"),
+                "display_name": widget_config.get("display_name"),
+                "initial_message": widget_config.get("initial_message"),
+                "auto_show_duration": widget_config.get("auto_show_duration"),
+                "keep_showing_suggested": widget_config.get("keep_showing_suggested"),
+                "theme": widget_config.get("theme"),
+                "primary_color": widget_config.get("primary_color"),
+                "use_primary_for_header": widget_config.get("use_primary_for_header"),
+                "chat_bubble_color": widget_config.get("chat_bubble_color"),
+                "align_bubble": widget_config.get("align_bubble"),
                 "profile_picture_url": profile_url,
                 "chat_icon_url": chat_icon_url,
-                "chat_header": widget_config.get("chat_header", ""),
-                "chat_welcome_message": widget_config.get("chat_welcome_message", ""),
+                "chat_header": widget_config.get("chat_header"),
+                "chat_welcome_message": widget_config.get("chat_welcome_message"),
                 "suggested_messages": suggested_messages,
-                "profile_zoom": widget_config.get("profile_zoom", 100),
-                "chat_icon_zoom": widget_config.get("chat_icon_zoom", 100),
-                "display_chatbot": widget_config.get("display_chatbot", True),
+                "profile_zoom": widget_config.get("profile_zoom"),
+                "chat_icon_zoom": widget_config.get("chat_icon_zoom"),
+                "display_chatbot": widget_config.get("display_chatbot"),
                 "allowed_origins": allowed_origins,
             }
             
