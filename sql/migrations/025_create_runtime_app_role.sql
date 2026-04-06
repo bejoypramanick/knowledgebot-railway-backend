@@ -1,32 +1,21 @@
--- ============================================================================
--- PostgreSQL 18 Runtime Application Role for RLS-Safe Multi-Tenancy
--- ============================================================================
--- Purpose:
--- - Create or update a dedicated runtime role for the application services.
--- - Ensure the runtime role cannot bypass row-level security.
--- - Grant the runtime role the privileges needed by the app at runtime.
---
--- IMPORTANT:
--- - Run this as a privileged admin role (for example `postgres`).
--- - Replace the password placeholder below before executing.
--- - Use the DECODED current DB password here, not a URL-encoded password.
---
--- After this migration, update every runtime service DATABASE_URL to use:
---   knowledgebot_app:<same-password>
--- instead of:
---   postgres:<password>
--- ============================================================================
-
 DO $$
 DECLARE
     app_role_name text := 'knowledgebot_app';
-    app_role_password text := 'REPLACE_WITH_DECODED_CURRENT_DB_PASSWORD';
+    app_role_password text := 'PUT_YOUR_REAL_DECODED_PASSWORD_HERE';
     db_name text := current_database();
     grantor_role text := current_user;
+    current_role_can_manage_roles boolean := false;
 BEGIN
-    IF app_role_password = 'REPLACE_WITH_DECODED_CURRENT_DB_PASSWORD' THEN
+    SELECT r.rolsuper OR r.rolcreaterole
+    INTO current_role_can_manage_roles
+    FROM pg_roles r
+    WHERE r.rolname = current_user;
+
+    IF NOT COALESCE(current_role_can_manage_roles, false) THEN
         RAISE EXCEPTION
-            'Replace the app_role_password placeholder in 025_create_runtime_app_role.sql before running it.';
+            'Current role "%" must have SUPERUSER or CREATEROLE to create/update "%".',
+            current_user,
+            app_role_name;
     END IF;
 
     IF NOT EXISTS (
@@ -81,18 +70,3 @@ BEGIN
         app_role_name
     );
 END $$;
-
--- --------------------------------------------------------------------------
--- Verification
--- --------------------------------------------------------------------------
--- Run these after the migration:
---
--- SELECT rolname, rolsuper, rolbypassrls
--- FROM pg_roles
--- WHERE rolname IN ('postgres', 'knowledgebot_app');
---
--- Expected for knowledgebot_app:
---   rolsuper = false
---   rolbypassrls = false
---
--- Then update runtime DATABASE_URL values in Railway to use knowledgebot_app.

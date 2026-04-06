@@ -30,7 +30,9 @@ What still remains is the Python-side cutover:
 
 ## Environment
 
-- `EXTRACT_REDIS_URL` or `FILE_REDIS_URL`
+- `REDIS_URL`
+- `FILE_TASK_QUEUE_REDIS_DB` optional, defaults to `0`
+- `WEB_TASK_QUEUE_REDIS_DB` optional, defaults to `1`
 - `EXTRACT_TASK_QUEUE` optional, defaults to `kreuzberg_extraction_tasks`
 - `RAILWAY_STORAGE_URL`
 - `RAILWAY_STORAGE_ACCESS_KEY`

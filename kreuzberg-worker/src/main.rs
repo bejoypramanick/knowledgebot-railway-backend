@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::env;
+use std::str::FromStr;
 use std::time::Duration;
 use tracing::{error, info};
 
@@ -108,17 +109,15 @@ async fn build_state() -> Result<AppState> {
     let secret_key = env_var("RAILWAY_STORAGE_SECRET_KEY")?;
     let region = env::var("RAILWAY_REGION").unwrap_or_else(|_| "us-east-1".to_string());
 
-    let file_redis_client = env::var("FILE_REDIS_URL")
-        .ok()
-        .map(|url| redis::Client::open(url.clone()).with_context(|| format!("invalid FILE_REDIS_URL: {url}")))
-        .transpose()?;
-    let web_redis_client = env::var("WEB_REDIS_URL")
-        .ok()
-        .map(|url| redis::Client::open(url.clone()).with_context(|| format!("invalid WEB_REDIS_URL: {url}")))
-        .transpose()?;
+    let file_redis_client = redis_client_from_base_url("FILE_TASK_QUEUE_REDIS_DB", 0)
+        .context("failed to configure file task Redis client")?;
+    let web_redis_client = redis_client_from_base_url("WEB_TASK_QUEUE_REDIS_DB", 1)
+        .context("failed to configure web task Redis client")?;
 
     if file_redis_client.is_none() && web_redis_client.is_none() {
-        return Err(anyhow!("missing FILE_REDIS_URL and WEB_REDIS_URL"));
+        return Err(anyhow!(
+            "missing REDIS_URL; set REDIS_URL plus FILE_TASK_QUEUE_REDIS_DB/WEB_TASK_QUEUE_REDIS_DB"
+        ));
     }
 
     let creds = Credentials::new(access_key, secret_key, None, None, "railway-storage");
@@ -156,6 +155,28 @@ async fn build_state() -> Result<AppState> {
         bucket_name,
         task_queue,
     })
+}
+
+fn redis_client_from_base_url(db_env_var: &str, default_db: u8) -> Result<Option<redis::Client>> {
+    let base_url = match env::var("REDIS_URL") {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => return Ok(None),
+    };
+
+    let db = env::var(db_env_var)
+        .ok()
+        .and_then(|value| value.parse::<u8>().ok())
+        .unwrap_or(default_db);
+
+    let mut url = redis::ConnectionInfo::from_str(&base_url)
+        .with_context(|| format!("invalid REDIS_URL: {base_url}"))?
+        .into_connection_info();
+
+    url.redis.db = i64::from(db);
+
+    redis::Client::open(url)
+        .map(Some)
+        .with_context(|| format!("invalid REDIS_URL with {db_env_var}={db}"))
 }
 
 fn pop_job(state: &AppState) -> Result<Option<ExtractionJob>> {

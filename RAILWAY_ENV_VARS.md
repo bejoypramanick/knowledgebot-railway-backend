@@ -89,7 +89,8 @@ DATABASE_URL=postgresql://...
 RAILWAY_POSTGRES_URL=postgresql://railway.internal:5432/...
 
 # Redis Session Storage (required)
-SESSION_REDIS_URL=redis://default:password@redis.railway.internal:6379/2
+REDIS_URL=redis://default:password@redis.railway.internal:6379
+SESSION_STORE_REDIS_DB=2
 
 # Service URLs (for proxying)
 CONFIGURATION_SERVICE_URL=http://configuration.railway.internal:8080
@@ -132,8 +133,12 @@ API_GATEWAY_HOST=0.0.0.0
 DATABASE_URL=postgresql://...
 RAILWAY_POSTGRES_URL=postgresql://railway.internal:5432/...
 
-# Redis Pub/Sub (required for SSE events)
-PUBSUB_REDIS_URL=redis://default:password@redis.railway.internal:6379/3
+# Redis (required for SSE events and caches)
+REDIS_URL=redis://default:password@redis.railway.internal:6379
+AGENT_EVENTS_REDIS_DB=3
+CHAT_STORE_REDIS_DB=6
+AGENT_ASSIGNMENT_CACHE_REDIS_DB=4
+CITATION_CACHE_REDIS_DB=4
 
 # Service URLs
 KNOWLEDGEBASE_INGESTION_URL=http://knowledge-base.railway.internal:8080
@@ -175,7 +180,8 @@ DATABASE_URL=postgresql://...
 RAILWAY_POSTGRES_URL=postgresql://railway.internal:5432/...
 
 # Redis (required - Celery broker + task queues)
-FILE_REDIS_URL=redis://default:password@redis.railway.internal:6379/0
+REDIS_URL=redis://default:password@redis.railway.internal:6379
+FILE_TASK_QUEUE_REDIS_DB=0
 
 # Storage (S3-compatible, Railway Volumes)
 RAILWAY_BUCKET_NAME=knowledgebot-files
@@ -222,7 +228,8 @@ DATABASE_URL=postgresql://...
 RAILWAY_POSTGRES_URL=postgresql://railway.internal:5432/...
 
 # Redis (required - Celery broker)
-WEB_REDIS_URL=redis://default:password@redis.railway.internal:6379/1
+REDIS_URL=redis://default:password@redis.railway.internal:6379
+WEB_TASK_QUEUE_REDIS_DB=1
 
 # Storage (S3-compatible)
 RAILWAY_BUCKET_NAME=knowledgebot-files

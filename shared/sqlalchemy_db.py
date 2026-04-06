@@ -82,7 +82,6 @@ async def _apply_request_context(conn_or_session) -> None:
 
 
 async def _verify_runtime_role_respects_rls(conn) -> None:
-    allow_insecure_role = os.getenv("ALLOW_INSECURE_DB_ROLE", "false").lower() == "true"
     result = await conn.execute(
         text(
             """
@@ -94,14 +93,10 @@ async def _verify_runtime_role_respects_rls(conn) -> None:
     )
     role_flags = result.mappings().first() or {}
     if role_flags.get("rolsuper") or role_flags.get("rolbypassrls"):
-        message = (
+        raise RuntimeError(
             "Current database role can bypass row-level security. "
             "Use a dedicated application role without SUPERUSER/BYPASSRLS."
         )
-        if allow_insecure_role:
-            logger.warning(f"⚠️ {message} ALLOW_INSECURE_DB_ROLE=true is set, continuing anyway.")
-            return
-        raise RuntimeError(message)
 
 
 async def init_database(database_url: Optional[str] = None, max_retries: int = 5) -> None:

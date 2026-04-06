@@ -15,7 +15,7 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
 # Environment variables needed (set in Railway dashboard):
-# - REDIS_URL or FILE_REDIS_URL (DB 0 for Celery file queue)
+# - REDIS_URL plus FILE_TASK_QUEUE_REDIS_DB=0
 # - EXTRACTOR_REDIS_URL (DB 2 for Extractor queue, auto-constructed from REDIS_URL if not set)
 # - DATABASE_URL=postgresql://...
 # - GEMINI_API_KEY=...

@@ -15,7 +15,8 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
 # Environment variables needed (set in Railway dashboard):
-# - REDIS_URL=redis://redis.railway.internal:6379/1  (or WEB_REDIS_URL)
+# - REDIS_URL=redis://redis.railway.internal:6379
+# - WEB_TASK_QUEUE_REDIS_DB=1
 # - DATABASE_URL=postgresql://...
 # - GEMINI_API_KEY=...
 # - KREUZBERG_API_URL=http://kreuzberg.railway.internal:8000
