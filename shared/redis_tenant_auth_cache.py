@@ -21,7 +21,7 @@ logger = get_otel_logger(__name__, "shared")
 TENANT_AUTH_CACHE_REDIS_DB = 8
 
 USER_MEMBERSHIPS_KEY_PREFIX = "tenant_auth:user_memberships:"
-USER_PROFILE_KEY_PREFIX = "tenant_auth:user_profile:"
+USER_PROFILE_KEY_PREFIX = "tenant_auth:user_profile:v2:"
 ROLE_DIRECTORY_KEY_PREFIX = "tenant_auth:role_directory:"
 
 USER_MEMBERSHIPS_TTL = 300

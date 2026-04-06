@@ -20,6 +20,50 @@ from shared.tracing_decorator import trace_service
 logger = get_railway_logger(__name__)
 
 
+def _normalize_profile_payload(profile_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize configuration-service profile payload into session-ready fields."""
+    role = profile_data.get("role")
+    roles = profile_data.get("roles")
+    tenant_memberships = profile_data.get("tenant_memberships", []) or []
+    tenant_id = profile_data.get("tenant_id")
+    tenant_slug = profile_data.get("tenant_slug")
+    tenant_name = profile_data.get("tenant_name")
+    active_user_role_id = profile_data.get("active_user_role_id")
+    active_membership = None
+
+    if tenant_id or tenant_slug:
+        for membership in tenant_memberships:
+            if tenant_id and membership.get("tenant_id") == tenant_id:
+                active_membership = membership
+                break
+            if tenant_slug and membership.get("tenant_slug") == tenant_slug:
+                active_membership = membership
+                break
+    elif tenant_memberships:
+        active_membership = tenant_memberships[0]
+
+    if active_membership:
+        tenant_id = tenant_id or active_membership.get("tenant_id")
+        tenant_slug = tenant_slug or active_membership.get("tenant_slug")
+        tenant_name = tenant_name or active_membership.get("tenant_name")
+        active_user_role_id = active_user_role_id or active_membership.get("active_user_role_id")
+
+    if not role and tenant_memberships:
+        role = (active_membership or tenant_memberships[0]).get("primary_role")
+    if not roles and tenant_memberships:
+        roles = (active_membership or tenant_memberships[0]).get("roles")
+
+    return {
+        "role": role or "user",
+        "roles": roles or ["user"],
+        "active_user_role_id": active_user_role_id,
+        "tenant_id": tenant_id,
+        "tenant_slug": tenant_slug,
+        "tenant_name": tenant_name,
+        "tenant_memberships": tenant_memberships,
+    }
+
+
 class ProfileService:
     """Service for fetching user profiles from configuration service"""
     
@@ -76,7 +120,7 @@ class ProfileService:
         )
         if cached_profile is not None:
             logger.info(f"✅ Profile cache hit for {user_email}")
-            return cached_profile
+            return _normalize_profile_payload(cached_profile)
 
         headers = {
             'X-User-UID': user_data.get('uid', ''),
@@ -103,16 +147,7 @@ class ProfileService:
             if response.status_code == 200:
                 profile_result = response.json()
                 profile_data = profile_result.get('data', {})
-
-                profile = {
-                    'role': profile_data.get('role', 'user'),
-                    'roles': profile_data.get('roles', ['user']),
-                    'active_user_role_id': profile_data.get('active_user_role_id'),
-                    'tenant_id': profile_data.get('tenant_id'),
-                    'tenant_slug': profile_data.get('tenant_slug'),
-                    'tenant_name': profile_data.get('tenant_name'),
-                    'tenant_memberships': profile_data.get('tenant_memberships', []),
-                }
+                profile = _normalize_profile_payload(profile_data)
                 await set_cached_user_profile(
                     user_email,
                     profile,

@@ -115,7 +115,9 @@ async def create_session_endpoint(
                 preferred_tenant_slug=preferred_tenant_slug,
             )
             user_data.update(profile)
-            logger.info(f"[RESULT] Profile fetched: role={profile['role']}, roles={profile['roles']}")
+            logger.info(
+                f"[RESULT] Profile fetched: role={profile.get('role')}, roles={profile.get('roles')}"
+            )
         except Exception as e:
             logger.error(f"[WARNING] Profile fetch failed: {e}")
             # Use fallback profile (role=user)
