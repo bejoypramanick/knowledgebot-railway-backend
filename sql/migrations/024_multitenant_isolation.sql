@@ -45,15 +45,7 @@ RETURNS uuid
 LANGUAGE sql
 STABLE
 AS $$
-    SELECT COALESCE(
-        NULLIF(current_setting('app.current_tenant_id', true), '')::uuid,
-        (
-            SELECT t.id
-            FROM public.tenants AS t
-            WHERE t.slug = NULLIF(current_setting('app.current_tenant_slug', true), '')
-            LIMIT 1
-        )
-    )
+    SELECT NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
 $$;
 
 CREATE OR REPLACE FUNCTION public.current_tenant_slug_optional()
