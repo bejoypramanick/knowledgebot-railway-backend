@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::env;
-use std::str::FromStr;
 use std::time::Duration;
 use tracing::{error, info};
 
@@ -168,15 +167,16 @@ fn redis_client_from_base_url(db_env_var: &str, default_db: u8) -> Result<Option
         .and_then(|value| value.parse::<u8>().ok())
         .unwrap_or(default_db);
 
-    let mut url = redis::ConnectionInfo::from_str(&base_url)
-        .with_context(|| format!("invalid REDIS_URL: {base_url}"))?
-        .into_connection_info();
+    let normalized_base_url = base_url.trim_end_matches('/');
+    let base_without_db = match normalized_base_url.rsplit_once('/') {
+        Some((prefix, suffix)) if suffix.chars().all(|ch| ch.is_ascii_digit()) => prefix.to_string(),
+        _ => normalized_base_url.to_string(),
+    };
+    let redis_url = format!("{base_without_db}/{db}");
 
-    url.redis.db = i64::from(db);
-
-    redis::Client::open(url)
+    redis::Client::open(redis_url.clone())
         .map(Some)
-        .with_context(|| format!("invalid REDIS_URL with {db_env_var}={db}"))
+        .with_context(|| format!("invalid REDIS_URL with {db_env_var}={db}: {redis_url}"))
 }
 
 fn pop_job(state: &AppState) -> Result<Option<ExtractionJob>> {
