@@ -15,6 +15,8 @@ from slowapi.util import get_remote_address
 
 from ..core.firebase_auth import verify_firebase_token, get_user_by_uid as get_user_from_firebase
 from ..core.config import get_settings
+from ..core.session_store import get_session_store
+from ..services.session_service import get_session_service
 from shared.otel_logger import get_otel_logger
 from shared.internal_request_auth import add_internal_request_signature
 from shared.widget_access import (
@@ -88,6 +90,36 @@ def _apply_public_widget_context(
     request.state.widget_access_verified = True
     request.state.widget_access_claims = widget_claims
     return widget_claims
+
+
+def _apply_authenticated_session_context(request: Request) -> bool:
+    settings = get_settings()
+    session_id = request.cookies.get(settings.session_cookie_name)
+    if not session_id:
+        return False
+
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    session_store = get_session_store()
+    session_service = get_session_service(session_store)
+    session_data = session_service.get_session(
+        session_id,
+        ip_address,
+        user_agent,
+        validate_security=True,
+    )
+    if not session_data:
+        return False
+
+    request.state.user = session_data
+    request.state.user_uid = session_data.get("uid")
+    request.state.user_email = session_data.get("email")
+    request.state.user_name = session_data.get("name")
+    request.state.user_role = session_data.get("role")
+    request.state.user_role_id = session_data.get("active_user_role_id")
+    request.state.tenant_id = session_data.get("active_tenant_id")
+    request.state.tenant_slug = session_data.get("active_tenant_slug")
+    return True
 
 
 def _require_public_widget_context(
@@ -849,15 +881,17 @@ async def switch_user_role(request: Request):
 @router.post("/chatbot/chat/stream")
 @limiter.limit("50/minute")
 async def public_chat_stream(request: Request):
-    """Public chat streaming endpoint - no authentication required for website visitors"""
+    """Chat streaming endpoint for both public widget traffic and authenticated dashboard traffic."""
     try:
         import httpx
         from ..core.config import get_settings
 
-        _require_public_widget_context(
-            request,
-            expected_scopes=(WIDGET_SESSION_TOKEN_SCOPE,),
-        )
+        is_authenticated_session = _apply_authenticated_session_context(request)
+        if not is_authenticated_session:
+            _require_public_widget_context(
+                request,
+                expected_scopes=(WIDGET_SESSION_TOKEN_SCOPE,),
+            )
 
         # Get request body - just pass it through as-is
         # Client should NOT send session_id (comes from cookie) or use_rag (defaults to true)
