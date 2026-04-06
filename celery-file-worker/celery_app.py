@@ -14,23 +14,24 @@ if current_dir not in sys.path:
 from celery import Celery
 from celery.signals import before_task_publish, task_prerun, task_postrun, task_failure, task_retry, worker_process_init
 from shared.otel_logger import get_otel_logger
+from shared.redis_factory import resolve_redis_url
 import redis
 
 logger = get_otel_logger("celery_app", "celery-file-worker")
 
 # Configure Celery with Redis broker (DB 0)
-# Must be explicitly configured via FILE_REDIS_URL environment variable
-redis_url = os.getenv('FILE_REDIS_URL')
+redis_url = resolve_redis_url(
+    primary_env_var='file_task_queue',
+    db_env_var='FILE_TASK_QUEUE_REDIS_DB',
+    default_db=0,
+)
 
 # Create Celery app
 celery_app = Celery('celery_file_worker')
 
 # Log Celery initialization
 logger.info("🚀 [CELERY_APP] Initializing Celery for File Processing Worker")
-logger.info(f"📊 [REDIS] FILE_REDIS_URL: {redis_url}")
-
-if not redis_url:
-    logger.warning("⚠️  FILE_REDIS_URL not set - file Celery app will fail to connect to Redis")
+logger.info(f"📊 [REDIS] file task queue URL: {redis_url}")
 
 # Test Redis connection at startup
 try:

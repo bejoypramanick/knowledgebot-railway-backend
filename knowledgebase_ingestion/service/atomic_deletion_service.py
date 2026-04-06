@@ -234,13 +234,21 @@ class AtomicDeletionService:
     async def _cancel_celery_task(self, celery_task_id: str, task_type: str) -> bool:
         """Cancel Celery task and remove from Redis queue"""
         try:
-            import os
+            from shared.redis_factory import resolve_redis_url
             
             # Get appropriate Redis URL based on task type
             if task_type == "file":
-                redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
+                redis_url = resolve_redis_url(
+                    primary_env_var='file_task_queue',
+                    db_env_var='FILE_TASK_QUEUE_REDIS_DB',
+                    default_db=0,
+                )
             else:  # website
-                redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
+                redis_url = resolve_redis_url(
+                    primary_env_var='web_task_queue',
+                    db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+                    default_db=1,
+                )
             
             redis_conn = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2)
             

@@ -124,8 +124,12 @@ class WebsiteService:
 
         try:
             import redis as redis_lib
-            # Use WEB_REDIS_URL (DB 1) for web tasks
-            redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
+            from shared.redis_factory import resolve_redis_url
+            redis_url = resolve_redis_url(
+                primary_env_var='web_task_queue',
+                db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+                default_db=1,
+            )
 
             try:
                 redis_conn = redis_lib.from_url(redis_url, socket_connect_timeout=2)

@@ -13,8 +13,9 @@ class Settings(BaseServiceSettings):
     website_crawling_url: str = "http://localhost:8002"
     chatbot_orchestration_url: str = "http://localhost:8003"
 
-    # Redis Configuration (used by celery_app.py to connect to Celery broker)
-    file_redis_url: Optional[str] = None  # FILE_REDIS_URL from Railway (required)
+    # Redis Configuration
+    redis_url: Optional[str] = None
+    file_task_queue_redis_db: int = 0
 
     # Kreuzberg Configuration
     kreuzberg_enabled: bool = Field(default=True, env="KREUZBERG_ENABLED")

@@ -16,7 +16,16 @@ from ..core.firebase_auth import verify_firebase_token, get_user_by_uid as get_u
 from ..core.config import get_settings
 from shared.otel_logger import get_otel_logger
 from shared.internal_request_auth import add_internal_request_signature
-from shared.widget_access import extract_widget_access_token, verify_widget_access_token
+from shared.widget_access import (
+    LEGACY_WIDGET_TOKEN_SCOPE,
+    WIDGET_EMBED_TOKEN_SCOPE,
+    WIDGET_SESSION_TOKEN_SCOPE,
+    extract_widget_access_token,
+    extract_widget_parent_origin,
+    issue_widget_session_token,
+    is_widget_origin_allowed,
+    verify_widget_access_token,
+)
 
 logger = get_otel_logger("api_gateway.routers.router", "api-gateway")
 router = APIRouter()
@@ -50,8 +59,14 @@ def _sign_internal_headers(headers: Dict[str, str], method: str, path_or_url: st
     )
 
 
-def _apply_public_widget_context(request: Request) -> Optional[Dict[str, Any]]:
-    widget_claims = verify_widget_access_token(extract_widget_access_token(request))
+def _apply_public_widget_context(
+    request: Request,
+    expected_scopes: Optional[tuple[str, ...]] = None,
+) -> Optional[Dict[str, Any]]:
+    widget_claims = verify_widget_access_token(
+        extract_widget_access_token(request),
+        expected_scopes=expected_scopes,
+    )
     if not widget_claims:
         return None
 
@@ -62,8 +77,11 @@ def _apply_public_widget_context(request: Request) -> Optional[Dict[str, Any]]:
     return widget_claims
 
 
-def _require_public_widget_context(request: Request) -> Dict[str, Any]:
-    widget_claims = _apply_public_widget_context(request)
+def _require_public_widget_context(
+    request: Request,
+    expected_scopes: Optional[tuple[str, ...]] = None,
+) -> Dict[str, Any]:
+    widget_claims = _apply_public_widget_context(request, expected_scopes=expected_scopes)
     if not widget_claims:
         raise HTTPException(status_code=403, detail="Valid widget access token is required")
     return widget_claims
@@ -96,7 +114,10 @@ async def check_config_service_with_retry(
                 )
                 
                 if response.status_code == 200:
-                    return response.json()
+                    payload = response.json()
+                    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+                        return payload["data"]
+                    return payload
                     
         except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
             if attempt < max_retries - 1:
@@ -133,18 +154,33 @@ async def validate_chat_window_load(request: Request):
             "chat_enabled": bool,
             "domain_authorized": bool,
             "session_id": str | null,
+            "widget_session_token": str | null,
             "reason": str | null
         }
     """
     try:
-        from shared.redis_widget_config_cache import get_display_chatbot, set_display_chatbot
+        from shared.redis_widget_config_cache import (
+            get_allowed_widget_origins,
+            get_display_chatbot,
+            set_allowed_widget_origins,
+            set_display_chatbot,
+        )
         import uuid
 
         correlation_id = str(uuid.uuid4())
         logger.info(f"[{correlation_id}] Chat validation request from window load")
-        widget_claims = _require_public_widget_context(request)
+        widget_claims = _require_public_widget_context(
+            request,
+            expected_scopes=(
+                LEGACY_WIDGET_TOKEN_SCOPE,
+                WIDGET_EMBED_TOKEN_SCOPE,
+                WIDGET_SESSION_TOKEN_SCOPE,
+            ),
+        )
         tenant_id = widget_claims.get("tenant_id")
         tenant_slug = widget_claims.get("tenant_slug")
+        parent_origin = widget_claims.get("parent_origin") or extract_widget_parent_origin(request)
+        claimed_parent_origin = widget_claims.get("parent_origin")
         tenant_headers = {}
         if tenant_id:
             tenant_headers["X-Tenant-ID"] = tenant_id
@@ -153,26 +189,61 @@ async def validate_chat_window_load(request: Request):
 
         logger.info(f"[{correlation_id}] ✅ Widget access token authorized")
 
-        # Step 2: Check chat enabled status (Redis cache first, then config service)
-        chat_enabled = await get_display_chatbot(tenant_id=tenant_id or tenant_slug)
+        if not parent_origin:
+            logger.warning(f"[{correlation_id}] ❌ Widget parent origin missing")
+            return {
+                "ready": False,
+                "chat_enabled": False,
+                "domain_authorized": False,
+                "session_id": None,
+                "widget_session_token": None,
+                "reason": "Embedding origin could not be determined. Set the iframe referrer policy to origin.",
+            }
+        if claimed_parent_origin and claimed_parent_origin != parent_origin:
+            logger.warning(f"[{correlation_id}] ❌ Widget parent origin mismatch for runtime token")
+            return {
+                "ready": False,
+                "chat_enabled": False,
+                "domain_authorized": False,
+                "session_id": None,
+                "widget_session_token": None,
+                "reason": "Embedding origin does not match the approved widget session",
+            }
 
-        if chat_enabled is None:
-            # Cache miss - fetch from config service
-            logger.info(f"[{correlation_id}] Cache MISS for display_chatbot, fetching from config service...")
+        # Step 2: Check chat enabled status (Redis cache first, then config service)
+        tenant_cache_key = tenant_id or tenant_slug
+        chat_enabled = await get_display_chatbot(tenant_id=tenant_cache_key)
+        allowed_origins = await get_allowed_widget_origins(tenant_id=tenant_cache_key)
+
+        if chat_enabled is None or allowed_origins is None:
+            logger.info(f"[{correlation_id}] Cache MISS for widget access controls, fetching from config service...")
             config_service_url = "http://configuration.railway.internal:8080"
             config = await check_config_service_with_retry(config_service_url, headers=tenant_headers or None)
 
             if config:
                 chat_enabled = config.get("display_chatbot", True)
-                # Cache the result
-                await set_display_chatbot(chat_enabled, tenant_id=tenant_id or tenant_slug)
-                logger.info(f"[{correlation_id}] ✅ Config service returned display_chatbot={chat_enabled}, cached")
+                allowed_origins = config.get("allowed_origins", []) if isinstance(config, dict) else []
+                await set_display_chatbot(chat_enabled, tenant_id=tenant_cache_key)
+                await set_allowed_widget_origins(allowed_origins, tenant_id=tenant_cache_key)
+                logger.info(
+                    f"[{correlation_id}] ✅ Config service returned display_chatbot={chat_enabled} "
+                    f"and {len(allowed_origins)} allowed origin(s), cached"
+                )
             else:
-                # Fail open if config service unavailable
-                chat_enabled = True
-                logger.warning(f"[{correlation_id}] ⚠️ Config service unavailable, allowing chat (fail-open)")
+                logger.warning(f"[{correlation_id}] ⚠️ Config service unavailable, denying widget bootstrap")
+                return {
+                    "ready": False,
+                    "chat_enabled": False,
+                    "domain_authorized": False,
+                    "session_id": None,
+                    "widget_session_token": None,
+                    "reason": "Widget security policy could not be loaded",
+                }
         else:
-            logger.info(f"[{correlation_id}] ✅ Cache HIT: display_chatbot={chat_enabled}")
+            logger.info(
+                f"[{correlation_id}] ✅ Cache HIT: display_chatbot={chat_enabled}, "
+                f"{len(allowed_origins)} allowed origin(s)"
+            )
 
         if not chat_enabled:
             logger.info(f"[{correlation_id}] ❌ Chat is disabled")
@@ -181,7 +252,33 @@ async def validate_chat_window_load(request: Request):
                 "chat_enabled": False,
                 "domain_authorized": True,
                 "session_id": None,
+                "widget_session_token": None,
                 "reason": "Chat is currently disabled"
+            }
+
+        if not allowed_origins:
+            logger.warning(f"[{correlation_id}] ❌ No allowed widget origins configured")
+            return {
+                "ready": False,
+                "chat_enabled": True,
+                "domain_authorized": False,
+                "session_id": None,
+                "widget_session_token": None,
+                "reason": "No allowed widget origins are configured for this tenant",
+            }
+
+        if not is_widget_origin_allowed(parent_origin, allowed_origins):
+            logger.warning(
+                f"[{correlation_id}] ❌ Widget origin '{parent_origin}' is not allowed "
+                f"for tenant '{tenant_id or tenant_slug}'"
+            )
+            return {
+                "ready": False,
+                "chat_enabled": True,
+                "domain_authorized": False,
+                "session_id": None,
+                "widget_session_token": None,
+                "reason": "This website is not authorized to use the widget",
             }
 
         # Step 3: Warm up downstream services (chatbot orchestration + configuration)
@@ -207,6 +304,7 @@ async def validate_chat_window_load(request: Request):
                             "chat_enabled": True,
                             "domain_authorized": True,
                             "session_id": None,
+                            "widget_session_token": None,
                             "reason": f"Service {service_name} is not ready (status {resp.status_code})"
                         }
                 except Exception as svc_err:
@@ -216,6 +314,7 @@ async def validate_chat_window_load(request: Request):
                         "chat_enabled": True,
                         "domain_authorized": True,
                         "session_id": None,
+                        "widget_session_token": None,
                         "reason": f"Service {service_name} is not reachable"
                     }
 
@@ -239,6 +338,7 @@ async def validate_chat_window_load(request: Request):
                         "chat_enabled": True,
                         "domain_authorized": True,
                         "session_id": None,
+                        "widget_session_token": None,
                         "reason": f"Failed to create session (status {session_response.status_code})"
                     }
 
@@ -252,6 +352,7 @@ async def validate_chat_window_load(request: Request):
                         "chat_enabled": True,
                         "domain_authorized": True,
                         "session_id": None,
+                        "widget_session_token": None,
                         "reason": "Failed to generate session ID"
                     }
 
@@ -263,14 +364,22 @@ async def validate_chat_window_load(request: Request):
                 "chat_enabled": True,
                 "domain_authorized": True,
                 "session_id": None,
+                "widget_session_token": None,
                 "reason": f"Failed to create session: {str(session_err)}"
             }
+
+        widget_session_token = issue_widget_session_token(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            parent_origin=parent_origin,
+        )
 
         return {
             "ready": True,
             "chat_enabled": True,
             "domain_authorized": True,
             "session_id": session_id,
+            "widget_session_token": widget_session_token,
             "reason": None
         }
 
@@ -281,6 +390,7 @@ async def validate_chat_window_load(request: Request):
             "chat_enabled": False,
             "domain_authorized": False,
             "session_id": None,
+            "widget_session_token": None,
             "reason": f"Chat initialization failed: {str(e)}"
         }
 
@@ -731,7 +841,10 @@ async def public_chat_stream(request: Request):
         import httpx
         from ..core.config import get_settings
 
-        _require_public_widget_context(request)
+        _require_public_widget_context(
+            request,
+            expected_scopes=(WIDGET_SESSION_TOKEN_SCOPE,),
+        )
 
         # Get request body - just pass it through as-is
         # Client should NOT send session_id (comes from cookie) or use_rag (defaults to true)
@@ -863,7 +976,10 @@ async def get_widget_config(request: Request):
     No authentication required - public endpoint - allows all origins.
     """
     try:
-        _require_public_widget_context(request)
+        _require_public_widget_context(
+            request,
+            expected_scopes=(WIDGET_SESSION_TOKEN_SCOPE,),
+        )
         settings = get_settings()
         config_service_url = settings.configuration_service_url
         full_url = f"{config_service_url}/api/v1/configuration/widgetConfig"

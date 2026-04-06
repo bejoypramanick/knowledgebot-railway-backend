@@ -18,9 +18,7 @@ async def init_pubsub_redis() -> redis.Redis:
     """
     Initialize async Redis client for Pub/Sub on database 3.
 
-    Uses DATABASE 3 for Pub/Sub (SSE events)
-    Requires PUBSUB_REDIS_URL environment variable with explicit database number
-    Format: redis://default:<password>@redis.railway.internal:6379/3
+    Uses REDIS_URL plus AGENT_EVENTS_REDIS_DB (default 3).
 
     Returns:
         Async Redis client connected to database 3
@@ -29,9 +27,9 @@ async def init_pubsub_redis() -> redis.Redis:
         RuntimeError if Redis is not configured
     """
     return await create_async_redis_client(
-        primary_env_var="PUBSUB_REDIS_URL",
-        fallback_env_var="",  # No fallback for Pub/Sub - must be explicit
-        fallback_db_suffix="",
+        primary_env_var="agent_events_pubsub",
+        db_env_var="AGENT_EVENTS_REDIS_DB",
+        default_db=3,
     )
 
 

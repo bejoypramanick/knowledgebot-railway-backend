@@ -3,7 +3,9 @@ Redis Agent Assignment Cache (DB 4)
 Dedicated Redis database for caching agent-to-session assignments.
 Separates agent cache concerns from Pub/Sub (DB 3).
 
-Env var: AGENT_CACHE_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/4
+Env vars:
+  REDIS_URL=redis://default:<password>@redis.railway.internal:6379
+  AGENT_ASSIGNMENT_CACHE_REDIS_DB=4
 """
 import redis.asyncio as redis
 from typing import Optional
@@ -26,16 +28,15 @@ async def init_agent_cache_redis() -> redis.Redis:
     """
     Initialize async Redis client for agent assignment cache on database 4.
 
-    Requires AGENT_CACHE_REDIS_URL environment variable.
-    Format: redis://default:<password>@redis.railway.internal:6379/4
+    Uses REDIS_URL plus AGENT_ASSIGNMENT_CACHE_REDIS_DB (default 4).
 
     Returns:
         Async Redis client connected to database 4
     """
     return await create_async_redis_client(
-        primary_env_var="AGENT_CACHE_REDIS_URL",
-        fallback_env_var="PUBSUB_REDIS_URL",
-        fallback_db_suffix="/4",
+        primary_env_var="agent_assignment_cache",
+        db_env_var="AGENT_ASSIGNMENT_CACHE_REDIS_DB",
+        default_db=4,
     )
 
 

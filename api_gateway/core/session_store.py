@@ -8,6 +8,7 @@ import json
 import redis
 from typing import Optional, Dict, Any
 from api_gateway.core.logging_config import get_railway_logger
+from shared.redis_factory import resolve_redis_url
 
 logger = get_railway_logger(__name__)
 
@@ -19,9 +20,7 @@ def init_redis() -> redis.Redis:
     """
     Initialize Redis connection for session storage
     
-    Uses DATABASE 2 for sessions
-    Requires SESSION_REDIS_URL environment variable with explicit database number
-    Format: redis://default:<password>@redis.railway.internal:6379/2
+    Uses REDIS_URL plus SESSION_STORE_REDIS_DB (default 2).
     
     Raises RuntimeError if Redis is not configured or connection fails.
     """
@@ -31,18 +30,15 @@ def init_redis() -> redis.Redis:
         logger.info("Redis client already initialized")
         return _redis_client
     
-    # SESSION_REDIS_URL is required - must include /2 for database 2
-    redis_url = os.getenv('SESSION_REDIS_URL')
-    
-    if not redis_url:
-        error_msg = (
-            "SESSION_REDIS_URL environment variable not set. "
-            "Session storage requires Redis. "
-            "Please configure SESSION_REDIS_URL in Railway API Gateway service. "
-            "Format: redis://default:<password>@redis.railway.internal:6379/2"
+    try:
+        redis_url = resolve_redis_url(
+            primary_env_var='session_store',
+            db_env_var='SESSION_STORE_REDIS_DB',
+            default_db=2,
         )
-        logger.error(f"❌ {error_msg}")
-        raise RuntimeError(error_msg)
+    except RuntimeError as e:
+        logger.error(f"❌ {e}")
+        raise
     
     try:
         _redis_client = redis.from_url(
@@ -61,7 +57,7 @@ def init_redis() -> redis.Redis:
         return _redis_client
         
     except redis.ConnectionError as e:
-        error_msg = f"Failed to connect to Redis: {e}. Check SESSION_REDIS_URL and ensure Redis service is running."
+        error_msg = f"Failed to connect to Redis: {e}. Check REDIS_URL and SESSION_STORE_REDIS_DB."
         logger.error(f"❌ {error_msg}")
         raise RuntimeError(error_msg)
     except Exception as e:
@@ -80,7 +76,7 @@ def get_redis_client() -> Optional[redis.Redis]:
 
 class SessionStore:
     """
-    Session storage using Redis database 3
+    Session storage using Redis database 2
     
     Redis databases in use:
     - Database 0: (your existing data)
@@ -88,8 +84,7 @@ class SessionStore:
     - Database 2: (your existing data)
     - Database 3: Sessions (isolated namespace)
     
-    Requires REDIS_URL environment variable to be set.
-    No fallback - fails fast if Redis is not configured.
+    Requires REDIS_URL and uses SESSION_STORE_REDIS_DB.
     """
     
     def __init__(self):

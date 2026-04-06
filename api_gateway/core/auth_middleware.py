@@ -44,6 +44,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
             "/auth/session",  # Session creation endpoint (receives Firebase token)
             "/auth/logout",   # Logout endpoint
             # Public chat widget endpoints (no authentication required)
+            "/api/v1/gateway/chatbot/validate-chat",  # Anonymous widget bootstrap
             "/api/v1/gateway/chatbot/chat/stream",  # Anonymous chat for website visitors
             "/api/v1/gateway/widget",  # Widget HTML page for iframe embedding
             "/api/v1/gateway/configuration/widgetConfig",  # Public widget configuration for chat window

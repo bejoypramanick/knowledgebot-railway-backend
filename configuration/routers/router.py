@@ -11,7 +11,7 @@ import asyncio
 
 from shared.otel_logger import get_otel_logger, clear_admin_context
 from shared.admin_audit import audit_action
-from shared.widget_access import issue_widget_access_token
+from shared.widget_access import issue_widget_access_token, normalize_widget_allowed_origins
 from configuration.core.railway_storage import railway_storage
 from ..service.configuration_service import ConfigurationService
 from ..dao.admin_session_dao import AdminSessionDAO
@@ -408,6 +408,9 @@ async def update_widget_config(
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing config JSON: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON in config field")
+    except ValueError as e:
+        logger.error(f"Widget configuration validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error updating widget config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -425,6 +428,14 @@ async def generate_widget_embed_script(request: Request):
         if not tenant_id:
             raise HTTPException(status_code=400, detail="Active tenant context is required to generate embed code")
 
+        widget_config = await config_service.get_widget_config()
+        allowed_origins = normalize_widget_allowed_origins((widget_config or {}).get("allowed_origins"))
+        if not allowed_origins:
+            raise HTTPException(
+                status_code=400,
+                detail="Add at least one approved embed origin before generating widget code",
+            )
+
         widget_token = issue_widget_access_token(tenant_id=tenant_id, tenant_slug=tenant_slug)
         iframe_src = f"{base_url}/widget?widgetMode=true&widgetToken={widget_token}"
 
@@ -436,6 +447,7 @@ async def generate_widget_embed_script(request: Request):
     style="width: 100%; height: 600px; border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"
     title="Chat Widget"
     allow="microphone"
+    referrerpolicy="origin"
     allowfullscreen
 ></iframe>'''
         else:
@@ -457,6 +469,7 @@ async def generate_widget_embed_script(request: Request):
   iframe.src = iframeUrl;
   iframe.title = 'Knowledgebot Chat Widget';
   iframe.allow = 'microphone';
+  iframe.referrerPolicy = 'origin';
   iframe.style.position = 'fixed';
   iframe.style.right = '24px';
   iframe.style.bottom = '88px';
@@ -505,6 +518,7 @@ async def generate_widget_embed_script(request: Request):
             "script": script,
             "embedType": embed_type,
             "widgetToken": widget_token,
+            "allowedOrigins": allowed_origins,
         }
     except Exception as e:
         logger.error(f"Error generating embed script: {e}")

@@ -4,7 +4,9 @@ Primary storage for hot-path chat sessions and messages.
 PostgreSQL becomes a durable archive via async write-through.
 The SSE streaming path touches zero PostgreSQL connections after first message.
 
-Env var: CHAT_STORE_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/6
+Env vars:
+  REDIS_URL=redis://default:<password>@redis.railway.internal:6379
+  CHAT_STORE_REDIS_DB=6
 
 Redis Data Model:
   Session (Hash):   chat:session:{session_uuid}  -> session_uuid, user_role_id, started_at, ...
@@ -41,13 +43,12 @@ async def init_chat_store_redis() -> redis.Redis:
     """
     Initialize async Redis client for chat store on database 6.
 
-    Requires CHAT_STORE_REDIS_URL environment variable.
-    Format: redis://default:<password>@redis.railway.internal:6379/6
+    Uses REDIS_URL plus CHAT_STORE_REDIS_DB (default 6).
     """
     return await create_async_redis_client(
-        primary_env_var="CHAT_STORE_REDIS_URL",
-        fallback_env_var="PUBSUB_REDIS_URL",
-        fallback_db_suffix="/6",
+        primary_env_var="chat_store",
+        db_env_var="CHAT_STORE_REDIS_DB",
+        default_db=6,
     )
 
 

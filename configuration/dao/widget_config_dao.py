@@ -26,7 +26,8 @@ class WidgetConfigDAO:
                 display_chatbot, profile_picture_url, chat_icon_url,
                 profile_picture_filename, chat_icon_filename,
                 profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
-                hil_enabled, response_policy, hil_disabled_message
+                hil_enabled, response_policy, hil_disabled_message,
+                allowed_origins
             FROM widget_configuration
             WHERE is_singleton = true
         """
@@ -134,14 +135,15 @@ class WidgetConfigDAO:
                 "chat_icon_position": dict,
                 "hil_enabled": bool,
                 "response_policy": float,
-                "hil_disabled_message": str
+                "hil_disabled_message": str,
+                "allowed_origins": list,
             }
 
             # Add provided fields to params
             for field_name, field_type in standard_fields.items():
                 if field_name in config_data:
                     value = config_data[field_name]
-                    if field_name in ("profile_position", "chat_icon_position"):
+                    if field_name in ("profile_position", "chat_icon_position", "allowed_origins"):
                         # JSON fields
                         params[field_name] = json.dumps(value)
                         set_clauses.append(f"{field_name} = :{field_name}")

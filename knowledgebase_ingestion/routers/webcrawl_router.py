@@ -370,14 +370,14 @@ async def debug_celery_test(request: Request = None):
                 "success": True,
                 "message": "Celery dispatcher test successful",
                 "task_id": result.id,
-                "broker_url": os.getenv('WEB_REDIS_URL', os.getenv('REDIS_URL', 'Not set')).split('@')[-1] if os.getenv('WEB_REDIS_URL') or os.getenv('REDIS_URL') else 'Not set'
+                "broker_url": os.getenv('REDIS_URL', 'Not set').split('@')[-1] if os.getenv('REDIS_URL') else 'Not set',
             }
         except Exception as celery_err:
             logger.error(f"❌ [CELERY_TEST] Celery dispatch failed: {celery_err}", exc_info=True)
             return {
                 "success": False,
                 "error": str(celery_err),
-                "broker_url": os.getenv('WEB_REDIS_URL', os.getenv('REDIS_URL', 'Not set')).split('@')[-1] if os.getenv('WEB_REDIS_URL') or os.getenv('REDIS_URL') else 'Not set'
+                "broker_url": os.getenv('REDIS_URL', 'Not set').split('@')[-1] if os.getenv('REDIS_URL') else 'Not set',
             }
     except Exception as e:
         logger.error(f"Error in Celery test: {e}", exc_info=True)

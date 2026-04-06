@@ -87,23 +87,12 @@ async def init_tenant_auth_cache_redis() -> redis.Redis:
     """
     Initialize async Redis client for tenant auth cache on database 8.
 
-    Fallback order is chosen so the same helper works in both:
-    - configuration service, which already relies on PUBSUB_REDIS_URL
-    - API gateway, which always has SESSION_REDIS_URL
+    Uses REDIS_URL plus TENANT_AUTH_CACHE_REDIS_DB (default 8).
     """
-    for fallback_env_var in ("PUBSUB_REDIS_URL", "SESSION_REDIS_URL", "AGENT_CACHE_REDIS_URL"):
-        try:
-            return await create_async_redis_client(
-                primary_env_var="TENANT_AUTH_CACHE_REDIS_URL",
-                fallback_env_var=fallback_env_var,
-                fallback_db_suffix=f"/{TENANT_AUTH_CACHE_REDIS_DB}",
-            )
-        except RuntimeError:
-            continue
-
-    raise RuntimeError(
-        "Redis URL not configured. Set TENANT_AUTH_CACHE_REDIS_URL or one of "
-        "PUBSUB_REDIS_URL / SESSION_REDIS_URL / AGENT_CACHE_REDIS_URL"
+    return await create_async_redis_client(
+        primary_env_var="tenant_auth_cache",
+        db_env_var="TENANT_AUTH_CACHE_REDIS_DB",
+        default_db=TENANT_AUTH_CACHE_REDIS_DB,
     )
 
 

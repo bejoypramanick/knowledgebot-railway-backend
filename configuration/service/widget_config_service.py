@@ -6,6 +6,7 @@ import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.otel_logger import get_otel_logger
+from shared.widget_access import normalize_widget_allowed_origins
 from configuration.dao.widget_config_dao import WidgetConfigDAO
 from configuration.core.railway_storage import railway_storage
 
@@ -35,6 +36,8 @@ class WidgetConfigService:
             if not widget_config:
                 widget_config = {}
 
+            allowed_origins = normalize_widget_allowed_origins(widget_config.get("allowed_origins"))
+
             logger.info(f"✅ Widget config + {len(suggested_messages)} suggested messages fetched (parallel)")
             
             # Resolve S3 keys to base64 data URLs (no presigned URL expiry concerns)
@@ -63,7 +66,8 @@ class WidgetConfigService:
                 "suggested_messages": suggested_messages,
                 "profile_zoom": widget_config.get("profile_zoom", 100),
                 "chat_icon_zoom": widget_config.get("chat_icon_zoom", 100),
-                "display_chatbot":widget_config.get("display_chatbot", True)
+                "display_chatbot": widget_config.get("display_chatbot", True),
+                "allowed_origins": allowed_origins,
             }
             
             logger.info("=" * 100)
@@ -87,6 +91,9 @@ class WidgetConfigService:
             logger.info("🔄 UPDATING WIDGET CONFIGURATION")
             logger.info("=" * 100)
             logger.info(f"📥 Received config_data keys: {list(config_data.keys())}")
+
+            if "allowed_origins" in config_data:
+                config_data["allowed_origins"] = normalize_widget_allowed_origins(config_data.get("allowed_origins"))
             
             # Check if display_chatbot is being changed
             old_config = await self.get_widget_config()
@@ -132,6 +139,13 @@ class WidgetConfigService:
                     logger.info("✅ Invalidated display_chatbot cache in Redis")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to invalidate display_chatbot cache: {e}")
+
+            try:
+                from shared.redis_widget_config_cache import invalidate_allowed_widget_origins
+                await invalidate_allowed_widget_origins()
+                logger.info("✅ Invalidated allowed widget origins cache in Redis")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to invalidate allowed widget origins cache: {e}")
             
         except Exception as e:
             logger.error(f"❌ Error updating widget config: {e}")

@@ -11,7 +11,13 @@ from shared.tenant_context import (
     set_tenant_context,
 )
 from shared.internal_request_auth import has_identity_headers, verify_internal_request
-from shared.widget_access import extract_widget_access_token, verify_widget_access_token
+from shared.widget_access import (
+    LEGACY_WIDGET_TOKEN_SCOPE,
+    WIDGET_EMBED_TOKEN_SCOPE,
+    WIDGET_SESSION_TOKEN_SCOPE,
+    extract_widget_access_token,
+    verify_widget_access_token,
+)
 
 
 PUBLIC_WIDGET_ACCESS_PATHS = (
@@ -25,6 +31,17 @@ PUBLIC_WIDGET_ACCESS_PATHS = (
 def _supports_public_widget_access(request: Request) -> bool:
     path = request.url.path
     return any(path.startswith(prefix) for prefix in PUBLIC_WIDGET_ACCESS_PATHS)
+
+
+def _widget_access_scopes_for_request(request: Request) -> tuple[str, ...]:
+    path = request.url.path
+    if path.startswith(("/api/v1/configuration/widgetConfig", "/api/v1/chatbot/chat/stream", "/api/v1/chatbot/chat/session", "/api/v1/knowledgebase/files")):
+        return (WIDGET_SESSION_TOKEN_SCOPE,)
+    return (
+        LEGACY_WIDGET_TOKEN_SCOPE,
+        WIDGET_EMBED_TOKEN_SCOPE,
+        WIDGET_SESSION_TOKEN_SCOPE,
+    )
 
 
 async def tenant_context_middleware(request: Request, call_next):
@@ -50,7 +67,10 @@ async def tenant_context_middleware(request: Request, call_next):
         user_role_id = request.headers.get("X-User-Role-ID") or user_role_id
         user_email = request.headers.get("X-User-Email") or user_email
     elif _supports_public_widget_access(request):
-        widget_access_claims = verify_widget_access_token(extract_widget_access_token(request))
+        widget_access_claims = verify_widget_access_token(
+            extract_widget_access_token(request),
+            expected_scopes=_widget_access_scopes_for_request(request),
+        )
         if widget_access_claims:
             tenant_id = widget_access_claims.get("tenant_id") or tenant_id
             tenant_slug = widget_access_claims.get("tenant_slug") or tenant_slug

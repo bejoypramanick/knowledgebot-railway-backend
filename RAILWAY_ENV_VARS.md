@@ -4,6 +4,40 @@ This document outlines all environment variables needed for each microservice on
 
 ---
 
+## Redis Configuration Model
+
+Redis now uses a single base URL plus purpose-specific DB number variables.
+The old per-purpose full Redis URLs are removed.
+
+```bash
+REDIS_URL=redis://default:password@redis.railway.internal:6379
+
+FILE_TASK_QUEUE_REDIS_DB=0
+WEB_TASK_QUEUE_REDIS_DB=1
+SESSION_STORE_REDIS_DB=2
+AGENT_EVENTS_REDIS_DB=3
+AGENT_ASSIGNMENT_CACHE_REDIS_DB=4
+WIDGET_ACCESS_CACHE_REDIS_DB=4
+CITATION_CACHE_REDIS_DB=4
+CHAT_STORE_REDIS_DB=6
+UI_DATA_CACHE_REDIS_DB=7
+TENANT_AUTH_CACHE_REDIS_DB=8
+```
+
+Use env var names based on purpose in the code:
+- `SESSION_STORE_REDIS_DB` for login/session cookies in the API gateway
+- `AGENT_EVENTS_REDIS_DB` for SSE/pubsub events
+- `FILE_TASK_QUEUE_REDIS_DB` for file worker queues
+- `WEB_TASK_QUEUE_REDIS_DB` for web crawl worker queues
+- `AGENT_ASSIGNMENT_CACHE_REDIS_DB` for agent assignment cache
+- `WIDGET_ACCESS_CACHE_REDIS_DB` for widget availability/origin cache
+- `CITATION_CACHE_REDIS_DB` for citation lookup cache
+- `CHAT_STORE_REDIS_DB` for hot chat transcript storage
+- `UI_DATA_CACHE_REDIS_DB` for UI screen cache
+- `TENANT_AUTH_CACHE_REDIS_DB` for tenant auth/profile cache
+
+---
+
 ## 📋 Common Variables (All Services)
 
 These variables should be set for ALL services:
@@ -20,6 +54,9 @@ RAILWAY_POSTGRES_URL=postgresql://user:password@railway.internal:5432/knowledgeb
 LOG_LEVEL=INFO
 # Set to true to export OTel spans (disabled by default on Railway)
 OTEL_SPAN_EXPORTER_ENABLED=false
+
+# Shared Redis base URL
+REDIS_URL=redis://default:password@redis.railway.internal:6379
 ```
 
 ### API Keys

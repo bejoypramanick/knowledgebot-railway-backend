@@ -2,6 +2,7 @@ import re
 from typing import List, Optional, Union, Annotated
 
 from pydantic import BaseModel, Field, validator, AfterValidator
+from shared.widget_access import normalize_widget_allowed_origins
 
 try:
     from email_validator import EmailNotValidError, validate_email
@@ -137,6 +138,16 @@ class WidgetConfigRequest(BaseModel):
     profile_picture_filename: Optional[str] = Field(None, max_length=255)
     chat_icon_filename: Optional[str] = Field(None, max_length=255)
     header_icon_filename: Optional[str] = Field(None, max_length=255)
+    allowed_origins: Optional[List[str]] = Field(None, max_items=20)
+
+    @validator('allowed_origins')
+    def validate_allowed_origins(cls, v):
+        if v is None:
+            return v
+        normalized_origins = normalize_widget_allowed_origins(v)
+        if len(normalized_origins) > 20:
+            raise ValueError('Maximum 20 allowed origins supported')
+        return normalized_origins
 
 # Additional request models for router endpoints
 class AdminManagementRequest(BaseModel):

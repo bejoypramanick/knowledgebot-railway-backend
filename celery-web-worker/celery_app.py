@@ -7,6 +7,7 @@ from celery import Celery
 from celery.signals import before_task_publish, task_prerun, task_postrun, task_failure, task_retry, worker_process_init
 from shared.telemetry import setup_telemetry
 from shared.otel_logger import get_otel_logger
+from shared.redis_factory import resolve_redis_url
 import os
 import redis
 
@@ -16,15 +17,18 @@ setup_telemetry("celery-web-worker")
 logger = get_otel_logger("celery_app", "celery-web-worker")
 
 # Configure Celery with Redis broker (DB 1)
-# Use explicit fallback to avoid cross-DB issues
-redis_url = os.getenv('WEB_REDIS_URL')
+redis_url = resolve_redis_url(
+    primary_env_var='web_task_queue',
+    db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+    default_db=1,
+)
 
 # Create Celery app
 celery_app = Celery('celery_web_worker')
 
 # Log Celery initialization
 logger.info("🚀 [CELERY_APP] Initializing Celery for Website Crawling Worker")
-logger.info(f"📊 [REDIS] WEB_REDIS_URL: {redis_url}")
+logger.info(f"📊 [REDIS] web task queue URL: {redis_url}")
 
 # Test Redis connection at startup and monitor queue
 try:

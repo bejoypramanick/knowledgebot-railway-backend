@@ -62,7 +62,12 @@ class CancellationToken:
 
         # Check Redis
         try:
-            redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
+            from shared.redis_factory import resolve_redis_url
+            redis_url = resolve_redis_url(
+                primary_env_var='web_task_queue',
+                db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+                default_db=1,
+            )
             redis_conn = redis.from_url(redis_url, socket_connect_timeout=2)
             cancelled_key = f"task_cancelled:{self.celery_task_id}"
             result = redis_conn.exists(cancelled_key)

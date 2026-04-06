@@ -8,6 +8,7 @@ from typing import Dict, List, Any, Optional
 from dao.file_dao import FileDAO
 from shared.otel_logger import get_otel_logger
 from shared.file_metrics import calculate_metrics
+from shared.redis_factory import resolve_redis_url
 
 logger = get_otel_logger("file_service", "celery-file-worker")
 
@@ -64,8 +65,11 @@ class FileService:
 
         try:
             import redis as redis_lib
-            # Use FILE_REDIS_URL (DB 0) for file tasks
-            redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
+            redis_url = resolve_redis_url(
+                primary_env_var='file_task_queue',
+                db_env_var='FILE_TASK_QUEUE_REDIS_DB',
+                default_db=0,
+            )
 
             try:
                 redis_conn = redis_lib.from_url(redis_url, socket_connect_timeout=2)

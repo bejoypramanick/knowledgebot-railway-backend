@@ -352,9 +352,13 @@ async def check_redis_queue() -> Dict[str, Any]:
         logger.info("🔍 [REDIS_CHECK] Checking Redis queue...")
 
         import redis
-        import os
+        from shared.redis_factory import resolve_redis_url
 
-        redis_url = os.getenv('WEB_REDIS_URL', os.getenv('REDIS_URL', 'redis://localhost:6379/1'))
+        redis_url = resolve_redis_url(
+            primary_env_var='web_task_queue',
+            db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+            default_db=1,
+        )
         redis_client = redis.from_url(redis_url, decode_responses=True)
 
         # Check queue length

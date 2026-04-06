@@ -25,9 +25,9 @@ DEFAULT_TTL = 86400  # 24 hours
 async def _get_redis_client() -> redis.Redis:
     """Get or initialize async Redis client for citation cache (DB 4)."""
     return await create_async_redis_client(
-        primary_env_var="AGENT_CACHE_REDIS_URL",
-        fallback_env_var="PUBSUB_REDIS_URL",
-        fallback_db_suffix="/4",
+        primary_env_var="citation_cache",
+        db_env_var="CITATION_CACHE_REDIS_DB",
+        default_db=4,
     )
 
 

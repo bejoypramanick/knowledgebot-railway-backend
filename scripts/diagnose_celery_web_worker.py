@@ -8,6 +8,7 @@ import os
 import sys
 import redis
 from celery import Celery
+from shared.redis_factory import resolve_redis_url
 
 def print_section(title):
     print("\n" + "=" * 80)
@@ -18,9 +19,9 @@ def check_environment_variables():
     print_section("1. ENVIRONMENT VARIABLES CHECK")
     
     vars_to_check = [
-        'WEB_REDIS_URL',
-        'FILE_REDIS_URL',
         'REDIS_URL',
+        'WEB_TASK_QUEUE_REDIS_DB',
+        'FILE_TASK_QUEUE_REDIS_DB',
         'CELERY_WEB_CONCURRENCY',
         'DB_POOL_MIN_SIZE',
         'DB_POOL_MAX_SIZE'
@@ -40,11 +41,15 @@ def check_environment_variables():
 
 def check_redis_connection():
     print_section("2. REDIS CONNECTION CHECK")
-    
-    web_redis_url = os.getenv('WEB_REDIS_URL')
-    
-    if not web_redis_url:
-        print("❌ WEB_REDIS_URL not set - cannot test connection")
+
+    try:
+        web_redis_url = resolve_redis_url(
+            primary_env_var='web_task_queue',
+            db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+            default_db=1,
+        )
+    except RuntimeError as exc:
+        print(f"❌ {exc}")
         return False
     
     try:
@@ -79,11 +84,15 @@ def check_redis_connection():
 
 def check_celery_dispatcher():
     print_section("3. CELERY DISPATCHER CHECK")
-    
-    web_redis_url = os.getenv('WEB_REDIS_URL')
-    
-    if not web_redis_url:
-        print("❌ WEB_REDIS_URL not set - cannot create dispatcher")
+
+    try:
+        web_redis_url = resolve_redis_url(
+            primary_env_var='web_task_queue',
+            db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+            default_db=1,
+        )
+    except RuntimeError as exc:
+        print(f"❌ {exc}")
         return False
     
     try:
@@ -110,11 +119,15 @@ def check_celery_dispatcher():
 
 def check_worker_status():
     print_section("4. WORKER STATUS CHECK")
-    
-    web_redis_url = os.getenv('WEB_REDIS_URL')
-    
-    if not web_redis_url:
-        print("❌ WEB_REDIS_URL not set - cannot check worker status")
+
+    try:
+        web_redis_url = resolve_redis_url(
+            primary_env_var='web_task_queue',
+            db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+            default_db=1,
+        )
+    except RuntimeError as exc:
+        print(f"❌ {exc}")
         return False
     
     try:
@@ -161,11 +174,15 @@ def check_worker_status():
 
 def test_task_dispatch():
     print_section("5. TEST TASK DISPATCH (DRY RUN)")
-    
-    web_redis_url = os.getenv('WEB_REDIS_URL')
-    
-    if not web_redis_url:
-        print("❌ WEB_REDIS_URL not set - cannot test dispatch")
+
+    try:
+        web_redis_url = resolve_redis_url(
+            primary_env_var='web_task_queue',
+            db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+            default_db=1,
+        )
+    except RuntimeError as exc:
+        print(f"❌ {exc}")
         return False
     
     try:
@@ -219,7 +236,7 @@ def main():
     else:
         print(f"\n⚠️  Some checks failed. Review the output above for details.")
         print(f"\nCommon issues:")
-        print(f"  1. WEB_REDIS_URL not set → Set in Railway environment variables")
+        print(f"  1. REDIS_URL or WEB_TASK_QUEUE_REDIS_DB not set")
         print(f"  2. Redis connection failed → Check Redis service is running")
         print(f"  3. No active workers → Start celery-web-worker service")
         print(f"  4. Tasks not registered → Check worker logs for import errors")

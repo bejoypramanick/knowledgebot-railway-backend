@@ -27,6 +27,7 @@ from typing import Callable, List, Optional, Union
 import redis.asyncio as redis
 from pydantic_ai.tools import ToolDefinition
 from shared.otel_logger import get_otel_logger
+from shared.redis_factory import resolve_redis_url
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
@@ -95,9 +96,11 @@ class GeminiCacheManager:
         if self._redis_client is not None:
             return self._redis_client
 
-        redis_url = os.getenv("AGENT_CACHE_REDIS_URL") or os.getenv("CHAT_STORE_REDIS_URL")
-        if not redis_url:
-            raise RuntimeError("Redis URL not configured for Gemini explicit cache registry")
+        redis_url = resolve_redis_url(
+            primary_env_var="gemini_cache_registry",
+            db_env_var="AGENT_ASSIGNMENT_CACHE_REDIS_DB",
+            default_db=4,
+        )
 
         self._redis_client = redis.from_url(redis_url, decode_responses=True)
         return self._redis_client

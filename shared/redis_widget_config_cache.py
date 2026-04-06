@@ -3,10 +3,13 @@ Redis Widget Configuration Cache (DB 4)
 Dedicated Redis database for caching widget display configuration.
 Uses same DB as agent cache for co-location of widget state.
 
-Env var: AGENT_CACHE_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/4
+Env vars:
+  REDIS_URL=redis://default:<password>@redis.railway.internal:6379
+  WIDGET_ACCESS_CACHE_REDIS_DB=4
 """
+import json
 import redis.asyncio as redis
-from typing import Optional
+from typing import List, Optional
 
 from shared.otel_logger import get_otel_logger
 from shared.redis_factory import create_async_redis_client
@@ -16,6 +19,7 @@ logger = get_otel_logger(__name__, "shared")
 
 CACHE_KEY_PREFIX = "widget:config:"
 DISPLAY_CHATBOT_KEY = f"{CACHE_KEY_PREFIX}display_chatbot"
+ALLOWED_ORIGINS_KEY = f"{CACHE_KEY_PREFIX}allowed_origins"
 DEFAULT_TTL = 86400  # 24 hours
 
 
@@ -24,20 +28,24 @@ def _display_chatbot_key(tenant_id: Optional[str] = None) -> str:
     return f"{DISPLAY_CHATBOT_KEY}:tenant:{scoped_tenant_key}"
 
 
+def _allowed_origins_key(tenant_id: Optional[str] = None) -> str:
+    scoped_tenant_key = tenant_id or get_current_tenant_id() or get_current_tenant_slug() or DEFAULT_TENANT_ID
+    return f"{ALLOWED_ORIGINS_KEY}:tenant:{scoped_tenant_key}"
+
+
 async def init_widget_config_cache_redis() -> redis.Redis:
     """
     Initialize async Redis client for widget config cache on database 4.
 
-    Requires AGENT_CACHE_REDIS_URL environment variable.
-    Format: redis://default:<password>@redis.railway.internal:6379/4
+    Uses REDIS_URL plus WIDGET_ACCESS_CACHE_REDIS_DB (default 4).
 
     Returns:
         Async Redis client connected to database 4
     """
     return await create_async_redis_client(
-        primary_env_var="AGENT_CACHE_REDIS_URL",
-        fallback_env_var="PUBSUB_REDIS_URL",
-        fallback_db_suffix="/4",
+        primary_env_var="widget_access_cache",
+        db_env_var="WIDGET_ACCESS_CACHE_REDIS_DB",
+        default_db=4,
     )
 
 
@@ -107,4 +115,52 @@ async def invalidate_display_chatbot(tenant_id: Optional[str] = None) -> bool:
         return True
     except Exception as e:
         logger.warning(f"⚠️ Cache INVALIDATE failed for display_chatbot: {e}")
+        return False
+
+
+async def get_allowed_widget_origins(tenant_id: Optional[str] = None) -> Optional[List[str]]:
+    try:
+        client = await get_widget_config_cache_redis()
+        cache_key = _allowed_origins_key(tenant_id)
+        value = await client.get(cache_key)
+        if value is None:
+            logger.debug(f"❌ Cache MISS: {cache_key} (no value)")
+            return None
+
+        origins = json.loads(value)
+        if not isinstance(origins, list):
+            logger.warning(f"⚠️ Invalid cached allowed origins payload for {cache_key}")
+            return None
+        logger.debug(f"✅ Cache HIT: {cache_key} ({len(origins)} allowed origin(s))")
+        return [str(origin) for origin in origins]
+    except Exception as e:
+        logger.warning(f"⚠️ Cache GET failed for allowed widget origins: {e}")
+        return None
+
+
+async def set_allowed_widget_origins(
+    origins: List[str],
+    ttl: int = DEFAULT_TTL,
+    tenant_id: Optional[str] = None,
+) -> bool:
+    try:
+        client = await get_widget_config_cache_redis()
+        cache_key = _allowed_origins_key(tenant_id)
+        await client.set(cache_key, json.dumps(origins), ex=ttl)
+        logger.info(f"✅ Cache SET: {cache_key} ({len(origins)} allowed origin(s), TTL: {ttl}s)")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ Cache SET failed for allowed widget origins: {e}")
+        return False
+
+
+async def invalidate_allowed_widget_origins(tenant_id: Optional[str] = None) -> bool:
+    try:
+        client = await get_widget_config_cache_redis()
+        cache_key = _allowed_origins_key(tenant_id)
+        await client.delete(cache_key)
+        logger.info(f"🗑️ Cache INVALIDATED: {cache_key}")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ Cache INVALIDATE failed for allowed widget origins: {e}")
         return False

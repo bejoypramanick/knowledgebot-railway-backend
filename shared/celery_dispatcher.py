@@ -6,6 +6,7 @@ import os
 from celery import Celery
 from urllib.parse import urlparse, urlunparse
 from shared.otel_logger import get_otel_logger
+from shared.redis_factory import resolve_redis_url
 
 logger = get_otel_logger("celery_dispatcher", "knowledgebase-ingestion")
 
@@ -36,24 +37,23 @@ def _redact_redis_url(redis_url: str) -> str:
         return redis_url
 
 
-# File processing: Redis DB 0 (EXPLICIT - never falls back to REDIS_URL)
-# Must be explicitly configured via FILE_REDIS_URL environment variable
-file_redis_url = os.getenv('FILE_REDIS_URL')
-if not file_redis_url:
-    logger.warning("⚠️  FILE_REDIS_URL not set - file Celery dispatcher will fail")
-
-# Web crawling: Redis DB 1 (EXPLICIT - never falls back to REDIS_URL)
-# Must be explicitly configured via WEB_REDIS_URL environment variable
-web_redis_url = os.getenv('WEB_REDIS_URL')
-if not web_redis_url:
-    logger.warning("⚠️  WEB_REDIS_URL not set - web Celery dispatcher will fail")
+file_redis_url = resolve_redis_url(
+    primary_env_var='file_task_queue',
+    db_env_var='FILE_TASK_QUEUE_REDIS_DB',
+    default_db=0,
+)
+web_redis_url = resolve_redis_url(
+    primary_env_var='web_task_queue',
+    db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+    default_db=1,
+)
 
 logger.info("=" * 80)
 logger.info("🚀 [CELERY_DISPATCHER_INIT] Initializing Celery Dispatcher")
 logger.info("=" * 80)
-logger.info(f"🔑 [ENV_VAR] FILE_REDIS_URL: {'SET' if file_redis_url else 'NOT SET'}")
-logger.info(f"🔑 [ENV_VAR] WEB_REDIS_URL: {'SET' if web_redis_url else 'NOT SET'}")
 logger.info(f"🔑 [ENV_VAR] REDIS_URL: {'SET' if os.getenv('REDIS_URL') else 'NOT SET'}")
+logger.info(f"🔑 [ENV_VAR] FILE_TASK_QUEUE_REDIS_DB: {os.getenv('FILE_TASK_QUEUE_REDIS_DB', '0')}")
+logger.info(f"🔑 [ENV_VAR] WEB_TASK_QUEUE_REDIS_DB: {os.getenv('WEB_TASK_QUEUE_REDIS_DB', '1')}")
 logger.info(f"📍 [FILE_REDIS_RESOLVED] URL: {_redact_redis_url(file_redis_url)}")
 logger.info(f"📍 [WEB_REDIS_RESOLVED] URL: {_redact_redis_url(web_redis_url)}")
 

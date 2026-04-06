@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse
 from shared.otel_logger import get_otel_logger
+from shared.redis_factory import resolve_redis_url
 
 logger = get_otel_logger("redis_message_queue", "messaging")
 
@@ -53,17 +54,16 @@ class RedisMessageQueue:
 
     def __init__(self):
         """Initialize Redis connections for both databases"""
-        # File processing: Redis DB 0 (EXPLICIT - never falls back to REDIS_URL)
-        # Must be explicitly configured via FILE_REDIS_URL environment variable
-        self.file_redis_url = os.getenv('FILE_REDIS_URL')
-        if not self.file_redis_url:
-            logger.warning("⚠️  FILE_REDIS_URL not set - file Redis connection will fail")
-
-        # Web crawling: Redis DB 1 (EXPLICIT - never falls back to REDIS_URL)
-        # Must be explicitly configured via WEB_REDIS_URL environment variable
-        self.web_redis_url = os.getenv('WEB_REDIS_URL')
-        if not self.web_redis_url:
-            logger.warning("⚠️  WEB_REDIS_URL not set - web Redis connection will fail")
+        self.file_redis_url = resolve_redis_url(
+            primary_env_var='file_task_queue',
+            db_env_var='FILE_TASK_QUEUE_REDIS_DB',
+            default_db=0,
+        )
+        self.web_redis_url = resolve_redis_url(
+            primary_env_var='web_task_queue',
+            db_env_var='WEB_TASK_QUEUE_REDIS_DB',
+            default_db=1,
+        )
 
         self._file_connection = None
         self._web_connection = None

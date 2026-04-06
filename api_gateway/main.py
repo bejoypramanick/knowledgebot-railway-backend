@@ -146,6 +146,7 @@ app.add_middleware(
         "/favicon.ico",
         "/api/v1/gateway/auth/session",  # Session creation endpoint
         "/api/v1/gateway/auth/logout",   # Logout endpoint
+        "/api/v1/gateway/chatbot/validate-chat",  # Public widget bootstrap endpoint
         "/api/v1/gateway/chatbot/chat/stream",  # Public chat widget endpoint
         "/api/v1/gateway/widget",  # Public widget HTML endpoint
         "/api/v1/gateway/configuration/widgetConfig",  # Public widget configuration endpoint

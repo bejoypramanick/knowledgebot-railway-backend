@@ -11,12 +11,12 @@ DB3=pub/sub+presence, DB4=agent cache, DB5=session UUID cache,
 DB6=chat store, DB7=UI cache (this module)
 """
 import json
-import os
 from typing import Optional
 
 import redis.asyncio as redis
 
 from shared.otel_logger import get_otel_logger
+from shared.redis_factory import create_async_redis_client
 from shared.tenant_context import DEFAULT_TENANT_ID, get_current_tenant_id, get_current_tenant_slug
 
 logger = get_otel_logger(__name__, "shared")
@@ -72,27 +72,13 @@ async def init_ui_cache_redis() -> redis.Redis:
     if _ui_cache_client is not None:
         return _ui_cache_client
 
-    # Derive DB7 URL from PUBSUB_REDIS_URL (DB3) by swapping the trailing /N
-    redis_url = os.getenv('PUBSUB_REDIS_URL', '')
-    if not redis_url:
-        raise RuntimeError("PUBSUB_REDIS_URL not set — cannot initialize UI cache Redis")
-
-    if '/' in redis_url.rsplit(':', 1)[-1]:
-        redis_url = redis_url.rsplit('/', 1)[0] + f'/{UI_CACHE_REDIS_DB}'
-    else:
-        redis_url = redis_url + f'/{UI_CACHE_REDIS_DB}'
-
     try:
         logger.info(f"Initializing Redis UI cache client (database {UI_CACHE_REDIS_DB})...")
-
-        _ui_cache_client = redis.from_url(
-            redis_url,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_keepalive=True,
-            health_check_interval=30,
+        _ui_cache_client = await create_async_redis_client(
+            primary_env_var="ui_data_cache",
+            db_env_var="UI_DATA_CACHE_REDIS_DB",
+            default_db=UI_CACHE_REDIS_DB,
         )
-        await _ui_cache_client.ping()
         logger.info(f"✅ Redis UI cache client initialized (db={UI_CACHE_REDIS_DB})")
         return _ui_cache_client
 
