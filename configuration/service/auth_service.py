@@ -27,6 +27,54 @@ def _role_priority(role_name: str) -> int:
         return 1
     return 2
 
+
+def _normalize_role_context(
+    email: str,
+    tenant_memberships: List[Dict[str, Any]],
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> Dict[str, Any]:
+    active_membership = None
+
+    if tenant_id:
+        for membership in tenant_memberships:
+            if membership["tenant_id"] == tenant_id:
+                active_membership = membership
+                break
+
+    if active_membership is None and tenant_slug:
+        for membership in tenant_memberships:
+            if membership["tenant_slug"] == tenant_slug:
+                active_membership = membership
+                break
+
+    if active_membership is None and tenant_memberships:
+        active_membership = tenant_memberships[0]
+
+    active_roles = active_membership.get("roles", []) if active_membership else []
+    if not active_roles:
+        active_roles = ["user"]
+
+    primary_role = active_membership.get("primary_role") if active_membership else "user"
+    active_user_role_id = active_membership.get("active_user_role_id") if active_membership else None
+
+    active_tenant = None
+    if active_membership:
+        active_tenant = {
+            "tenant_id": active_membership["tenant_id"],
+            "tenant_slug": active_membership["tenant_slug"],
+            "tenant_name": active_membership["tenant_name"],
+        }
+
+    return {
+        "email": email,
+        "roles": active_roles,
+        "primary_role": primary_role,
+        "active_user_role_id": active_user_role_id,
+        "active_tenant": active_tenant,
+        "tenant_memberships": tenant_memberships,
+    }
+
 class AuthService:
     """Service layer for authentication"""
     
@@ -48,7 +96,14 @@ class AuthService:
                 tenant_slug=tenant_slug,
             )
             if cached_profile is not None:
-                return cached_profile
+                return _normalize_role_context(
+                    email,
+                    cached_profile.get("tenant_memberships", []) or [],
+                    tenant_id=tenant_id
+                    or (cached_profile.get("active_tenant") or {}).get("tenant_id"),
+                    tenant_slug=tenant_slug
+                    or (cached_profile.get("active_tenant") or {}).get("tenant_slug"),
+                )
 
             tenant_memberships = await get_cached_user_memberships(email)
             if tenant_memberships is None:
@@ -56,35 +111,12 @@ class AuthService:
                 tenant_memberships = self._group_memberships(memberships)
                 await set_cached_user_memberships(email, tenant_memberships)
 
-            active_membership = self._select_active_membership(
+            result = _normalize_role_context(
+                email,
                 tenant_memberships,
                 tenant_id=tenant_id,
                 tenant_slug=tenant_slug,
             )
-
-            active_roles = active_membership.get("roles", []) if active_membership else []
-            if not active_roles:
-                active_roles = ["user"]
-
-            primary_role = active_membership.get("primary_role") if active_membership else "user"
-            active_user_role_id = active_membership.get("active_user_role_id") if active_membership else None
-
-            active_tenant = None
-            if active_membership:
-                active_tenant = {
-                    "tenant_id": active_membership["tenant_id"],
-                    "tenant_slug": active_membership["tenant_slug"],
-                    "tenant_name": active_membership["tenant_name"],
-                }
-
-            result = {
-                "email": email,
-                "roles": active_roles,
-                "primary_role": primary_role,
-                "active_user_role_id": active_user_role_id,
-                "active_tenant": active_tenant,
-                "tenant_memberships": tenant_memberships,
-            }
             await set_cached_user_profile(
                 email,
                 result,
