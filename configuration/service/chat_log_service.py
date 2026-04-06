@@ -211,11 +211,11 @@ class ChatLogService:
             agent_id: User ID of the agent (from users table)
         """
         try:
-            from shared.redis_pubsub_manager import get_pubsub_redis
+            from shared.redis_pubsub_manager import get_agent_presence_key, get_pubsub_redis
             redis_client = await get_pubsub_redis()
             
             # Check if agent has an active presence key (using user ID)
-            presence_key = f"agent:online:{agent_id}"
+            presence_key = get_agent_presence_key(agent_id)
             is_online = await redis_client.exists(presence_key)
             
             logger.info(f"🔍 [ONLINE_CHECK] Agent ID {agent_id} online status: {bool(is_online)}")

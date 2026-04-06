@@ -5,13 +5,83 @@ Simplifies SSE architecture by replacing in-memory queues
 """
 import redis.asyncio as redis
 import json
-import logging
 from shared.otel_logger import get_otel_logger
 from shared.redis_factory import create_async_redis_client
 from typing import Dict, Any, Optional, AsyncIterator
 import asyncio
+from shared.tenant_context import (
+    get_current_tenant_id,
+    get_current_tenant_slug,
+    resolve_tenant_scope,
+)
 
 logger = get_otel_logger(__name__, "shared")
+
+
+def _resolve_channel_scope(
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    tenant_scope: Optional[str] = None,
+) -> str:
+    return tenant_scope or resolve_tenant_scope(
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+    )
+
+
+def get_agent_channel_name(
+    agent_id: str,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    tenant_scope: Optional[str] = None,
+) -> str:
+    scope = _resolve_channel_scope(
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        tenant_scope=tenant_scope,
+    )
+    return f"agent:events:tenant:{scope}:agent:{agent_id}"
+
+
+def get_broadcast_channel_name(
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    tenant_scope: Optional[str] = None,
+) -> str:
+    scope = _resolve_channel_scope(
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        tenant_scope=tenant_scope,
+    )
+    return f"agent:events:tenant:{scope}:broadcast"
+
+
+def get_session_channel_name(
+    session_id: str,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    tenant_scope: Optional[str] = None,
+) -> str:
+    scope = _resolve_channel_scope(
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        tenant_scope=tenant_scope,
+    )
+    return f"session:events:tenant:{scope}:session:{session_id}"
+
+
+def get_agent_presence_key(
+    agent_id: str,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    tenant_scope: Optional[str] = None,
+) -> str:
+    scope = _resolve_channel_scope(
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        tenant_scope=tenant_scope,
+    )
+    return f"agent:online:tenant:{scope}:{agent_id}"
 
 
 async def init_pubsub_redis() -> redis.Redis:
@@ -53,19 +123,57 @@ class AgentEventBroadcaster:
         if self.redis_client is None:
             self.redis_client = await get_pubsub_redis()
     
-    def _get_agent_channel(self, agent_id: str) -> str:
+    def _get_agent_channel(
+        self,
+        agent_id: str,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> str:
         """Get Redis channel name for specific agent (uses user ID, not email)"""
-        return f"agent:events:{agent_id}"
-    
-    def _get_broadcast_channel(self) -> str:
+        return get_agent_channel_name(
+            agent_id,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+
+    def _get_broadcast_channel(
+        self,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> str:
         """Get Redis channel name for broadcasting to all agents"""
-        return "agent:events:broadcast"
-    
-    def _get_session_channel(self, session_id: str) -> str:
+        return get_broadcast_channel_name(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+
+    def _get_session_channel(
+        self,
+        session_id: str,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> str:
         """Get Redis channel name for specific session (customer + agent)"""
-        return f"session:events:{session_id}"
-    
-    async def publish_to_agent(self, agent_id: str, event_data: Dict[str, Any]) -> bool:
+        return get_session_channel_name(
+            session_id,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+
+    async def publish_to_agent(
+        self,
+        agent_id: str,
+        event_data: Dict[str, Any],
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> bool:
         """
         Publish event to specific agent's channel.
         
@@ -78,7 +186,12 @@ class AgentEventBroadcaster:
         """
         try:
             await self._ensure_redis()
-            channel = self._get_agent_channel(agent_id)
+            channel = self._get_agent_channel(
+                agent_id,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             message = json.dumps(event_data)
             
             # Publish to Redis channel (async, non-blocking)
@@ -95,7 +208,13 @@ class AgentEventBroadcaster:
             logger.error(f"❌ Error publishing to agent {agent_id}: {e}")
             return False
     
-    async def publish_to_all_agents(self, event_data: Dict[str, Any]) -> bool:
+    async def publish_to_all_agents(
+        self,
+        event_data: Dict[str, Any],
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> bool:
         """
         Broadcast event to all connected agents.
         
@@ -107,7 +226,11 @@ class AgentEventBroadcaster:
         """
         try:
             await self._ensure_redis()
-            channel = self._get_broadcast_channel()
+            channel = self._get_broadcast_channel(
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             message = json.dumps(event_data)
             
             subscribers = await self.redis_client.publish(channel, message)
@@ -119,7 +242,14 @@ class AgentEventBroadcaster:
             logger.error(f"❌ Error broadcasting to all agents: {e}")
             return False
     
-    async def publish_to_session(self, session_id: str, event_data: Dict[str, Any]) -> bool:
+    async def publish_to_session(
+        self,
+        session_id: str,
+        event_data: Dict[str, Any],
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> bool:
         """
         Publish event to session channel (customer + agent receive).
         
@@ -132,7 +262,12 @@ class AgentEventBroadcaster:
         """
         try:
             await self._ensure_redis()
-            channel = self._get_session_channel(session_id)
+            channel = self._get_session_channel(
+                session_id,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             message = json.dumps(event_data)
             
             # Publish to Redis channel
@@ -150,7 +285,15 @@ class AgentEventBroadcaster:
             logger.error(f"❌ Error publishing to session {session_id}: {e}")
             return False
     
-    async def publish_for_session(self, session_id: str, event_data: Dict[str, Any], assigned_agent_id: Optional[str] = None) -> bool:
+    async def publish_for_session(
+        self,
+        session_id: str,
+        event_data: Dict[str, Any],
+        assigned_agent_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> bool:
         """
         Publish event to all relevant channels for a session.
         
@@ -174,14 +317,31 @@ class AgentEventBroadcaster:
         """
         try:
             # 1. Publish to session channel (customer + agent receive)
-            await self.publish_to_session(session_id, event_data)
-            
+            await self.publish_to_session(
+                session_id,
+                event_data,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+
             # 2. If assigned agent is known, also publish to agent-specific channel
             if assigned_agent_id:
-                await self.publish_to_agent(assigned_agent_id, event_data)
-            
+                await self.publish_to_agent(
+                    assigned_agent_id,
+                    event_data,
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
+                    tenant_scope=tenant_scope,
+                )
+
             # 3. Always broadcast to admins (they see all sessions)
-            await self.publish_to_all_agents(event_data)
+            await self.publish_to_all_agents(
+                event_data,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             
             return True
             
@@ -199,8 +359,21 @@ class SessionEventSubscriber:
     Perfect for anonymous customer chat widgets.
     """
     
-    def __init__(self, session_id: str):
+    def __init__(
+        self,
+        session_id: str,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ):
         self.session_id = session_id
+        self.tenant_id = tenant_id or get_current_tenant_id()
+        self.tenant_slug = tenant_slug or get_current_tenant_slug()
+        self.tenant_scope = _resolve_channel_scope(
+            tenant_id=self.tenant_id,
+            tenant_slug=self.tenant_slug,
+            tenant_scope=tenant_scope,
+        )
         self.redis_client = None  # Will be initialized async
         self.pubsub = None
     
@@ -219,7 +392,10 @@ class SessionEventSubscriber:
             self.pubsub = self.redis_client.pubsub()
             
             # Subscribe to session-specific channel (async, non-blocking)
-            session_channel = f"session:events:{self.session_id}"
+            session_channel = get_session_channel_name(
+                self.session_id,
+                tenant_scope=self.tenant_scope,
+            )
             await self.pubsub.subscribe(session_channel)
 
             logger.info(f"🔌 Customer subscribed to channel: {session_channel}")
@@ -260,7 +436,10 @@ class SessionEventSubscriber:
         
         finally:
             # Cleanup
-            session_channel = f"session:events:{self.session_id}"
+            session_channel = get_session_channel_name(
+                self.session_id,
+                tenant_scope=self.tenant_scope,
+            )
             if self.pubsub:
                 try:
                     logger.info(f"🧹 Cleaning up Redis subscription for channel: {session_channel}")
@@ -290,10 +469,25 @@ class AgentEventSubscriber:
     Uses user IDs instead of emails for channel names.
     """
     
-    def __init__(self, agent_id: str, agent_email: str = None, role: str = 'human_agent'):
+    def __init__(
+        self,
+        agent_id: str,
+        agent_email: str = None,
+        role: str = 'human_agent',
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ):
         self.agent_id = agent_id
         self.agent_email = agent_email  # For logging only
         self.role = role
+        self.tenant_id = tenant_id or get_current_tenant_id()
+        self.tenant_slug = tenant_slug or get_current_tenant_slug()
+        self.tenant_scope = _resolve_channel_scope(
+            tenant_id=self.tenant_id,
+            tenant_slug=self.tenant_slug,
+            tenant_scope=tenant_scope,
+        )
         self.redis_client = None  # Will be initialized async
         self.pubsub = None
     
@@ -314,12 +508,17 @@ class AgentEventSubscriber:
             # Subscribe based on role
             if self.role == 'admin':
                 # Admins ONLY subscribe to broadcast channel (all chats, view-only if not assigned)
-                broadcast_channel = "agent:events:broadcast"
+                broadcast_channel = get_broadcast_channel_name(
+                    tenant_scope=self.tenant_scope
+                )
                 await self.pubsub.subscribe(broadcast_channel)
                 logger.info(f"🔌 Admin {self.agent_email} (ID: {self.agent_id}) subscribed to broadcast channel: {broadcast_channel}")
             else:
                 # Human agents subscribe to personal channel (only their assigned chats)
-                agent_channel = f"agent:events:{self.agent_id}"
+                agent_channel = get_agent_channel_name(
+                    self.agent_id,
+                    tenant_scope=self.tenant_scope,
+                )
                 await self.pubsub.subscribe(agent_channel)
                 logger.info(f"🔌 Human agent {self.agent_email} (ID: {self.agent_id}) subscribed to personal channel: {agent_channel}")
 
@@ -363,7 +562,10 @@ class AgentEventSubscriber:
         
         finally:
             # Cleanup
-            agent_channel = f"agent:events:{self.agent_id}"
+            agent_channel = get_agent_channel_name(
+                self.agent_id,
+                tenant_scope=self.tenant_scope,
+            )
             if self.pubsub:
                 try:
                     logger.info(f"🧹 Cleaning up Redis subscription for channel: {agent_channel}")
@@ -399,25 +601,73 @@ def get_broadcaster() -> AgentEventBroadcaster:
 
 
 # Convenience functions
-async def broadcast_event_to_agent(agent_id: str, event_data: Dict[str, Any]) -> bool:
+async def broadcast_event_to_agent(
+    agent_id: str,
+    event_data: Dict[str, Any],
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    tenant_scope: Optional[str] = None,
+) -> bool:
     """Broadcast event to specific agent (uses user ID)"""
     broadcaster = get_broadcaster()
-    return await broadcaster.publish_to_agent(agent_id, event_data)
+    return await broadcaster.publish_to_agent(
+        agent_id,
+        event_data,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        tenant_scope=tenant_scope,
+    )
 
 
-async def broadcast_event_to_all_agents(event_data: Dict[str, Any]) -> bool:
+async def broadcast_event_to_all_agents(
+    event_data: Dict[str, Any],
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    tenant_scope: Optional[str] = None,
+) -> bool:
     """Broadcast event to all agents"""
     broadcaster = get_broadcaster()
-    return await broadcaster.publish_to_all_agents(event_data)
+    return await broadcaster.publish_to_all_agents(
+        event_data,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        tenant_scope=tenant_scope,
+    )
 
 
-async def broadcast_event_to_session(session_id: str, event_data: Dict[str, Any]) -> bool:
+async def broadcast_event_to_session(
+    session_id: str,
+    event_data: Dict[str, Any],
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    tenant_scope: Optional[str] = None,
+) -> bool:
     """Broadcast event to session channel (customer + agent)"""
     broadcaster = get_broadcaster()
-    return await broadcaster.publish_to_session(session_id, event_data)
+    return await broadcaster.publish_to_session(
+        session_id,
+        event_data,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        tenant_scope=tenant_scope,
+    )
 
 
-async def broadcast_event_for_session(session_id: str, event_data: Dict[str, Any], assigned_agent_id: Optional[str] = None) -> bool:
+async def broadcast_event_for_session(
+    session_id: str,
+    event_data: Dict[str, Any],
+    assigned_agent_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    tenant_scope: Optional[str] = None,
+) -> bool:
     """Broadcast event for specific session (all channels, uses user ID for agent)"""
     broadcaster = get_broadcaster()
-    return await broadcaster.publish_for_session(session_id, event_data, assigned_agent_id)
+    return await broadcaster.publish_for_session(
+        session_id,
+        event_data,
+        assigned_agent_id,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        tenant_scope=tenant_scope,
+    )

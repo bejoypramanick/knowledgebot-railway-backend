@@ -11,6 +11,7 @@ from typing import Tuple, Dict, Any, Optional
 from shared.extraction_worker_client import ExtractionWorkerClient
 from shared.otel_logger import get_otel_logger
 from shared.s3_file_storage import s3_file_storage
+from shared.tenant_context import resolve_tenant_scope
 
 logger = get_otel_logger("kreuzberg_integration", "shared")
 
@@ -55,7 +56,11 @@ async def process_with_kreuzberg(
     Returns (markdown_content, metadata_dict).
     """
     start_time = time.time()
-    reply_channel = f"kreuzberg_extraction_results:{source_id or original_filename}:{int(start_time * 1000)}"
+    tenant_scope = resolve_tenant_scope()
+    reply_channel = (
+        f"kreuzberg_extraction_results:tenant:{tenant_scope}:"
+        f"{source_id or original_filename}:{int(start_time * 1000)}"
+    )
     client = ExtractionWorkerClient()
     # IMPORTANT: artifact_prefix must be unique per extraction job. For web crawling we often run
     # multiple page extractions under the same website_id; using only source_id would cause S3

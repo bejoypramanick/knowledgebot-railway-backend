@@ -148,22 +148,19 @@ async def lifespan(app: FastAPI):
             logger.info("🔥 LIFESPAN: Warming Redis UI cache (DB7)...")
             from shared.redis_ui_cache import (
                 init_ui_cache_redis, cache_set,
-                CHAT_AGENT_CONFIG_KEY, WIDGET_CONFIG_KEY,
+                CHAT_AGENT_CONFIG_KEY,
                 PERFORMANCE_METRICS_KEY, TTL_LONG, TTL_SHORT
             )
             await init_ui_cache_redis()
 
             from configuration.service.chat_agent_config_service import ChatAgentConfigService
-            from configuration.service.widget_config_service import WidgetConfigService
             from configuration.service.performance_service import PerformanceService
 
             config_svc = ChatAgentConfigService()
-            widget_svc = WidgetConfigService()
             perf_svc = PerformanceService()
 
-            config_data, widget_data, perf_data = await asyncio.gather(
+            config_data, perf_data = await asyncio.gather(
                 config_svc.get_chatAgent_config(),
-                widget_svc.get_widget_config(),
                 perf_svc.get_performance_metrics(),
                 return_exceptions=True
             )
@@ -172,11 +169,10 @@ async def lifespan(app: FastAPI):
                 import json
                 logger.info(f"📋 LIFESPAN: chat_agent_config going into Redis: {json.dumps(config_data, default=str)}")
                 await cache_set(CHAT_AGENT_CONFIG_KEY, config_data, TTL_LONG)
-            if not isinstance(widget_data, Exception):
-                await cache_set(WIDGET_CONFIG_KEY, widget_data, TTL_LONG)
             if not isinstance(perf_data, Exception):
                 await cache_set(PERFORMANCE_METRICS_KEY, perf_data, TTL_SHORT)
 
+            logger.info("ℹ️ LIFESPAN: Skipping widget config warmup because it is tenant-scoped and RLS-protected")
             logger.info("✅ LIFESPAN: Redis UI cache warmed successfully")
         except Exception as cache_err:
             logger.warning(f"⚠️ LIFESPAN: UI cache warmup failed (non-fatal): {cache_err}")

@@ -12,16 +12,25 @@ from typing import Optional
 
 from shared.otel_logger import get_otel_logger
 from shared.redis_factory import create_async_redis_client
+from shared.tenant_context import resolve_tenant_scope
 
 logger = get_otel_logger(__name__, "shared")
 
-CACHE_KEY_PREFIX = "session:assigned_agent:"
-USER_EMAIL_PREFIX = "user:email:"      # email → user database ID
-USER_ID_PREFIX = "user:id:"            # user database ID → email
-ADMIN_IDS_KEY = "cache:admin_ids"      # cached list of admin IDs
+KEY_NAMESPACE = "agent_cache"
 DEFAULT_TTL = 3600  # 1 hour
 USER_CACHE_TTL = 600  # 10 minutes for user lookups
 ADMIN_CACHE_TTL = 300  # 5 minutes for admin list
+
+
+def _tenant_key(
+    resource: str,
+    identifier: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> str:
+    tenant_scope = resolve_tenant_scope(tenant_id=tenant_id, tenant_slug=tenant_slug)
+    base = f"{KEY_NAMESPACE}:tenant:{tenant_scope}:{resource}"
+    return f"{base}:{identifier}" if identifier else base
 
 
 async def init_agent_cache_redis() -> redis.Redis:
@@ -45,7 +54,11 @@ async def get_agent_cache_redis() -> redis.Redis:
     return await init_agent_cache_redis()
 
 
-async def get_assigned_agent(session_uuid: str) -> Optional[str]:
+async def get_assigned_agent(
+    session_uuid: str,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> Optional[str]:
     """
     Get the assigned agent ID/email for a session from Redis cache.
 
@@ -57,7 +70,12 @@ async def get_assigned_agent(session_uuid: str) -> Optional[str]:
     """
     try:
         client = await get_agent_cache_redis()
-        cache_key = f"{CACHE_KEY_PREFIX}{session_uuid}"
+        cache_key = _tenant_key(
+            "session:assigned_agent",
+            session_uuid,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+        )
         value = await client.get(cache_key)
         if value:
             logger.debug(f"Agent cache HIT: {session_uuid} -> {value}")
@@ -67,7 +85,13 @@ async def get_assigned_agent(session_uuid: str) -> Optional[str]:
         return None
 
 
-async def set_assigned_agent(session_uuid: str, agent_value, ttl: int = DEFAULT_TTL) -> bool:
+async def set_assigned_agent(
+    session_uuid: str,
+    agent_value,
+    ttl: int = DEFAULT_TTL,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> bool:
     """
     Cache the assigned agent for a session.
 
@@ -81,7 +105,12 @@ async def set_assigned_agent(session_uuid: str, agent_value, ttl: int = DEFAULT_
     """
     try:
         client = await get_agent_cache_redis()
-        cache_key = f"{CACHE_KEY_PREFIX}{session_uuid}"
+        cache_key = _tenant_key(
+            "session:assigned_agent",
+            session_uuid,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+        )
         await client.set(cache_key, agent_value, ex=ttl)
         logger.debug(f"Agent cache SET: {session_uuid} -> {agent_value} (TTL: {ttl}s)")
         return True
@@ -90,7 +119,11 @@ async def set_assigned_agent(session_uuid: str, agent_value, ttl: int = DEFAULT_
         return False
 
 
-async def clear_assigned_agent(session_uuid: str) -> bool:
+async def clear_assigned_agent(
+    session_uuid: str,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> bool:
     """
     Remove the agent assignment cache for a session.
 
@@ -102,7 +135,12 @@ async def clear_assigned_agent(session_uuid: str) -> bool:
     """
     try:
         client = await get_agent_cache_redis()
-        cache_key = f"{CACHE_KEY_PREFIX}{session_uuid}"
+        cache_key = _tenant_key(
+            "session:assigned_agent",
+            session_uuid,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+        )
         await client.delete(cache_key)
         logger.debug(f"Agent cache DEL: {session_uuid}")
         return True
@@ -113,32 +151,57 @@ async def clear_assigned_agent(session_uuid: str) -> bool:
 
 # --- User identity cache (email ↔ ID) ---
 
-async def get_cached_user_id(email: str) -> Optional[str]:
+async def get_cached_user_id(
+    email: str,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> Optional[str]:
     """Get cached database user ID from email."""
     try:
         client = await get_agent_cache_redis()
-        value = await client.get(f"{USER_EMAIL_PREFIX}{email}")
+        value = await client.get(
+            _tenant_key("user:email", email, tenant_id=tenant_id, tenant_slug=tenant_slug)
+        )
         return value if value else None
     except Exception as e:
         logger.warning(f"User ID cache GET failed for {email}: {e}")
         return None
 
 
-async def set_cached_user_id(email: str, user_id: str) -> None:
+async def set_cached_user_id(
+    email: str,
+    user_id: str,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> None:
     """Cache email → database ID and ID → email bidirectionally."""
     try:
         client = await get_agent_cache_redis()
-        await client.set(f"{USER_EMAIL_PREFIX}{email}", user_id, ex=USER_CACHE_TTL)
-        await client.set(f"{USER_ID_PREFIX}{user_id}", email, ex=USER_CACHE_TTL)
+        await client.set(
+            _tenant_key("user:email", email, tenant_id=tenant_id, tenant_slug=tenant_slug),
+            user_id,
+            ex=USER_CACHE_TTL,
+        )
+        await client.set(
+            _tenant_key("user:id", user_id, tenant_id=tenant_id, tenant_slug=tenant_slug),
+            email,
+            ex=USER_CACHE_TTL,
+        )
     except Exception as e:
         logger.warning(f"User ID cache SET failed for {email}: {e}")
 
 
-async def get_cached_user_email(user_id: str) -> Optional[str]:
+async def get_cached_user_email(
+    user_id: str,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> Optional[str]:
     """Get cached email from database user ID."""
     try:
         client = await get_agent_cache_redis()
-        return await client.get(f"{USER_ID_PREFIX}{user_id}")
+        return await client.get(
+            _tenant_key("user:id", user_id, tenant_id=tenant_id, tenant_slug=tenant_slug)
+        )
     except Exception as e:
         logger.warning(f"User email cache GET failed for {user_id}: {e}")
         return None
@@ -146,11 +209,16 @@ async def get_cached_user_email(user_id: str) -> Optional[str]:
 
 # --- Admin IDs cache ---
 
-async def get_cached_admin_ids() -> Optional[list]:
+async def get_cached_admin_ids(
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> Optional[list]:
     """Get cached list of admin IDs. Returns None on miss."""
     try:
         client = await get_agent_cache_redis()
-        value = await client.get(ADMIN_IDS_KEY)
+        value = await client.get(
+            _tenant_key("admin_ids", tenant_id=tenant_id, tenant_slug=tenant_slug)
+        )
         if value:
             import json
             return json.loads(value)
@@ -160,11 +228,19 @@ async def get_cached_admin_ids() -> Optional[list]:
         return None
 
 
-async def set_cached_admin_ids(admin_ids: list) -> None:
+async def set_cached_admin_ids(
+    admin_ids: list,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> None:
     """Cache the list of admin IDs."""
     try:
         import json
         client = await get_agent_cache_redis()
-        await client.set(ADMIN_IDS_KEY, json.dumps(admin_ids), ex=ADMIN_CACHE_TTL)
+        await client.set(
+            _tenant_key("admin_ids", tenant_id=tenant_id, tenant_slug=tenant_slug),
+            json.dumps(admin_ids),
+            ex=ADMIN_CACHE_TTL,
+        )
     except Exception as e:
         logger.warning(f"Admin IDs cache SET failed: {e}")

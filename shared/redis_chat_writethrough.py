@@ -25,7 +25,7 @@ class ChatWriteThroughService:
     Background service that flushes Redis chat data to PostgreSQL.
 
     Flush cycle (every N seconds):
-    1. SMEMBERS chat:dirty_sessions -> get dirty session UUIDs
+    1. SCAN chat:tenant:*:dirty_sessions -> get dirty session UUIDs per tenant
     2. For each session:
        a. Ensure session row exists in PG (INSERT ... ON CONFLICT DO NOTHING)
        b. Get unsynced messages from Redis (after sync_index)
@@ -92,30 +92,32 @@ class ChatWriteThroughService:
 
         logger.debug(f"Write-through: {len(dirty_sessions)} dirty sessions to flush")
 
-        for session_uuid in dirty_sessions:
+        for dirty_ref in dirty_sessions:
+            session_uuid = dirty_ref["session_uuid"]
+            tenant_scope = dirty_ref.get("tenant_scope")
             try:
-                await self._flush_session(session_uuid)
+                await self._flush_session(session_uuid, tenant_scope=tenant_scope)
             except Exception as e:
                 logger.error(f"Write-through flush failed for {session_uuid}: {e}")
                 # Leave in dirty set for retry next cycle
 
-    async def _flush_session(self, session_uuid: str):
+    async def _flush_session(self, session_uuid: str, tenant_scope: Optional[str] = None):
         """Flush one session's data to PostgreSQL."""
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text
 
         # Get session data from Redis
-        session_data = await self._store.get_session(session_uuid)
+        session_data = await self._store.get_session(session_uuid, tenant_scope=tenant_scope)
         if not session_data:
             # Session expired from Redis - remove from dirty set
-            await self._store.remove_from_dirty(session_uuid)
+            await self._store.remove_from_dirty(session_uuid, tenant_scope=tenant_scope)
             return
 
         # Get unsynced messages
-        unsynced = await self._store.get_unsynced_messages(session_uuid)
+        unsynced = await self._store.get_unsynced_messages(session_uuid, tenant_scope=tenant_scope)
         if not unsynced and session_data.get("pg_synced"):
             # Nothing to sync
-            await self._store.remove_from_dirty(session_uuid)
+            await self._store.remove_from_dirty(session_uuid, tenant_scope=tenant_scope)
             return
 
         try:
@@ -243,13 +245,20 @@ class ChatWriteThroughService:
 
                         # Step 4: Update sync index in Redis
                         # +1 because sync_index represents "flush from this index onwards"
-                        await self._store.mark_synced(session_uuid, max_index + 1)
+                        await self._store.mark_synced(
+                            session_uuid,
+                            max_index + 1,
+                            tenant_scope=tenant_scope,
+                        )
 
                         logger.info(f"Write-through: flushed {len(batch)} messages for {session_uuid} (up to index {max_index})")
 
                         # If we flushed all unsynced, remove from dirty
                         if len(batch) >= len(unsynced):
-                            await self._store.remove_from_dirty(session_uuid)
+                            await self._store.remove_from_dirty(
+                                session_uuid,
+                                tenant_scope=tenant_scope,
+                            )
                     else:
                         # No messages to sync, just update session metadata
                         # Parse last_activity_at timestamp
@@ -274,16 +283,19 @@ class ChatWriteThroughService:
                             },
                         )
                         await db.commit()
-                        await self._store.remove_from_dirty(session_uuid)
+                        await self._store.remove_from_dirty(
+                            session_uuid,
+                            tenant_scope=tenant_scope,
+                        )
 
         except Exception as e:
             logger.error(f"Write-through PG flush failed for {session_uuid}: {e}")
             # Leave in dirty set - retry next cycle
 
-    async def flush_now(self, session_uuid: str):
+    async def flush_now(self, session_uuid: str, tenant_scope: Optional[str] = None):
         """Immediately flush a specific session (e.g., on session close)."""
         try:
-            await self._flush_session(session_uuid)
+            await self._flush_session(session_uuid, tenant_scope=tenant_scope)
             logger.info(f"Write-through: immediate flush completed for {session_uuid}")
         except Exception as e:
             logger.error(f"Write-through immediate flush failed for {session_uuid}: {e}")
@@ -293,9 +305,13 @@ class ChatWriteThroughService:
         dirty = await self._store.get_dirty_sessions()
         if dirty:
             logger.info(f"Write-through: flushing {len(dirty)} sessions on shutdown...")
-            for session_uuid in dirty:
+            for dirty_ref in dirty:
+                session_uuid = dirty_ref["session_uuid"]
                 try:
-                    await self._flush_session(session_uuid)
+                    await self._flush_session(
+                        session_uuid,
+                        tenant_scope=dirty_ref.get("tenant_scope"),
+                    )
                 except Exception as e:
                     logger.error(f"Write-through shutdown flush failed for {session_uuid}: {e}")
             logger.info("Write-through: shutdown flush completed")
@@ -309,9 +325,13 @@ class ChatWriteThroughService:
             dirty = await self._store.get_dirty_sessions()
             if dirty:
                 logger.info(f"Write-through: recovery sync - {len(dirty)} dirty sessions from previous run")
-                for session_uuid in dirty:
+                for dirty_ref in dirty:
+                    session_uuid = dirty_ref["session_uuid"]
                     try:
-                        await self._flush_session(session_uuid)
+                        await self._flush_session(
+                            session_uuid,
+                            tenant_scope=dirty_ref.get("tenant_scope"),
+                        )
                     except Exception as e:
                         logger.error(f"Write-through recovery flush failed for {session_uuid}: {e}")
                 logger.info("Write-through: recovery sync completed")

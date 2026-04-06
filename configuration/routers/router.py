@@ -903,13 +903,18 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
             redis_task = None
             presence_task = None
             last_activity = time.time()
-            channel_name = f"agent:events:{user_id}"
+            channel_name = None
 
             try:
                 # Set initial presence key in Redis
-                from shared.redis_pubsub_manager import get_pubsub_redis
+                from shared.redis_pubsub_manager import (
+                    get_agent_channel_name,
+                    get_agent_presence_key,
+                    get_pubsub_redis,
+                )
                 redis_client = await get_pubsub_redis()
-                presence_key = f"agent:online:{user_id}"
+                channel_name = get_agent_channel_name(user_id)
+                presence_key = get_agent_presence_key(user_id)
                 await redis_client.set(presence_key, "1", ex=60)  # 60 second TTL
                 logger.info(f"✅ Set online presence for agent {user_email} (ID: {user_id})")
 
@@ -1181,7 +1186,8 @@ async def customer_events_stream(request: Request, session_id: str = Query(..., 
             heartbeat_task = None
             redis_task = None
             last_activity = time.time()
-            channel_name = f"session:events:{session_id}"
+            from shared.redis_pubsub_manager import get_session_channel_name
+            channel_name = get_session_channel_name(session_id)
 
             try:
                 logger.info(f"🔄 Setting up heartbeat and Redis tasks for session {session_id}")

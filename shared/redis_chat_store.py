@@ -9,30 +9,37 @@ Env vars:
   CHAT_STORE_REDIS_DB=6
 
 Redis Data Model:
-  Session (Hash):   chat:session:{session_uuid}  -> session_uuid, user_role_id, started_at, ...
-  Messages (List):  chat:messages:{session_uuid}  -> JSON objects appended via RPUSH
-  Dirty Set:        chat:dirty_sessions           -> SET of session_uuids needing PG flush
-  Sync Index:       chat:sync_index:{session_uuid} -> index of last synced message
+  Session (Hash):   chat:tenant:{tenant}:session:{session_uuid}
+  Messages (List):  chat:tenant:{tenant}:messages:{session_uuid}
+  Dirty Set:        chat:tenant:{tenant}:dirty_sessions
+  Sync Index:       chat:tenant:{tenant}:sync_index:{session_uuid}
 """
 import redis.asyncio as redis
 import json
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any
 
 from shared.otel_logger import get_otel_logger
 from shared.redis_factory import create_async_redis_client
 from shared.tenant_context import (
-    get_current_tenant_id,
-    get_current_tenant_slug,
+    resolve_tenant_identity,
+    resolve_tenant_scope,
 )
 
 logger = get_otel_logger(__name__, "shared")
 
 # Key patterns
-SESSION_KEY = "chat:session:{}"
-MESSAGES_KEY = "chat:messages:{}"
-DIRTY_SET_KEY = "chat:dirty_sessions"
-SYNC_INDEX_KEY = "chat:sync_index:{}"
+SESSION_KEY = "chat:tenant:{tenant}:session:{session_uuid}"
+MESSAGES_KEY = "chat:tenant:{tenant}:messages:{session_uuid}"
+DIRTY_SET_KEY = "chat:tenant:{tenant}:dirty_sessions"
+DIRTY_SET_PATTERN = "chat:tenant:*:dirty_sessions"
+SYNC_INDEX_KEY = "chat:tenant:{tenant}:sync_index:{session_uuid}"
+
+# Legacy unscoped key patterns kept temporarily for migration-on-access.
+LEGACY_SESSION_KEY = "chat:session:{}"
+LEGACY_MESSAGES_KEY = "chat:messages:{}"
+LEGACY_DIRTY_SET_KEY = "chat:dirty_sessions"
+LEGACY_SYNC_INDEX_KEY = "chat:sync_index:{}"
 
 # TTLs
 SESSION_TTL = 86400  # 24 hours
@@ -71,6 +78,156 @@ class RedisChatStore:
         if self._client is None:
             self._client = await get_chat_store_redis()
 
+    def _resolve_scope(
+        self,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> str:
+        return tenant_scope or resolve_tenant_scope(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+        )
+
+    def _tenant_identity(
+        self,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+    ) -> Dict[str, Optional[str]]:
+        return resolve_tenant_identity(tenant_id=tenant_id, tenant_slug=tenant_slug)
+
+    def _session_key(
+        self,
+        session_uuid: str,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> str:
+        scope = self._resolve_scope(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+        return SESSION_KEY.format(tenant=scope, session_uuid=session_uuid)
+
+    def _messages_key(
+        self,
+        session_uuid: str,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> str:
+        scope = self._resolve_scope(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+        return MESSAGES_KEY.format(tenant=scope, session_uuid=session_uuid)
+
+    def _sync_index_key(
+        self,
+        session_uuid: str,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> str:
+        scope = self._resolve_scope(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+        return SYNC_INDEX_KEY.format(tenant=scope, session_uuid=session_uuid)
+
+    def _dirty_set_key(
+        self,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> str:
+        scope = self._resolve_scope(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+        return DIRTY_SET_KEY.format(tenant=scope)
+
+    def _extract_tenant_scope(self, dirty_set_key: str) -> Optional[str]:
+        parts = dirty_set_key.split(":")
+        if len(parts) == 4 and parts[0] == "chat" and parts[1] == "tenant" and parts[3] == "dirty_sessions":
+            return parts[2]
+        return None
+
+    async def _migrate_legacy_session_if_needed(
+        self,
+        session_uuid: str,
+        tenant_id: Optional[str] = None,
+        tenant_slug: Optional[str] = None,
+        tenant_scope: Optional[str] = None,
+    ) -> None:
+        await self._ensure_client()
+
+        scoped_session_key = self._session_key(
+            session_uuid,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+        if await self._client.exists(scoped_session_key):
+            return
+
+        legacy_session_key = LEGACY_SESSION_KEY.format(session_uuid)
+        if not await self._client.exists(legacy_session_key):
+            return
+
+        scoped_messages_key = self._messages_key(
+            session_uuid,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+        scoped_sync_index_key = self._sync_index_key(
+            session_uuid,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+        scoped_dirty_set_key = self._dirty_set_key(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            tenant_scope=tenant_scope,
+        )
+
+        legacy_messages_key = LEGACY_MESSAGES_KEY.format(session_uuid)
+        legacy_sync_index_key = LEGACY_SYNC_INDEX_KEY.format(session_uuid)
+        legacy_is_dirty = await self._client.sismember(LEGACY_DIRTY_SET_KEY, session_uuid)
+        tenant_identity = self._tenant_identity(tenant_id=tenant_id, tenant_slug=tenant_slug)
+
+        pipe = self._client.pipeline()
+        pipe.rename(legacy_session_key, scoped_session_key)
+
+        if await self._client.exists(legacy_messages_key):
+            pipe.rename(legacy_messages_key, scoped_messages_key)
+
+        if await self._client.exists(legacy_sync_index_key):
+            pipe.rename(legacy_sync_index_key, scoped_sync_index_key)
+
+        pipe.hset(
+            scoped_session_key,
+            mapping={
+                "tenant_id": tenant_identity["tenant_id"] or "",
+                "tenant_slug": tenant_identity["tenant_slug"] or "",
+            },
+        )
+
+        if legacy_is_dirty:
+            pipe.srem(LEGACY_DIRTY_SET_KEY, session_uuid)
+            pipe.sadd(scoped_dirty_set_key, session_uuid)
+
+        await pipe.execute()
+        logger.info(
+            f"Redis chat session migrated to tenant scope: {session_uuid} -> {scoped_session_key}"
+        )
+
     # ─── Session Operations ───────────────────────────────────────────
 
     async def get_or_create_session(
@@ -80,6 +237,7 @@ class RedisChatStore:
         metadata: Dict[str, Any] = None,
         tenant_id: str = None,
         tenant_slug: str = None,
+        tenant_scope: str = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get existing session from Redis or create a new one.
@@ -91,17 +249,32 @@ class RedisChatStore:
         """
         try:
             await self._ensure_client()
-            session_key = SESSION_KEY.format(session_uuid)
+            tenant_identity = self._tenant_identity(
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+            )
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_identity["tenant_id"],
+                tenant_slug=tenant_identity["tenant_slug"],
+                tenant_scope=tenant_scope,
+            )
+            session_key = self._session_key(
+                session_uuid,
+                tenant_id=tenant_identity["tenant_id"],
+                tenant_slug=tenant_identity["tenant_slug"],
+                tenant_scope=tenant_scope,
+            )
 
             # Check if session already exists in Redis
             existing = await self._client.hgetall(session_key)
             if existing:
-                if (tenant_id or get_current_tenant_id()) and not existing.get("tenant_id"):
+                if tenant_identity["tenant_id"] and not existing.get("tenant_id"):
                     await self._client.hset(
                         session_key,
                         mapping={
-                            "tenant_id": tenant_id or get_current_tenant_id() or "",
-                            "tenant_slug": tenant_slug or get_current_tenant_slug() or "",
+                            "tenant_id": tenant_identity["tenant_id"] or "",
+                            "tenant_slug": tenant_identity["tenant_slug"] or "",
                         },
                     )
                     existing = await self._client.hgetall(session_key)
@@ -114,8 +287,8 @@ class RedisChatStore:
             session_data = {
                 "session_uuid": session_uuid,
                 "user_role_id": user_role_id if user_role_id else "",
-                "tenant_id": tenant_id or get_current_tenant_id() or "",
-                "tenant_slug": tenant_slug or get_current_tenant_slug() or "",
+                "tenant_id": tenant_identity["tenant_id"] or "",
+                "tenant_slug": tenant_identity["tenant_slug"] or "",
                 "started_at": now,
                 "last_activity_at": now,
                 "is_active": "true",
@@ -137,11 +310,28 @@ class RedisChatStore:
             logger.warning(f"Redis get_or_create_session failed for {session_uuid}: {e}")
             return None
 
-    async def get_session(self, session_uuid: str) -> Optional[Dict[str, Any]]:
+    async def get_session(
+        self,
+        session_uuid: str,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> Optional[Dict[str, Any]]:
         """Get session data from Redis."""
         try:
             await self._ensure_client()
-            session_key = SESSION_KEY.format(session_uuid)
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            session_key = self._session_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             data = await self._client.hgetall(session_key)
             if data:
                 return self._deserialize_session(data)
@@ -150,11 +340,28 @@ class RedisChatStore:
             logger.warning(f"Redis get_session failed for {session_uuid}: {e}")
             return None
 
-    async def update_session_activity(self, session_uuid: str) -> bool:
+    async def update_session_activity(
+        self,
+        session_uuid: str,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> bool:
         """Update last_activity_at timestamp."""
         try:
             await self._ensure_client()
-            session_key = SESSION_KEY.format(session_uuid)
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            session_key = self._session_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             now = datetime.now(timezone.utc).isoformat()
             await self._client.hset(session_key, "last_activity_at", now)
             return True
@@ -162,11 +369,28 @@ class RedisChatStore:
             logger.warning(f"Redis update_session_activity failed: {e}")
             return False
 
-    async def close_session(self, session_uuid: str) -> bool:
+    async def close_session(
+        self,
+        session_uuid: str,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> bool:
         """Mark session as closed in Redis."""
         try:
             await self._ensure_client()
-            session_key = SESSION_KEY.format(session_uuid)
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            session_key = self._session_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             now = datetime.now(timezone.utc).isoformat()
             pipe = self._client.pipeline()
             pipe.hset(session_key, mapping={
@@ -188,7 +412,10 @@ class RedisChatStore:
         session_uuid: str,
         role: str,
         content: str,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Save a message to Redis. Uses a pipeline for atomic:
@@ -202,6 +429,12 @@ class RedisChatStore:
         """
         try:
             await self._ensure_client()
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
 
             now = datetime.now(timezone.utc).isoformat()
             message = {
@@ -213,14 +446,29 @@ class RedisChatStore:
             }
             message_json = json.dumps(message)
 
-            session_key = SESSION_KEY.format(session_uuid)
-            messages_key = MESSAGES_KEY.format(session_uuid)
+            session_key = self._session_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            messages_key = self._messages_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            dirty_set_key = self._dirty_set_key(
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
 
             pipe = self._client.pipeline()
             pipe.rpush(messages_key, message_json)
             pipe.hincrby(session_key, "message_count", 1)
             pipe.hset(session_key, "last_activity_at", now)
-            pipe.sadd(DIRTY_SET_KEY, session_uuid)
+            pipe.sadd(dirty_set_key, session_uuid)
             pipe.expire(messages_key, MESSAGES_TTL)
             pipe.expire(session_key, SESSION_TTL)
             results = await pipe.execute()
@@ -242,11 +490,28 @@ class RedisChatStore:
             logger.warning(f"Redis save_message failed for {session_uuid}: {e}")
             return None
 
-    async def get_messages(self, session_uuid: str) -> List[Dict[str, Any]]:
+    async def get_messages(
+        self,
+        session_uuid: str,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> List[Dict[str, Any]]:
         """Get all messages for a session from Redis."""
         try:
             await self._ensure_client()
-            messages_key = MESSAGES_KEY.format(session_uuid)
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            messages_key = self._messages_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             raw_messages = await self._client.lrange(messages_key, 0, -1)
 
             messages = []
@@ -265,11 +530,28 @@ class RedisChatStore:
             logger.warning(f"Redis get_messages failed for {session_uuid}: {e}")
             return []
 
-    async def get_message_count(self, session_uuid: str) -> int:
+    async def get_message_count(
+        self,
+        session_uuid: str,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> int:
         """Get message count from Redis."""
         try:
             await self._ensure_client()
-            messages_key = MESSAGES_KEY.format(session_uuid)
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            messages_key = self._messages_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             count = await self._client.llen(messages_key)
             return count
         except Exception as e:
@@ -278,32 +560,88 @@ class RedisChatStore:
 
     # ─── Write-Through Support ────────────────────────────────────────
 
-    async def mark_dirty(self, session_uuid: str) -> bool:
+    async def mark_dirty(
+        self,
+        session_uuid: str,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> bool:
         """Mark a session as needing PG flush."""
         try:
             await self._ensure_client()
-            await self._client.sadd(DIRTY_SET_KEY, session_uuid)
+            await self._client.sadd(
+                self._dirty_set_key(
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
+                    tenant_scope=tenant_scope,
+                ),
+                session_uuid,
+            )
             return True
         except Exception as e:
             logger.warning(f"Redis mark_dirty failed: {e}")
             return False
 
-    async def get_dirty_sessions(self) -> Set[str]:
-        """Get all session UUIDs that need PG flush."""
+    async def get_dirty_sessions(self) -> List[Dict[str, str]]:
+        """Get all session UUIDs that need PG flush, grouped by tenant scope."""
         try:
             await self._ensure_client()
-            members = await self._client.smembers(DIRTY_SET_KEY)
-            return members
+            legacy_dirty_members = await self._client.smembers(LEGACY_DIRTY_SET_KEY)
+            for legacy_session_uuid in legacy_dirty_members:
+                legacy_data = await self._client.hgetall(LEGACY_SESSION_KEY.format(legacy_session_uuid))
+                await self._migrate_legacy_session_if_needed(
+                    legacy_session_uuid,
+                    tenant_id=legacy_data.get("tenant_id") or None,
+                    tenant_slug=legacy_data.get("tenant_slug") or None,
+                )
+
+            dirty_sessions: List[Dict[str, str]] = []
+            async for dirty_key in self._client.scan_iter(match=DIRTY_SET_PATTERN):
+                tenant_scope = self._extract_tenant_scope(dirty_key)
+                if not tenant_scope:
+                    continue
+                members = await self._client.smembers(dirty_key)
+                for session_uuid in members:
+                    dirty_sessions.append(
+                        {
+                            "tenant_scope": tenant_scope,
+                            "session_uuid": session_uuid,
+                        }
+                    )
+            return dirty_sessions
         except Exception as e:
             logger.warning(f"Redis get_dirty_sessions failed: {e}")
-            return set()
+            return []
 
-    async def get_unsynced_messages(self, session_uuid: str) -> List[Dict[str, Any]]:
+    async def get_unsynced_messages(
+        self,
+        session_uuid: str,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> List[Dict[str, Any]]:
         """Get messages that haven't been synced to PG yet."""
         try:
             await self._ensure_client()
-            sync_index_key = SYNC_INDEX_KEY.format(session_uuid)
-            messages_key = MESSAGES_KEY.format(session_uuid)
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            sync_index_key = self._sync_index_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            messages_key = self._messages_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
 
             # Get sync index (how far we've flushed)
             sync_index_str = await self._client.get(sync_index_key)
@@ -327,11 +665,29 @@ class RedisChatStore:
             logger.warning(f"Redis get_unsynced_messages failed for {session_uuid}: {e}")
             return []
 
-    async def mark_synced(self, session_uuid: str, up_to_index: int) -> bool:
+    async def mark_synced(
+        self,
+        session_uuid: str,
+        up_to_index: int,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> bool:
         """Update sync index after successful PG flush."""
         try:
             await self._ensure_client()
-            sync_index_key = SYNC_INDEX_KEY.format(session_uuid)
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            sync_index_key = self._sync_index_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
             await self._client.set(sync_index_key, str(up_to_index))
             logger.debug(f"Redis sync_index updated: {session_uuid} -> {up_to_index}")
             return True
@@ -339,29 +695,80 @@ class RedisChatStore:
             logger.warning(f"Redis mark_synced failed: {e}")
             return False
 
-    async def remove_from_dirty(self, session_uuid: str) -> bool:
+    async def remove_from_dirty(
+        self,
+        session_uuid: str,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> bool:
         """Remove session from dirty set after full sync."""
         try:
             await self._ensure_client()
-            await self._client.srem(DIRTY_SET_KEY, session_uuid)
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            await self._client.srem(
+                self._dirty_set_key(
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
+                    tenant_scope=tenant_scope,
+                ),
+                session_uuid,
+            )
             return True
         except Exception as e:
             logger.warning(f"Redis remove_from_dirty failed: {e}")
             return False
 
-    async def delete_session(self, session_uuid: str) -> bool:
+    async def delete_session(
+        self,
+        session_uuid: str,
+        tenant_id: str = None,
+        tenant_slug: str = None,
+        tenant_scope: str = None,
+    ) -> bool:
         """Delete session and messages from Redis."""
         try:
             await self._ensure_client()
-            session_key = SESSION_KEY.format(session_uuid)
-            messages_key = MESSAGES_KEY.format(session_uuid)
-            sync_index_key = SYNC_INDEX_KEY.format(session_uuid)
+            await self._migrate_legacy_session_if_needed(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            session_key = self._session_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            messages_key = self._messages_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            sync_index_key = self._sync_index_key(
+                session_uuid,
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
+            dirty_set_key = self._dirty_set_key(
+                tenant_id=tenant_id,
+                tenant_slug=tenant_slug,
+                tenant_scope=tenant_scope,
+            )
 
             pipe = self._client.pipeline()
             pipe.delete(session_key)
             pipe.delete(messages_key)
             pipe.delete(sync_index_key)
-            pipe.srem(DIRTY_SET_KEY, session_uuid)
+            pipe.srem(dirty_set_key, session_uuid)
             await pipe.execute()
 
             logger.info(f"Redis session DELETED: {session_uuid}")
@@ -377,6 +784,8 @@ class RedisChatStore:
         return {
             "session_uuid": data.get("session_uuid", ""),
             "user_role_id": data["user_role_id"] if data.get("user_role_id") else None,
+            "tenant_id": data.get("tenant_id") or None,
+            "tenant_slug": data.get("tenant_slug") or None,
             "started_at": data.get("started_at"),
             "last_activity_at": data.get("last_activity_at"),
             "is_active": data.get("is_active", "true") == "true",

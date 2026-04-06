@@ -4,22 +4,31 @@ Caches display_name/storage_document_name → original_url mappings for citation
 Uses same DB as agent cache (DB 4) for co-location of lookup state.
 
 Cache strategy:
-- Key format: citation:url:{title} → original_url
+- Key format: citation_cache:tenant:{tenant}:url:{title} → original_url
 - TTL: 24 hours (refreshed on access)
 - Populated on cache miss (from DB) and on website scrape completion
 - Invalidated when websites are deleted
 """
 import redis.asyncio as redis
-import json
 from typing import Dict, List, Optional
 
 from shared.otel_logger import get_otel_logger
 from shared.redis_factory import create_async_redis_client
+from shared.tenant_context import resolve_tenant_scope
 
 logger = get_otel_logger(__name__, "shared")
 
-CACHE_KEY_PREFIX = "citation:url:"
+CACHE_KEY_PREFIX = "citation_cache"
 DEFAULT_TTL = 86400  # 24 hours
+
+
+def _cache_key(
+    title: str,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> str:
+    tenant_scope = resolve_tenant_scope(tenant_id=tenant_id, tenant_slug=tenant_slug)
+    return f"{CACHE_KEY_PREFIX}:tenant:{tenant_scope}:url:{title}"
 
 
 async def _get_redis_client() -> redis.Redis:
@@ -31,7 +40,11 @@ async def _get_redis_client() -> redis.Redis:
     )
 
 
-async def get_cached_urls(titles: List[str]) -> Dict[str, Optional[str]]:
+async def get_cached_urls(
+    titles: List[str],
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> Dict[str, Optional[str]]:
     """
     Batch lookup cached title → URL mappings.
 
@@ -44,7 +57,10 @@ async def get_cached_urls(titles: List[str]) -> Dict[str, Optional[str]]:
 
     try:
         client = await _get_redis_client()
-        keys = [f"{CACHE_KEY_PREFIX}{title}" for title in titles]
+        keys = [
+            _cache_key(title, tenant_id=tenant_id, tenant_slug=tenant_slug)
+            for title in titles
+        ]
         values = await client.mget(keys)
 
         result = {}
@@ -62,7 +78,12 @@ async def get_cached_urls(titles: List[str]) -> Dict[str, Optional[str]]:
         return {}
 
 
-async def cache_url_mappings(url_map: Dict[str, str], ttl: int = DEFAULT_TTL) -> int:
+async def cache_url_mappings(
+    url_map: Dict[str, str],
+    ttl: int = DEFAULT_TTL,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> int:
     """
     Cache multiple title → URL mappings.
 
@@ -80,7 +101,11 @@ async def cache_url_mappings(url_map: Dict[str, str], ttl: int = DEFAULT_TTL) ->
         client = await _get_redis_client()
         pipe = client.pipeline()
         for title, url in url_map.items():
-            pipe.set(f"{CACHE_KEY_PREFIX}{title}", url, ex=ttl)
+            pipe.set(
+                _cache_key(title, tenant_id=tenant_id, tenant_slug=tenant_slug),
+                url,
+                ex=ttl,
+            )
         await pipe.execute()
         logger.info(f"📎 [CITATION_CACHE] Cached {len(url_map)} URL mappings (TTL: {ttl}s)")
         return len(url_map)
@@ -90,11 +115,21 @@ async def cache_url_mappings(url_map: Dict[str, str], ttl: int = DEFAULT_TTL) ->
         return 0
 
 
-async def cache_single_url(title: str, url: str, ttl: int = DEFAULT_TTL) -> bool:
+async def cache_single_url(
+    title: str,
+    url: str,
+    ttl: int = DEFAULT_TTL,
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> bool:
     """Cache a single title → URL mapping. Called when a new website page is scraped."""
     try:
         client = await _get_redis_client()
-        await client.set(f"{CACHE_KEY_PREFIX}{title}", url, ex=ttl)
+        await client.set(
+            _cache_key(title, tenant_id=tenant_id, tenant_slug=tenant_slug),
+            url,
+            ex=ttl,
+        )
         logger.info(f"📎 [CITATION_CACHE] Cached: {title} → {url}")
         return True
     except Exception as e:
@@ -102,14 +137,21 @@ async def cache_single_url(title: str, url: str, ttl: int = DEFAULT_TTL) -> bool
         return False
 
 
-async def invalidate_urls(titles: List[str]) -> int:
+async def invalidate_urls(
+    titles: List[str],
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+) -> int:
     """Remove cached URL mappings (e.g., when websites are deleted)."""
     if not titles:
         return 0
 
     try:
         client = await _get_redis_client()
-        keys = [f"{CACHE_KEY_PREFIX}{title}" for title in titles]
+        keys = [
+            _cache_key(title, tenant_id=tenant_id, tenant_slug=tenant_slug)
+            for title in titles
+        ]
         deleted = await client.delete(*keys)
         logger.info(f"🗑️ [CITATION_CACHE] Invalidated {deleted} entries")
         return deleted

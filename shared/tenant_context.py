@@ -46,6 +46,37 @@ def get_tenant_context() -> Dict[str, Optional[str]]:
     }
 
 
+def resolve_tenant_identity(
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    default_to_default: bool = True,
+) -> Dict[str, Optional[str]]:
+    resolved_tenant_id = tenant_id or get_current_tenant_id()
+    resolved_tenant_slug = tenant_slug or get_current_tenant_slug()
+
+    if default_to_default:
+        resolved_tenant_id = resolved_tenant_id or DEFAULT_TENANT_ID
+        resolved_tenant_slug = resolved_tenant_slug or DEFAULT_TENANT_SLUG
+
+    return {
+        "tenant_id": resolved_tenant_id,
+        "tenant_slug": resolved_tenant_slug,
+    }
+
+
+def resolve_tenant_scope(
+    tenant_id: Optional[str] = None,
+    tenant_slug: Optional[str] = None,
+    default_to_default: bool = True,
+) -> Optional[str]:
+    resolved = resolve_tenant_identity(
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        default_to_default=default_to_default,
+    )
+    return resolved["tenant_id"] or resolved["tenant_slug"]
+
+
 def set_tenant_context(
     tenant_id: Optional[str] = None,
     tenant_slug: Optional[str] = None,
