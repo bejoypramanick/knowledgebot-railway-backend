@@ -28,8 +28,7 @@ def _get_internal_request_secret() -> str:
 
 def _normalize_path(path_or_url: str) -> str:
     parsed = urlsplit(path_or_url)
-    path = parsed.path or "/"
-    return f"{path}?{parsed.query}" if parsed.query else path
+    return parsed.path or "/"
 
 
 def _signature_payload(method: str, path_or_url: str, timestamp: str, caller: str) -> bytes:
