@@ -11,7 +11,6 @@ from configuration.dao.widget_config_dao import WidgetConfigDAO
 from configuration.core.railway_storage import railway_storage
 
 logger = get_otel_logger("widget_config_service", "configuration")
-DEFAULT_WIDGET_ALLOWED_ORIGINS = ["https://dailogue.globistaan.com"]
 
 class WidgetConfigService:
     """Service layer for widget configuration operations"""
@@ -38,8 +37,6 @@ class WidgetConfigService:
                 widget_config = {}
 
             allowed_origins = normalize_widget_allowed_origins(widget_config.get("allowed_origins"))
-            if not allowed_origins:
-                allowed_origins = list(DEFAULT_WIDGET_ALLOWED_ORIGINS)
 
             logger.info(f"✅ Widget config + {len(suggested_messages)} suggested messages fetched (parallel)")
             
