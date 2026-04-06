@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 from httpx import AsyncClient
 import httpx
 import asyncio
+from urllib.parse import urlencode
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -57,6 +58,18 @@ def _sign_internal_headers(headers: Dict[str, str], method: str, path_or_url: st
         path_or_url=path_or_url,
         caller=INTERNAL_CALLER_ID,
     )
+
+
+def _append_query_params(url: str, query_params) -> str:
+    if not query_params:
+        return url
+
+    encoded_query = urlencode(list(query_params.multi_items()))
+    if not encoded_query:
+        return url
+
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}{encoded_query}"
 
 
 def _apply_public_widget_context(
@@ -1276,7 +1289,8 @@ async def generic_proxy_handler(request: Request, path: str):
         # Internal services expect /api/v1/{service_name}/{endpoint}
         # The service_path already includes the service prefix (e.g., "configuration/users/profile")
         full_url = f"{service_url}/api/v1/{service_path}"
-        logger.debug(f"[proxy] upstream={service_url} url={full_url}")
+        upstream_url = _append_query_params(full_url, request.query_params)
+        logger.debug(f"[proxy] upstream={service_url} url={upstream_url}")
 
         # Prepare headers
         headers = dict(request.headers)
@@ -1284,7 +1298,7 @@ async def generic_proxy_handler(request: Request, path: str):
         _remove_untrusted_identity_headers(headers)
         headers = add_correlation_id_headers(headers, correlation_id)
         _inject_identity_headers(request, headers)
-        _sign_internal_headers(headers, method=request.method, path_or_url=full_url)
+        _sign_internal_headers(headers, method=request.method, path_or_url=upstream_url)
         
         # Make HTTP request to service
         # Use longer timeout for batch operations (file uploads/deletes) and complex queries
@@ -1302,7 +1316,7 @@ async def generic_proxy_handler(request: Request, path: str):
         #     logger.info(f"⏱️  Using extended timeout {request_timeout}s for web crawling")
 
         async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=False) as client:
-            logger.info(f"🔍 About to make HTTP request to: {full_url} (timeout={request_timeout}s)")
+            logger.info(f"🔍 About to make HTTP request to: {upstream_url} (timeout={request_timeout}s)")
 
             # For SSE and other streaming responses, we need special handling
             # Check content-type to decide how to handle the response
@@ -1356,7 +1370,7 @@ async def generic_proxy_handler(request: Request, path: str):
                 content=request_body,
                 params=request.query_params
             )
-            logger.info(f"✅ Received response from {full_url} (Status: {response.status_code})")
+            logger.info(f"✅ Received response from {upstream_url} (Status: {response.status_code})")
 
             # Create proper FastAPI Response from httpx response
             from fastapi.responses import StreamingResponse, Response
