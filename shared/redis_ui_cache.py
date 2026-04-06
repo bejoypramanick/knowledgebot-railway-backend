@@ -34,8 +34,8 @@ TOKEN_USAGE_KEY_PREFIX = "ui_cache:token_usage:"
 KB_FILES_KEY_PREFIX = "ui_cache:kb_files:"
 
 # TTLs
-TTL_LONG = 86400      # 24 hours — config screens (invalidated explicitly on mutation)
-TTL_WIDGET = 86400    # 24 hours — widget config (presigned URLs valid 7 days, regenerated on invalidation)
+TTL_LONG = 300        # 5 minutes — config screens
+TTL_WIDGET = 300      # 5 minutes — widget config
 TTL_MEDIUM = 600      # 10 minutes — knowledge base
 TTL_SHORT = 300       # 5 minutes — performance/token usage
 
