@@ -37,8 +37,10 @@ class WidgetConfigDAO:
         params = {"tenant_id": tenant_id}
         try:
             logger.log_db_operation(select_query, params)
-            async with get_db_session() as session:
-                result = await session.execute(text(select_query), params)
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    result = await session.execute(text(select_query), params)
                 row = result.mappings().first()
                 
                 if row:
@@ -172,10 +174,12 @@ class WidgetConfigDAO:
             """
 
             logger.log_db_operation(query, params)
-            async with get_db_session() as session:
-                await session.execute(text(query), params)
-                await session.commit()
-                logger.info(f"✅ Widget config UPSERT successful: {len(columns)-3} field(s) updated")
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    await session.execute(text(query), params)
+                    await session.commit()
+                    logger.info(f"✅ Widget config UPSERT successful: {len(columns)-3} field(s) updated")
         except Exception as e:
             logger.log_db_query("update_widget_config", config_data, error=e)
             logger.error(f"❌ Error in update_widget_config: {e}")

@@ -42,11 +42,13 @@ class ChatAgentConfigDAO:
         params = {"tenant_id": tenant_id}
         try:
             logger.log_db_operation(str(query), params)
-            async with get_db_session() as session:
-                result = await session.execute(query, params)
-                rows = result.fetchall()
-                logger.log_db_query(str(query), params, rows)
-                return [dict(row._mapping) for row in rows]
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    result = await session.execute(query, params)
+                    rows = result.fetchall()
+                    logger.log_db_query(str(query), params, rows)
+                    return [dict(row._mapping) for row in rows]
         except Exception as e:
             logger.log_db_query(str(query), None, error=e)
             raise
@@ -83,11 +85,13 @@ class ChatAgentConfigDAO:
         }
         try:
             logger.log_db_operation(str(query), params)
-            async with get_db_session() as session:
-                result = await session.execute(query, params)
-                row = result.fetchone()
-                logger.log_db_query(str(query), params, f"MERGE {row.action if row else 'UNKNOWN'}")
-                await session.commit()
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    result = await session.execute(query, params)
+                    row = result.fetchone()
+                    logger.log_db_query(str(query), params, f"MERGE {row.action if row else 'UNKNOWN'}")
+                    await session.commit()
         except Exception as e:
             logger.log_db_query(str(query), params, error=e)
             raise
@@ -110,13 +114,15 @@ class ChatAgentConfigDAO:
         params = {"tenant_id": tenant_id}
         try:
             logger.log_db_operation(str(query), params)
-            async with get_db_session() as session:
-                results = await session.execute(query, params)
-                rows = results.fetchall()
-                logger.log_db_query(str(query), params, rows)
-                agents = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
-                await set_cached_role_directory("human_agent", agents)
-                return agents
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    results = await session.execute(query, params)
+                    rows = results.fetchall()
+                    logger.log_db_query(str(query), params, rows)
+                    agents = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
+                    await set_cached_role_directory("human_agent", agents)
+                    return agents
         except Exception as e:
             logger.error(f"Error fetching human agents: {type(e).__name__}")
             raise
@@ -139,13 +145,15 @@ class ChatAgentConfigDAO:
         params = {"tenant_id": tenant_id}
         try:
             logger.log_db_operation(str(query), params)
-            async with get_db_session() as session:
-                results = await session.execute(query, params)
-                rows = results.fetchall()
-                logger.log_db_query(str(query), params, rows)
-                admins = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
-                await set_cached_role_directory("admin", admins)
-                return admins
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    results = await session.execute(query, params)
+                    rows = results.fetchall()
+                    logger.log_db_query(str(query), params, rows)
+                    admins = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
+                    await set_cached_role_directory("admin", admins)
+                    return admins
         except Exception as e:
             logger.error(f"Error fetching admin emails: {type(e).__name__}")
             raise
@@ -164,11 +172,13 @@ class ChatAgentConfigDAO:
         params = {"tenant_id": tenant_id}
         try:
             logger.log_db_operation(str(query), params)
-            async with get_db_session() as session:
-                result = await session.execute(query, params)
-                rows = result.fetchall()
-                logger.log_db_query(str(query), params, rows)
-                return [dict(row._mapping) for row in rows]
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    result = await session.execute(query, params)
+                    rows = result.fetchall()
+                    logger.log_db_query(str(query), params, rows)
+                    return [dict(row._mapping) for row in rows]
         except Exception as e:
             logger.log_db_query(str(query), None, error=e)
             raise
@@ -188,11 +198,13 @@ class ChatAgentConfigDAO:
         params = {"tenant_id": tenant_id}
         try:
             logger.log_db_operation(str(query), params)
-            async with get_db_session() as session:
-                rows = await session.execute(query, params)
-                result = rows.fetchall()
-                logger.log_db_query(str(query), params, result)
-                return [dict(row._mapping) for row in result]
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    rows = await session.execute(query, params)
+                    result = rows.fetchall()
+                    logger.log_db_query(str(query), params, result)
+                    return [dict(row._mapping) for row in result]
         except Exception as e:
             logger.error(f"Error fetching personas: {e}")
             raise
@@ -213,11 +225,13 @@ class ChatAgentConfigDAO:
         params = {"tenant_id": tenant_id}
         try:
             logger.log_db_operation(str(query), params)
-            async with get_db_session() as session:
-                result = await session.execute(query, params)
-                row = result.fetchone()
-                logger.log_db_query(str(query), params, row)
-                return dict(row._mapping) if row else None
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    result = await session.execute(query, params)
+                    row = result.fetchone()
+                    logger.log_db_query(str(query), params, row)
+                    return dict(row._mapping) if row else None
         except Exception as e:
             logger.log_db_query(str(query), None, error=e)
             raise
@@ -246,13 +260,15 @@ class ChatAgentConfigDAO:
                     'tenant_id': tenant_id
                 }
                 logger.log_db_operation(str(update_query), params)
-                result = await session.execute(update_query, params)
-
-                if result.rowcount == 0:
-                    raise ValueError(f"Persona '{persona_name}' not found. Cannot update non-existent persona.")
-
-                logger.log_db_query(str(update_query), params, f"UPDATE {result.rowcount}")
-                await session.commit()
+                from shared.tenant_context import tenant_context
+                with tenant_context(tenant_id=tenant_id):
+                    result = await session.execute(update_query, params)
+    
+                    if result.rowcount == 0:
+                        raise ValueError(f"Persona '{persona_name}' not found. Cannot update non-existent persona.")
+    
+                    logger.log_db_query(str(update_query), params, f"UPDATE {result.rowcount}")
+                    await session.commit()
         except Exception as e:
             logger.log_db_query("update_persona", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
             raise
@@ -595,11 +611,13 @@ class ChatAgentConfigDAO:
                 "used": used
             }
             logger.log_db_operation(str(query), params)
-            async with get_db_session() as session:
-                result = await session.execute(query, params)
-                logger.log_db_query(str(query), params, f"UPDATE {result.rowcount}")
-                await session.commit()
-                return result.rowcount > 0
+            from shared.tenant_context import tenant_context
+            with tenant_context(tenant_id=tenant_id):
+                async with get_db_session() as session:
+                    result = await session.execute(query, params)
+                    logger.log_db_query(str(query), params, f"UPDATE {result.rowcount}")
+                    await session.commit()
+                    return result.rowcount > 0
         except Exception as e:
             logger.log_db_query("update_llm_provider_tokens", {"provider": provider, "limit": limit, "used": used}, error=e)
             raise
