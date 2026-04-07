@@ -18,6 +18,9 @@ class WidgetConfigDAO:
 
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
         """Get main widget configuration with self-healing row creation."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         select_query = """
             SELECT
                 display_name, initial_message, auto_show_duration,
@@ -29,23 +32,24 @@ class WidgetConfigDAO:
                 hil_enabled, response_policy, hil_disabled_message,
                 allowed_origins
             FROM widget_configuration
-            WHERE is_singleton = true
+            WHERE is_singleton = true AND tenant_id = CAST(:tenant_id AS UUID)
         """
+        params = {"tenant_id": tenant_id}
         try:
-            logger.log_db_operation(select_query)
+            logger.log_db_operation(select_query, params)
             async with get_db_session() as session:
-                result = await session.execute(text(select_query))
+                result = await session.execute(text(select_query), params)
                 row = result.mappings().first()
                 
                 if row:
-                    logger.log_db_query(select_query, None, row)
+                    logger.log_db_query(select_query, params, row)
                     return dict(row)
                 
                 # SELF-HEALING: No row found for this tenant, seed a default one
-                logger.warning("⚠️ No widget configuration found for current tenant. Seeding default row...")
+                logger.warning(f"⚠️ No widget configuration found for tenant {tenant_id}. Seeding default row...")
                 seed_query = """
-                    INSERT INTO widget_configuration (is_singleton)
-                    VALUES (true)
+                    INSERT INTO widget_configuration (tenant_id, is_singleton)
+                    VALUES (CAST(:tenant_id AS UUID), true)
                     ON CONFLICT DO NOTHING
                     RETURNING 
                         display_name, initial_message, auto_show_duration,
@@ -57,16 +61,16 @@ class WidgetConfigDAO:
                         hil_enabled, response_policy, hil_disabled_message,
                         allowed_origins
                 """
-                seed_result = await session.execute(text(seed_query))
+                seed_result = await session.execute(text(seed_query), params)
                 await session.commit()
                 
                 # If ON CONFLICT DO NOTHING happened, fetch again
                 row = seed_result.mappings().first()
                 if not row:
-                    result = await session.execute(text(select_query))
+                    result = await session.execute(text(select_query), params)
                     row = result.mappings().first()
                 
-                logger.info("✅ Default widget configuration seeded successfully")
+                logger.info(f"✅ Default widget configuration seeded successfully for tenant {tenant_id}")
                 return dict(row) if row else None
 
         except Exception as e:
@@ -75,18 +79,25 @@ class WidgetConfigDAO:
 
     async def get_suggested_messages(self) -> List[str]:
         """Get suggested messages for the widget."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         query = """
             SELECT message_text
             FROM widget_suggested_messages
-            WHERE widget_config_id = (SELECT id FROM widget_configuration WHERE is_singleton = true)
+            WHERE widget_config_id = (
+                SELECT id FROM widget_configuration 
+                WHERE is_singleton = true AND tenant_id = CAST(:tenant_id AS UUID)
+            )
             ORDER BY display_order
         """
+        params = {"tenant_id": tenant_id}
         try:
-            logger.log_db_operation(query)
+            logger.log_db_operation(query, params)
             async with get_db_session() as session:
-                result = await session.execute(text(query))
+                result = await session.execute(text(query), params)
                 rows = result.mappings().all()
-                logger.log_db_query(query, None, rows)
+                logger.log_db_query(query, params, rows)
                 return [row["message_text"] for row in rows]
         except Exception as e:
             error_str = str(e)
@@ -175,12 +186,15 @@ class WidgetConfigDAO:
         try:
             logger.info(f"📋 [DAO] update_suggested_messages called with {len(messages)} messages: {messages}")
             async with get_db_session() as session:
-                # Get the widget config ID (should be ID 1 for the main config)
-                config_id_query = "SELECT id FROM widget_configuration LIMIT 1"
-                logger.log_db_operation(config_id_query)
-                config_id_result = await session.execute(text(config_id_query))
+                # Get the widget config ID for THIS tenant
+                from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+                tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+                config_id_query = "SELECT id FROM widget_configuration WHERE is_singleton = true AND tenant_id = CAST(:tenant_id AS UUID)"
+                params = {"tenant_id": tenant_id}
+                logger.log_db_operation(config_id_query, params)
+                config_id_result = await session.execute(text(config_id_query), params)
                 config_id_row = config_id_result.fetchone()
-                logger.log_db_query(config_id_query, None, config_id_row)
+                logger.log_db_query(config_id_query, params, config_id_row)
 
                 if not config_id_row:
                     logger.error("❌ [DAO] No widget_configuration row found! Cannot insert suggested messages.")
@@ -201,18 +215,10 @@ class WidgetConfigDAO:
                     INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
                     VALUES (:widget_config_id, :message_text, :display_order, true, NOW(), NOW())
                 """
-                logger.info("=" * 100)
-                logger.info("📝 INSERTING SUGGESTED MESSAGES INTO widget_suggested_messages TABLE")
-                logger.info("=" * 100)
                 for i, message in enumerate(messages):
                     insert_params = {"widget_config_id": widget_config_id, "message_text": message, "display_order": i}
-                    logger.log_db_operation(insert_query, insert_params)
-                    logger.info(f"📤 INSERT QUERY #{i+1}:")
-                    logger.info(f"   Query: {insert_query}")
-                    logger.info(f"   Params: widget_config_id={widget_config_id}, message_text='{message}', display_order={i}, is_active=true")
                     await session.execute(text(insert_query), insert_params)
-                    logger.info(f"✅ [DAO] Inserted message [{i}]: '{message}'")
-                logger.info("=" * 100)
+                    logger.info(f"✅ [DAO] Inserted message [{i}]")
 
                 await session.commit()
                 logger.info(f"✅ [DAO] Committed {len(messages)} suggested messages successfully")
@@ -251,12 +257,19 @@ class WidgetConfigDAO:
 
             url_column, filename_column = column_mapping[image_type]
 
+            from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+            tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
             query = f"""
                 UPDATE widget_configuration
                 SET {url_column} = :storage_url, {filename_column} = :storage_filename, updated_at = NOW()
-                WHERE is_singleton = true
+                WHERE is_singleton = true AND tenant_id = CAST(:tenant_id AS UUID)
             """
-            params = {"storage_url": storage_url, "storage_filename": storage_filename}
+            params = {
+                "storage_url": storage_url, 
+                "storage_filename": storage_filename,
+                "tenant_id": tenant_id
+            }
 
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
@@ -271,14 +284,18 @@ class WidgetConfigDAO:
 
     async def get_image_filenames(self) -> dict:
         """Get current image filenames from DB for S3 deletion."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         query = """
             SELECT profile_picture_filename, chat_icon_filename
             FROM widget_configuration
-            WHERE is_singleton = true
+            WHERE is_singleton = true AND tenant_id = CAST(:tenant_id AS UUID)
         """
+        params = {"tenant_id": tenant_id}
         try:
             async with get_db_session() as session:
-                result = await session.execute(text(query))
+                result = await session.execute(text(query), params)
                 row = result.fetchone()
                 if row:
                     return {
@@ -313,11 +330,14 @@ class WidgetConfigDAO:
 
     async def add_suggested_message(self, message: str, index: int):
         """Add a suggested message."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         query = """
             INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
-            VALUES ((SELECT id FROM widget_configuration WHERE is_singleton = true), :message_text, :display_order, true, NOW(), NOW())
+            VALUES ((SELECT id FROM widget_configuration WHERE is_singleton = true AND tenant_id = CAST(:tenant_id AS UUID)), :message_text, :display_order, true, NOW(), NOW())
         """
-        params = {"message_text": message, "display_order": index}
+        params = {"message_text": message, "display_order": index, "tenant_id": tenant_id}
         try:
             logger.log_db_operation(query, params)
             async with get_db_session() as session:

@@ -30,21 +30,26 @@ class ChatAgentConfigDAO:
 
     async def get_security_settings(self) -> List[Dict[str, Any]]:
         """Get security settings."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        
         query = text("""
             SELECT setting_name, setting_value, setting_type, description
             FROM security_settings
+            WHERE tenant_id = CAST(:tenant_id AS UUID)
             ORDER BY setting_name
         """)
+        params = {"tenant_id": tenant_id}
         try:
-            logger.log_db_operation(str(query))
+            logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                result = await session.execute(query)
+                result = await session.execute(query, params)
                 rows = result.fetchall()
-                logger.log_db_query(str(query), None, rows)
+                logger.log_db_query(str(query), params, rows)
                 return [dict(row._mapping) for row in rows]
         except Exception as e:
             logger.log_db_query(str(query), None, error=e)
-            raise  # ← Raise exception instead of silently returning []
+            raise
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'string'):
         """
@@ -89,9 +94,8 @@ class ChatAgentConfigDAO:
 
     async def get_human_agents(self) -> List[Dict[str, Any]]:
         """Get all human agents with id and email."""
-        cached = await get_cached_role_directory("human_agent")
-        if cached is not None:
-            return cached
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
 
         query = text("""
             SELECT DISTINCT u.id, u.email
@@ -99,15 +103,17 @@ class ChatAgentConfigDAO:
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'human_agent'
+            AND urm.tenant_id = CAST(:tenant_id AS UUID)
             AND u.is_active = true
             AND urm.is_active = true
         """)
+        params = {"tenant_id": tenant_id}
         try:
-            logger.log_db_operation(str(query))
+            logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                results = await session.execute(query)
+                results = await session.execute(query, params)
                 rows = results.fetchall()
-                logger.log_db_query(str(query), None, rows)
+                logger.log_db_query(str(query), params, rows)
                 agents = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
                 await set_cached_role_directory("human_agent", agents)
                 return agents
@@ -117,9 +123,8 @@ class ChatAgentConfigDAO:
 
     async def get_admins(self) -> List[Dict[str, Any]]:
         """Get all admins with id and email."""
-        cached = await get_cached_role_directory("admin")
-        if cached is not None:
-            return cached
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
 
         query = text("""
             SELECT DISTINCT u.id, u.email
@@ -127,15 +132,17 @@ class ChatAgentConfigDAO:
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'admin'
+            AND urm.tenant_id = CAST(:tenant_id AS UUID)
             AND u.is_active = true
             AND urm.is_active = true
         """)
+        params = {"tenant_id": tenant_id}
         try:
-            logger.log_db_operation(str(query))
+            logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                results = await session.execute(query)
+                results = await session.execute(query, params)
                 rows = results.fetchall()
-                logger.log_db_query(str(query), None, rows)
+                logger.log_db_query(str(query), params, rows)
                 admins = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
                 await set_cached_role_directory("admin", admins)
                 return admins
@@ -145,81 +152,98 @@ class ChatAgentConfigDAO:
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get all LLM providers."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         query = text("""
             SELECT id, provider_name, token_limit, token_used, is_active, created_at, updated_at
             FROM llm_providers
+            WHERE tenant_id = CAST(:tenant_id AS UUID)
             ORDER BY provider_name
         """)
+        params = {"tenant_id": tenant_id}
         try:
-            logger.log_db_operation(str(query))
+            logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                result = await session.execute(query)
+                result = await session.execute(query, params)
                 rows = result.fetchall()
-                logger.log_db_query(str(query), None, rows)
+                logger.log_db_query(str(query), params, rows)
                 return [dict(row._mapping) for row in rows]
         except Exception as e:
             logger.log_db_query(str(query), None, error=e)
-            raise  # ← Raise exception instead of silently returning []
+            raise
 
     async def get_all_personas(self) -> List[Dict[str, Any]]:
         """Get all personas from database"""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         query = text("""
             SELECT id, persona_name, system_prompt,
                     is_active, created_at, updated_at
             FROM public.persona_configurations
+            WHERE tenant_id = CAST(:tenant_id AS UUID)
             ORDER BY id ASC
         """)
+        params = {"tenant_id": tenant_id}
         try:
-            logger.log_db_operation(str(query))
+            logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                rows = await session.execute(query)
+                rows = await session.execute(query, params)
                 result = rows.fetchall()
-                logger.log_db_query(str(query), None, result)
-                return [dict(row._mapping) for row in result]  # ← Return inside try block
+                logger.log_db_query(str(query), params, result)
+                return [dict(row._mapping) for row in result]
         except Exception as e:
             logger.error(f"Error fetching personas: {e}")
-            raise  # Already raises, this is fine
+            raise
 
     async def get_active_persona(self) -> Optional[Dict[str, Any]]:
         """Get active chatbot persona from database."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         query = text("""
             SELECT id, persona_name, persona_description, system_prompt,
                    is_active, created_at, updated_at
             FROM persona_configurations
-            WHERE is_active = true
+            WHERE is_active = true AND tenant_id = CAST(:tenant_id AS UUID)
             ORDER BY id DESC
             LIMIT 1
         """)
+        params = {"tenant_id": tenant_id}
         try:
-            logger.log_db_operation(str(query))
+            logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                result = await session.execute(query)
+                result = await session.execute(query, params)
                 row = result.fetchone()
-                logger.log_db_query(str(query), None, row)
+                logger.log_db_query(str(query), params, row)
                 return dict(row._mapping) if row else None
         except Exception as e:
             logger.log_db_query(str(query), None, error=e)
-            raise  # ← Raise exception instead of silently returning None
-    
+            raise
+
     async def update_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
         """Update existing persona configuration only (no insert)."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         try:
             async with get_db_session() as session:
                 if is_active:
-                    deactivate_query = text("UPDATE persona_configurations SET is_active = false")
-                    logger.log_db_operation(str(deactivate_query))
-                    await session.execute(deactivate_query)
-                    logger.log_db_query(str(deactivate_query), None, "UPDATE")
+                    deactivate_query = text("UPDATE persona_configurations SET is_active = false WHERE tenant_id = CAST(:tenant_id AS UUID)")
+                    logger.log_db_operation(str(deactivate_query), {"tenant_id": tenant_id})
+                    await session.execute(deactivate_query, {"tenant_id": tenant_id})
 
                 update_query = text("""
                     UPDATE persona_configurations
                     SET system_prompt = :system_prompt, is_active = :is_active, updated_at = NOW()
-                    WHERE persona_name = :persona_name
+                    WHERE persona_name = :persona_name AND tenant_id = CAST(:tenant_id AS UUID)
                 """)
                 params = {
                     'system_prompt': system_prompt,
                     'is_active': is_active,
-                    'persona_name': persona_name
+                    'persona_name': persona_name,
+                    'tenant_id': tenant_id
                 }
                 logger.log_db_operation(str(update_query), params)
                 result = await session.execute(update_query, params)
