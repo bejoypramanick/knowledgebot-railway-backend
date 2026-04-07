@@ -59,18 +59,26 @@ DECLARE
 BEGIN
     -- ----------------------------------------------------------------
     -- 0a. Pick a unique element-number combination for the tenant name.
-    --     Retry up to 10 times in the (very unlikely) event of a collision.
+    --
+    -- Collision math:
+    --   118 elements × 9999 numbers = ~1,179,882 total combinations.
+    --   At   10,000 tenants  →  ~0.8% collision rate  → avg 1.008 attempts
+    --   At  100,000 tenants  →  ~8.5% collision rate  → avg 1.09  attempts
+    --   At  500,000 tenants  →  ~42%  collision rate  → avg 1.7   attempts
+    --   At 1,000,000 tenants →  ~85%  collision rate  → avg ~7    attempts
+    --
+    -- The retry cap is 50 — far above what is ever needed in practice.
     -- ----------------------------------------------------------------
     LOOP
         v_attempt := v_attempt + 1;
-        IF v_attempt > 10 THEN
-            RAISE EXCEPTION 'Could not generate a unique tenant name after 10 attempts. Something is wrong.';
+        IF v_attempt > 50 THEN
+            RAISE EXCEPTION 'Could not generate a unique tenant name after 50 attempts — the combination space may be exhausted or something is wrong.';
         END IF;
 
         -- Random element from the array
         v_element     := v_elements[ 1 + floor(random() * array_length(v_elements, 1))::int ];
         -- Random number 1–999
-        v_number      := 1 + floor(random() * 999)::int;
+        v_number      := 1 + floor(random() * 9999)::int;  -- 1–9999 → ~1.18 M combinations
 
         v_tenant_name := v_element || '-' || v_number;                      -- e.g. "Neon-42"
         v_tenant_slug := lower(v_element) || '-' || v_number;               -- e.g. "neon-42"
