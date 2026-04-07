@@ -113,18 +113,26 @@ class AuthService:
                         or (cached_profile.get("active_tenant") or {}).get("tenant_slug"),
                     )
 
+                # 1. Primary Authorization Gate: Check if user exists in the core users table
+                # If they don't exist here, they are not a pre-provisioned user and are unauthorized
+                user_exists = await self.auth_dao.check_user_exists(email)
+                if not user_exists:
+                    logger.warning(f"🚫 Unauthorized request from {email} - and not found in users table")
+                    # We raise a ValueError which the router can catch and turn into a 403
+                    raise ValueError(f"User {email} is not authorized to access this system")
+
+                # 2. Check memberships (real-time or cache)
                 tenant_memberships = await get_cached_user_memberships(email)
                 if tenant_memberships is None:
                     memberships = await self.auth_dao.get_user_memberships(email)
                     
-                    # Manual onboarding check: User exists in DB but has 0 memberships
+                    # 3. Handle Manual Onboarding
+                    # User exists in DB (checked above) but has 0 memberships
                     if not memberships:
-                        needs_onboarding = await self.auth_dao.check_user_exists_no_memberships(email)
-                        if needs_onboarding:
-                            logger.info(f"📋 User {email} requires manual onboarding (exists in users table but has no memberships)")
-                            result = _normalize_role_context(email, [], tenant_id=tenant_id, tenant_slug=tenant_slug)
-                            result["needs_onboarding"] = True
-                            return result
+                        logger.info(f"📋 User {email} requires manual onboarding (exists in users table but has no memberships)")
+                        result = _normalize_role_context(email, [], tenant_id=tenant_id, tenant_slug=tenant_slug)
+                        result["needs_onboarding"] = True
+                        return result
                     
                     tenant_memberships = self._group_memberships(memberships)
                     await set_cached_user_memberships(email, tenant_memberships)
@@ -138,9 +146,7 @@ class AuthService:
                 
                 # Check for onboarding even if cache existed but was empty
                 if not tenant_memberships:
-                    needs_onboarding = await self.auth_dao.check_user_exists_no_memberships(email)
-                    if needs_onboarding:
-                        result["needs_onboarding"] = True
+                    result["needs_onboarding"] = True
 
                 await set_cached_user_profile(
                     email,

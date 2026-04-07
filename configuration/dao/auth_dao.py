@@ -114,6 +114,17 @@ class AuthDAO:
             logger.log_db_query(str(query), params, error=e)
             raise  # ← Raise exception instead of returning []
 
+    async def check_user_exists(self, email: str) -> bool:
+        """Check if user exists in the core users table."""
+        try:
+            query = text("SELECT 1 FROM users WHERE email = :email AND is_active = true")
+            async with get_db_session() as session:
+                result = await session.execute(query, {"email": email})
+                return result.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking user existence: {e}")
+            return False
+
     async def check_user_exists_no_memberships(self, email: str) -> bool:
         """Check if user exists in the database but currently has no active memberships."""
         try:

@@ -2286,6 +2286,10 @@ async def get_user_profile(request: Request, user: dict = Depends(get_current_us
         logger.info(f"[RETURN] Profile: email={profile['email']}, role={profile['role']}")
         
         return {"success": True, "data": profile}
+    except ValueError as e:
+        elapsed_time = time.time() - start_time
+        logger.warning(f"🚫 Authorization failure for {user_email}: {str(e)}")
+        raise HTTPException(status_code=403, detail=str(e))
     except HTTPException:
         elapsed_time = time.time() - start_time
         logger.error(f"[EXIT] GET /users/profile - HTTPException (elapsed: {elapsed_time:.3f}s)")
