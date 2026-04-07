@@ -372,3 +372,23 @@ class AuthService:
         except Exception as e:
             logger.error(f"Error in get_or_create_unique_id: {e}", exc_info=True)
             raise
+
+    async def provision_tenant(self, email: str, tenant_name: str, tenant_slug: str) -> Dict[str, Any]:
+        """
+        Manually provision a new tenant for a pre-provisioned user.
+        Includes database operations and cache invalidation.
+        """
+        try:
+            # 1. Perform database provisioning
+            result = await self.auth_dao.manual_provision_tenant(email, tenant_name, tenant_slug)
+            
+            # 2. Invalidate ALL authentication caches for this user
+            # This is critical so the next /profile call sees the new memberships
+            from shared.redis_tenant_auth_cache import invalidate_user_auth_cache
+            await invalidate_user_auth_cache(email)
+            
+            # 3. Return fresh profile (using common logic)
+            return await self.get_user_role(email, tenant_slug=tenant_slug)
+        except Exception as e:
+            logger.error(f"Error in manual tenant provisioning for {email}: {e}")
+            raise
