@@ -237,7 +237,7 @@ class ChatAgentConfigDAO:
             raise
 
     async def update_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
-        """Update existing persona configuration only (no insert)."""
+        """Upsert persona configuration (MERGE for PG17+)."""
         from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
         tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
 
@@ -248,10 +248,20 @@ class ChatAgentConfigDAO:
                     logger.log_db_operation(str(deactivate_query), {"tenant_id": tenant_id})
                     await session.execute(deactivate_query, {"tenant_id": tenant_id})
 
-                update_query = text("""
-                    UPDATE persona_configurations
-                    SET system_prompt = :system_prompt, is_active = :is_active, updated_at = NOW()
-                    WHERE persona_name = :persona_name AND tenant_id = CAST(:tenant_id AS UUID)
+                query = text("""
+                    MERGE INTO persona_configurations AS target
+                    USING (VALUES (
+                        CAST(:tenant_id AS UUID),
+                        CAST(:persona_name AS VARCHAR),
+                        CAST(:system_prompt AS TEXT),
+                        CAST(:is_active AS BOOLEAN)
+                    )) AS source(tenant_id, persona_name, system_prompt, is_active)
+                    ON target.tenant_id = source.tenant_id AND target.persona_name = source.persona_name
+                    WHEN MATCHED THEN
+                        UPDATE SET system_prompt = source.system_prompt, is_active = source.is_active, updated_at = NOW()
+                    WHEN NOT MATCHED THEN
+                        INSERT (tenant_id, persona_name, system_prompt, is_active, created_at, updated_at)
+                        VALUES (source.tenant_id, source.persona_name, source.system_prompt, source.is_active, NOW(), NOW())
                 """)
                 params = {
                     'system_prompt': system_prompt,
@@ -259,15 +269,10 @@ class ChatAgentConfigDAO:
                     'persona_name': persona_name,
                     'tenant_id': tenant_id
                 }
-                logger.log_db_operation(str(update_query), params)
+                logger.log_db_operation(str(query), params)
                 from shared.tenant_context import tenant_context
                 with tenant_context(tenant_id=tenant_id):
-                    result = await session.execute(update_query, params)
-    
-                    if result.rowcount == 0:
-                        raise ValueError(f"Persona '{persona_name}' not found. Cannot update non-existent persona.")
-    
-                    logger.log_db_query(str(update_query), params, f"UPDATE {result.rowcount}")
+                    await session.execute(query, params)
                     await session.commit()
         except Exception as e:
             logger.log_db_query("update_persona", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
@@ -594,15 +599,25 @@ class ChatAgentConfigDAO:
             raise
 
     async def update_llm_provider_tokens(self, provider: str, limit: int, used: int) -> bool:
-        """Update token limits and usage for an LLM provider (tenant-aware)."""
+        """Upsert token limits and usage for an LLM provider (tenant-aware)."""
         from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
         tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
 
         try:
             query = text("""
-                UPDATE llm_providers
-                SET token_limit = :limit, token_used = :used, updated_at = NOW()
-                WHERE provider_name = :provider AND tenant_id = :tenant_id
+                MERGE INTO llm_providers AS target
+                USING (VALUES (
+                    CAST(:tenant_id AS UUID),
+                    CAST(:provider AS VARCHAR),
+                    CAST(:limit AS BIGINT),
+                    CAST(:used AS BIGINT)
+                )) AS source(tenant_id, provider_name, token_limit, token_used)
+                ON target.tenant_id = source.tenant_id AND target.provider_name = source.provider_name
+                WHEN MATCHED THEN
+                    UPDATE SET token_limit = source.token_limit, token_used = source.token_used, updated_at = NOW()
+                WHEN NOT MATCHED THEN
+                    INSERT (tenant_id, provider_name, token_limit, token_used, is_active, created_at, updated_at)
+                    VALUES (source.tenant_id, source.provider_name, source.token_limit, source.token_used, true, NOW(), NOW())
             """)
             params = {
                 "tenant_id": tenant_id,
@@ -614,10 +629,9 @@ class ChatAgentConfigDAO:
             from shared.tenant_context import tenant_context
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
-                    result = await session.execute(query, params)
-                    logger.log_db_query(str(query), params, f"UPDATE {result.rowcount}")
+                    await session.execute(query, params)
                     await session.commit()
-                    return result.rowcount > 0
+                    return True
         except Exception as e:
             logger.log_db_query("update_llm_provider_tokens", {"provider": provider, "limit": limit, "used": used}, error=e)
             raise

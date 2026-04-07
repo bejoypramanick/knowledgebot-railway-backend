@@ -376,18 +376,59 @@ class AuthService:
     async def provision_tenant(self, email: str, tenant_name: str, tenant_slug: str) -> Dict[str, Any]:
         """
         Manually provision a new tenant for a pre-provisioned user.
-        Includes database operations and cache invalidation.
+        Includes database operations, configuration initialization, and cache invalidation.
         """
         try:
-            # 1. Perform database provisioning
+            # 1. Perform database provisioning (Tables: tenants, user_role_mapping)
             result = await self.auth_dao.manual_provision_tenant(email, tenant_name, tenant_slug)
+            tenant_id = result["tenant_id"]
             
-            # 2. Invalidate ALL authentication caches for this user
-            # This is critical so the next /profile call sees the new memberships
+            logger.info(f"🚀 Provisioned tenant {tenant_id} for {email}. Initializing default configurations...")
+            
+            # 2. Initialize default configurations for the new tenant
+            from ..dao.widget_config_dao import WidgetConfigDAO
+            from ..dao.chat_agent_config_dao import ChatAgentConfigDAO
+            widget_dao = WidgetConfigDAO()
+            agent_dao = ChatAgentConfigDAO()
+            
+            from shared.tenant_context import tenant_context
+            # We run initialization inside a tenant context to ensure RLS-compliant seeding
+            with tenant_context(tenant_id=tenant_id):
+                # A. Seed Widget Appearance Defaults
+                await widget_dao.save_widget_config({
+                    "display_name": "Knowledge Bot",
+                    "initial_message": "Hello! How can I help you today?",
+                    "theme": "light",
+                    "primary_color": "#2563eb",
+                    "auto_show_duration": 5,
+                    "keep_showing_suggested": True,
+                    "use_primary_for_header": True,
+                    "chat_bubble_color": "#ffffff",
+                    "align_bubble": "right",
+                    "display_chatbot": True
+                })
+                
+                # B. Seed Agent Behavior & Persona Defaults
+                await agent_dao.save_chat_agent_config(
+                    admin_emails=[email],
+                    human_agents=[],
+                    response_timeout=30,
+                    response_policy=120,
+                    hil_enabled=True,
+                    hil_disabled_message="Our human agents are currently offline. Please leave a message.",
+                    persona_name="Support Assistant",
+                    system_prompt="You are a professional and helpful customer support assistant. Answer questions clearly and concisely based on the available knowledge.",
+                    llm_tokens={
+                        "gemini-2.0-flash": {"limit": 1000000, "used": 0},
+                        "openai": {"limit": 100000, "used": 0}
+                    }
+                )
+            
+            # 3. Invalidate ALL authentication caches for this user
             from shared.redis_tenant_auth_cache import invalidate_user_auth_cache
             await invalidate_user_auth_cache(email)
             
-            # 3. Return fresh profile (using common logic)
+            # 4. Return fresh profile
             return await self.get_user_role(email, tenant_slug=tenant_slug)
         except Exception as e:
             logger.error(f"Error in manual tenant provisioning for {email}: {e}")
