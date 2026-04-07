@@ -56,4 +56,31 @@ BEGIN
     CREATE POLICY user_role_mapping_update_policy ON public.user_role_mapping FOR UPDATE USING (tenant_id = public.current_tenant_id_optional()) WITH CHECK (tenant_id = public.current_tenant_id_optional());
     CREATE POLICY user_role_mapping_delete_policy ON public.user_role_mapping FOR DELETE USING (tenant_id = public.current_tenant_id_optional());
 
+    -- Special handling for tenants to allow self-service provisioning
+    DROP POLICY IF EXISTS tenants_write_policy ON public.tenants;
+    DROP POLICY IF EXISTS tenants_insert_policy ON public.tenants;
+    DROP POLICY IF EXISTS tenants_update_policy ON public.tenants;
+    DROP POLICY IF EXISTS tenants_delete_policy ON public.tenants;
+
+    -- Allow anyone to create a tenant, or at least any authorized user without a tenant context
+    CREATE POLICY tenants_insert_policy ON public.tenants FOR INSERT WITH CHECK (true);
+    CREATE POLICY tenants_update_policy ON public.tenants FOR UPDATE USING (id = public.current_tenant_id_optional()) WITH CHECK (id = public.current_tenant_id_optional());
+    CREATE POLICY tenants_delete_policy ON public.tenants FOR DELETE USING (id = public.current_tenant_id_optional());
+
+    -- Update tenants select policy to ensure the newly created tenant is visible during RETURNING
+    -- even before the session context is updated with the new ID.
+    DROP POLICY IF EXISTS tenants_select_policy ON public.tenants;
+    CREATE POLICY tenants_select_policy ON public.tenants FOR SELECT USING (
+        id = public.current_tenant_id_optional()
+        OR (public.current_tenant_id_optional() IS NULL AND metadata->>'provisioned_for' = public.current_user_email_optional())
+        OR EXISTS (
+            SELECT 1
+            FROM public.user_role_mapping AS urm
+            JOIN public.users AS u ON u.id = urm.user_id
+            WHERE urm.tenant_id = public.tenants.id
+              AND urm.is_active = true
+              AND u.email = public.current_user_email_optional()
+        )
+    );
+
 END $$;
