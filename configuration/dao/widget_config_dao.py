@@ -17,8 +17,8 @@ class WidgetConfigDAO:
         pass  # No connection parameter - DAO manages its own connection
 
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
-        """Get main widget configuration."""
-        query = """
+        """Get main widget configuration with self-healing row creation."""
+        select_query = """
             SELECT
                 display_name, initial_message, auto_show_duration,
                 keep_showing_suggested, theme, primary_color,
@@ -32,16 +32,46 @@ class WidgetConfigDAO:
             WHERE is_singleton = true
         """
         try:
-            logger.log_db_operation(query)
+            logger.log_db_operation(select_query)
             async with get_db_session() as session:
-                result = await session.execute(text(query))
+                result = await session.execute(text(select_query))
                 row = result.mappings().first()
-                logger.log_db_query(query, None, row)
-                # Convert database row to dictionary
+                
+                if row:
+                    logger.log_db_query(select_query, None, row)
+                    return dict(row)
+                
+                # SELF-HEALING: No row found for this tenant, seed a default one
+                logger.warning("⚠️ No widget configuration found for current tenant. Seeding default row...")
+                seed_query = """
+                    INSERT INTO widget_configuration (is_singleton)
+                    VALUES (true)
+                    ON CONFLICT DO NOTHING
+                    RETURNING 
+                        display_name, initial_message, auto_show_duration,
+                        keep_showing_suggested, theme, primary_color,
+                        use_primary_for_header, chat_bubble_color, align_bubble,
+                        display_chatbot, profile_picture_url, chat_icon_url,
+                        profile_picture_filename, chat_icon_filename,
+                        profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
+                        hil_enabled, response_policy, hil_disabled_message,
+                        allowed_origins
+                """
+                seed_result = await session.execute(text(seed_query))
+                await session.commit()
+                
+                # If ON CONFLICT DO NOTHING happened, fetch again
+                row = seed_result.mappings().first()
+                if not row:
+                    result = await session.execute(text(select_query))
+                    row = result.mappings().first()
+                
+                logger.info("✅ Default widget configuration seeded successfully")
                 return dict(row) if row else None
+
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
-            raise  # Raise exception instead of silently returning None
+            logger.error(f"❌ Error in get_widget_config: {e}")
+            raise
 
     async def get_suggested_messages(self) -> List[str]:
         """Get suggested messages for the widget."""
@@ -53,66 +83,24 @@ class WidgetConfigDAO:
         """
         try:
             logger.log_db_operation(query)
-            logger.info("=" * 100)
-            logger.info("📖 RETRIEVING SUGGESTED MESSAGES FROM widget_suggested_messages TABLE")
-            logger.info("=" * 100)
-            logger.info(f"Query: {query}")
             async with get_db_session() as session:
-                # First, check how many rows exist in the table
-                count_query = "SELECT COUNT(*) as count FROM widget_suggested_messages"
-                count_result = await session.execute(text(count_query))
-                count_row = count_result.mappings().first()
-                total_count = count_row["count"] if count_row else 0
-                logger.info(f"📊 Total rows in widget_suggested_messages: {total_count}")
-                
-                # Check how many are active
-                active_query = "SELECT COUNT(*) as count FROM widget_suggested_messages WHERE is_active = true"
-                active_result = await session.execute(text(active_query))
-                active_row = active_result.mappings().first()
-                active_count = active_row["count"] if active_row else 0
-                logger.info(f"📊 Active rows in widget_suggested_messages: {active_count}")
-                
-                # Get all rows to debug
-                debug_query = "SELECT id, widget_config_id, message_text, is_active, display_order FROM widget_suggested_messages"
-                debug_result = await session.execute(text(debug_query))
-                debug_rows = debug_result.mappings().all()
-                logger.info(f"📊 All rows in widget_suggested_messages:")
-                for row in debug_rows:
-                    logger.info(f"   ID: {row['id']}, Config ID: {row['widget_config_id']}, Active: {row['is_active']}, Order: {row['display_order']}, Text: {row['message_text']}")
-                
-                # Now execute the actual query
                 result = await session.execute(text(query))
                 rows = result.mappings().all()
                 logger.log_db_query(query, None, rows)
-                messages = [row["message_text"] for row in rows]
-                logger.info(f"✅ Retrieved {len(messages)} suggested messages:")
-                for i, msg in enumerate(messages, 1):
-                    logger.info(f"   [{i}] {msg}")
-                logger.info("=" * 100)
-                return messages
+                return [row["message_text"] for row in rows]
         except Exception as e:
             error_str = str(e)
-            # Check if table doesn't exist
             if "does not exist" in error_str or "relation" in error_str:
-                logger.warning(f"⚠️ widget_suggested_messages table does not exist yet. Returning empty list.")
-                logger.info("=" * 100)
                 return []
-            else:
-                logger.log_db_query(query, None, error=e)
-                logger.error(f"❌ Error retrieving suggested messages: {e}")
-                logger.info("=" * 100)
-                return []
+            logger.error(f"❌ Error retrieving suggested messages: {e}")
+            return []
 
     async def update_widget_config(self, config_data: Dict[str, Any]):
         """
-        Update widget configuration with support for partial updates.
-        Only updates fields that are provided in config_data.
+        Update widget configuration using UPSERT (INSERT ... ON CONFLICT).
+        Ensures the row exists and is updated atomically.
         """
         try:
-            # Build SET clause dynamically - only include provided fields
-            set_clauses = []
-            params = {}
-
             # Standard widget config fields
             standard_fields = {
                 "display_name": str,
@@ -139,39 +127,47 @@ class WidgetConfigDAO:
                 "allowed_origins": list,
             }
 
-            # Add provided fields to params
-            for field_name, field_type in standard_fields.items():
+            columns = ["is_singleton", "updated_at"]
+            placeholders = [":is_singleton", "NOW()"]
+            update_clauses = ["updated_at = EXCLUDED.updated_at"]
+            params = {"is_singleton": True}
+
+            for field_name, _ in standard_fields.items():
                 if field_name in config_data:
                     value = config_data[field_name]
+                    columns.append(field_name)
                     if field_name in ("profile_position", "chat_icon_position", "allowed_origins"):
-                        # JSON fields
                         params[field_name] = json.dumps(value)
-                        set_clauses.append(f"{field_name} = :{field_name}")
                     else:
                         params[field_name] = value
-                        set_clauses.append(f"{field_name} = :{field_name}")
+                    placeholders.append(f":{field_name}")
+                    update_clauses.append(f"{field_name} = EXCLUDED.{field_name}")
 
-            if not set_clauses:
-                logger.info("⚠️ No fields provided to update in widget config")
-                return
-
-            # Always update timestamp
-            set_clauses.append("updated_at = NOW()")
+            # USE MULTI-TENANT AWRE ON CONFLICT
+            # Note: idx_widget_configuration_tenant_singleton is (tenant_id, is_singleton) WHERE is_singleton = true
+            # PostgreSQL requires target columns to match index columns.
+            # Explicitly specifying tenant_id in INSERT is better for clarity although default works.
+            from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+            tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+            params["tenant_id"] = tenant_id
+            columns.append("tenant_id")
+            placeholders.append(":tenant_id")
 
             query = f"""
-                UPDATE widget_configuration
-                SET {', '.join(set_clauses)}
-                WHERE is_singleton = true
+                INSERT INTO widget_configuration ({', '.join(columns)})
+                VALUES ({', '.join(placeholders)})
+                ON CONFLICT (tenant_id, is_singleton) WHERE is_singleton = true
+                DO UPDATE SET {', '.join(update_clauses)}
             """
 
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 await session.execute(text(query), params)
                 await session.commit()
-                logger.log_db_query(query, params, None)
-                logger.info(f"✅ Widget config updated: {len(set_clauses)-1} field(s)")
+                logger.info(f"✅ Widget config UPSERT successful: {len(columns)-3} field(s) updated")
         except Exception as e:
             logger.log_db_query("update_widget_config", config_data, error=e)
+            logger.error(f"❌ Error in update_widget_config: {e}")
             raise
 
     async def update_suggested_messages(self, messages: List[str]):

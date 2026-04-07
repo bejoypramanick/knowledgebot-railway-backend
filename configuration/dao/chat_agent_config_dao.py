@@ -49,29 +49,33 @@ class ChatAgentConfigDAO:
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'string'):
         """
         Upsert security setting using PG17+ MERGE with RETURNING.
-
-        MERGE provides better semantics than ON CONFLICT:
-        - Returns merge_action() to distinguish INSERT vs UPDATE
-        - Enables audit trail: log "setting created vs updated" for compliance
-        - Clearer intent when updating multiple columns
-
-        Example log:
-        - "Security setting max_agents: INSERT (first time set)"
-        - "Security setting max_agents: UPDATE (value changed)"
+        Includes tenant_id scoping for multi-tenancy.
         """
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         query = text("""
             MERGE INTO security_settings AS target
-            USING (VALUES (CAST(:name AS VARCHAR), CAST(:value AS TEXT), CAST(:setting_type AS VARCHAR)))
-                  AS source(setting_name, setting_value, setting_type)
-            ON target.setting_name = source.setting_name
+            USING (VALUES (
+                CAST(:tenant_id AS UUID), 
+                CAST(:name AS VARCHAR), 
+                CAST(:value AS TEXT), 
+                CAST(:setting_type AS VARCHAR)
+            )) AS source(tenant_id, setting_name, setting_value, setting_type)
+            ON target.tenant_id = source.tenant_id AND target.setting_name = source.setting_name
             WHEN MATCHED THEN
                 UPDATE SET setting_value = source.setting_value, updated_at = NOW()
             WHEN NOT MATCHED THEN
-                INSERT (setting_name, setting_value, setting_type)
-                VALUES (source.setting_name, source.setting_value, source.setting_type)
+                INSERT (tenant_id, setting_name, setting_value, setting_type)
+                VALUES (source.tenant_id, source.setting_name, source.setting_value, source.setting_type)
             RETURNING merge_action() AS action, target.setting_name
         """)
-        params = {'name': name, 'value': value, 'setting_type': setting_type}
+        params = {
+            'tenant_id': tenant_id,
+            'name': name, 
+            'value': value, 
+            'setting_type': setting_type
+        }
         try:
             logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
@@ -550,14 +554,22 @@ class ChatAgentConfigDAO:
             raise
 
     async def update_llm_provider_tokens(self, provider: str, limit: int, used: int) -> bool:
-        """Update token limits and usage for an LLM provider"""
+        """Update token limits and usage for an LLM provider (tenant-aware)."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
         try:
             query = text("""
                 UPDATE llm_providers
                 SET token_limit = :limit, token_used = :used, updated_at = NOW()
-                WHERE provider_name = :provider
+                WHERE provider_name = :provider AND tenant_id = :tenant_id
             """)
-            params = {"provider": provider, "limit": limit, "used": used}
+            params = {
+                "tenant_id": tenant_id,
+                "provider": provider, 
+                "limit": limit, 
+                "used": used
+            }
             logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
                 result = await session.execute(query, params)
