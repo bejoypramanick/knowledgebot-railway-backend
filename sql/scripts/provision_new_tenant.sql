@@ -127,24 +127,7 @@ BEGIN
     RAISE NOTICE '✅ Admin role mapping created (user_role_id=%)', v_user_role_id;
 
     -- ----------------------------------------------------------------
-    -- 5. Seed notification_settings for the admin
-    -- ----------------------------------------------------------------
-    INSERT INTO public.notification_settings (
-        tenant_id, user_email,
-        notify_new_chat, notify_human_request, notify_feedback,
-        created_at, updated_at
-    )
-    VALUES (
-        v_tenant_id, v_admin_email,
-        true, true, true,
-        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-    )
-    ON CONFLICT DO NOTHING;
-
-    RAISE NOTICE '✅ Notification settings seeded for %', v_admin_email;
-
-    -- ----------------------------------------------------------------
-    -- 6. Summary
+    -- 5. Summary
     -- ----------------------------------------------------------------
     RAISE NOTICE '';
     RAISE NOTICE '============================================================';
