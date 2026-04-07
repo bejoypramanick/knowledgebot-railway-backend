@@ -175,9 +175,9 @@ class ChatWriteThroughService:
                         row = result.fetchone()
                         db_id = str(row.id)
                         action = row.action
-                        await db.commit()
 
-                        logger.info(f"Write-through: PG session {action} {session_uuid}")
+                        # NO intermediate commit here - keep transaction open to preserve RLS context (app.current_tenant_id)
+                        logger.info(f"Write-through: PG session {action} {session_uuid} (context preserved)")
 
                     # Step 2: Batch insert unsynced messages
                     if unsynced:

@@ -104,14 +104,18 @@ class AuthService:
                     tenant_slug=tenant_slug,
                 )
                 if cached_profile is not None:
-                    return _normalize_role_context(
+                    result = _normalize_role_context(
                         email,
-                        cached_profile.get("tenant_memberships", []) or [],
+                        cached_profile.get("tenant_memberships", []),
                         tenant_id=tenant_id
                         or (cached_profile.get("active_tenant") or {}).get("tenant_id"),
                         tenant_slug=tenant_slug
                         or (cached_profile.get("active_tenant") or {}).get("tenant_slug"),
                     )
+                    # Even if cached, check if they need onboarding (memberships empty)
+                    if not cached_profile.get("tenant_memberships"):
+                        result["needs_onboarding"] = True
+                    return result
 
                 # 1. Primary Authorization Gate: Check if user exists in the core users table
                 # If they don't exist here, they are not a pre-provisioned user and are unauthorized
