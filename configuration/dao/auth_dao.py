@@ -114,6 +114,104 @@ class AuthDAO:
             logger.log_db_query(str(query), params, error=e)
             raise  # ← Raise exception instead of returning []
 
+    async def check_user_exists_no_memberships(self, email: str) -> bool:
+        """Check if user exists in the database but currently has no active memberships."""
+        try:
+            # Check user table
+            user_query = text("SELECT id FROM users WHERE email = :email AND is_active = true")
+            async with get_db_session() as session:
+                result = await session.execute(user_query, {"email": email})
+                user_row = result.fetchone()
+                if not user_row:
+                    return False
+                
+                # Check if they have ANY active mappings
+                mapping_query = text("SELECT 1 FROM user_role_mapping WHERE user_id = :user_id AND is_active = true LIMIT 1")
+                result = await session.execute(mapping_query, {"user_id": user_row.id})
+                has_mapping = result.fetchone() is not None
+                
+                return not has_mapping
+        except Exception as e:
+            logger.error(f"Error checking user existence: {e}")
+            return False
+
+    async def manual_provision_tenant(self, email: str, tenant_name: str, tenant_slug: str) -> Dict[str, Any]:
+        """Manually provision a tenant and make the user an admin."""
+        try:
+            import json
+            async with get_db_session() as session:
+                # 1. Get user_id again (inside transaction)
+                user_query = text("SELECT id FROM users WHERE email = :email AND is_active = true")
+                result = await session.execute(user_query, {"email": email})
+                user_row = result.fetchone()
+                if not user_row:
+                    raise ValueError(f"User {email} not found or inactive")
+                user_id = user_row.id
+                
+                # 2. Check if tenant slug already exists
+                check_tenant = text("SELECT id FROM tenants WHERE slug = :slug")
+                result = await session.execute(check_tenant, {"slug": tenant_slug})
+                if result.fetchone():
+                    raise ValueError(f"Tenant slug '{tenant_slug}' is already taken")
+
+                # 3. Create tenant
+                create_tenant = text("""
+                    INSERT INTO tenants (slug, name, description, is_active, metadata)
+                    VALUES (:slug, :name, 'Manually provisioned on first login', true, :metadata)
+                    RETURNING id
+                """)
+                tenant_metadata = json.dumps({"provisioned_for": email})
+                result = await session.execute(create_tenant, {
+                    "slug": tenant_slug, 
+                    "name": tenant_name, 
+                    "metadata": tenant_metadata
+                })
+                tenant_row = result.fetchone()
+                if not tenant_row:
+                    raise ValueError("Failed to create tenant")
+                tenant_id = tenant_row.id
+                
+                # 4. Get admin role ID
+                role_query = text("SELECT id FROM roles WHERE role_name = 'admin'")
+                result = await session.execute(role_query)
+                role_row = result.fetchone()
+                if not role_row:
+                    raise ValueError("Admin role not found")
+                admin_role_id = role_row.id
+
+                # Apply context for RLS write policy
+                await session.execute(
+                    text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+                    {"tenant_id": str(tenant_id)}
+                )
+                
+                # 5. Insert mapping
+                mapping_query = text("""
+                    INSERT INTO user_role_mapping (user_id, role_id, tenant_id, is_active, created_at, updated_at)
+                    VALUES (:user_id, :role_id, :tenant_id, true, NOW(), NOW())
+                    ON CONFLICT (user_id, role_id, tenant_id) DO NOTHING
+                    RETURNING user_role_id
+                """)
+                result = await session.execute(mapping_query, {
+                    "user_id": user_id,
+                    "role_id": admin_role_id,
+                    "tenant_id": tenant_id
+                })
+                mapping_row = result.fetchone()
+                
+                await session.commit()
+                logger.info(f"✅ Manually provisioned tenant {tenant_slug} for user {email}")
+                
+                return {
+                    "tenant_id": str(tenant_id),
+                    "tenant_slug": tenant_slug,
+                    "tenant_name": tenant_name,
+                    "user_role_id": str(mapping_row.user_role_id) if mapping_row else None
+                }
+        except Exception as e:
+            logger.error(f"Error manually provisioning tenant for {email}: {e}")
+            raise
+
     async def get_user_memberships(self, email: str) -> List[Dict[str, Any]]:
         """Get all active tenant memberships for a user."""
         query = text("""

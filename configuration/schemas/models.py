@@ -167,3 +167,8 @@ class FeedbackRequest(BaseModel):
     """Request model for session feedback"""
     session_id: str = Field(..., min_length=1, max_length=255)
     feedback_type: str = Field(..., pattern=r'^(positive|negative)$')
+
+class ProvisionTenantRequest(BaseModel):
+    """Request model for manual tenant provisioning"""
+    tenant_name: str = Field(..., min_length=2, max_length=100)
+    tenant_slug: str = Field(..., min_length=2, max_length=50, pattern=r'^[a-z0-9-]+$')

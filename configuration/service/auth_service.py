@@ -13,6 +13,8 @@ from shared.redis_tenant_auth_cache import (
     set_cached_role_directory,
     set_cached_user_memberships,
     set_cached_user_profile,
+    invalidate_user_auth_cache,
+    invalidate_role_directory,
 )
 
 from ..dao.auth_dao import AuthDAO
@@ -92,46 +94,85 @@ class AuthService:
         tenant_slug: Optional[str] = None,
     ) -> dict:
         """Get the active tenant role context for a given email."""
+        from shared.tenant_context import tenant_context
+        
         try:
-            cached_profile = await get_cached_user_profile(
-                email,
-                tenant_id=tenant_id,
-                tenant_slug=tenant_slug,
-            )
-            if cached_profile is not None:
-                return _normalize_role_context(
+            with tenant_context(user_email=email, tenant_id=tenant_id, tenant_slug=tenant_slug):
+                cached_profile = await get_cached_user_profile(
                     email,
-                    cached_profile.get("tenant_memberships", []) or [],
-                    tenant_id=tenant_id
-                    or (cached_profile.get("active_tenant") or {}).get("tenant_id"),
-                    tenant_slug=tenant_slug
-                    or (cached_profile.get("active_tenant") or {}).get("tenant_slug"),
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
                 )
+                if cached_profile is not None:
+                    return _normalize_role_context(
+                        email,
+                        cached_profile.get("tenant_memberships", []) or [],
+                        tenant_id=tenant_id
+                        or (cached_profile.get("active_tenant") or {}).get("tenant_id"),
+                        tenant_slug=tenant_slug
+                        or (cached_profile.get("active_tenant") or {}).get("tenant_slug"),
+                    )
 
-            tenant_memberships = await get_cached_user_memberships(email)
-            if tenant_memberships is None:
-                memberships = await self.auth_dao.get_user_memberships(email)
-                tenant_memberships = self._group_memberships(memberships)
-                await set_cached_user_memberships(email, tenant_memberships)
+                tenant_memberships = await get_cached_user_memberships(email)
+                if tenant_memberships is None:
+                    memberships = await self.auth_dao.get_user_memberships(email)
+                    
+                    # Manual onboarding check: User exists in DB but has 0 memberships
+                    if not memberships:
+                        needs_onboarding = await self.auth_dao.check_user_exists_no_memberships(email)
+                        if needs_onboarding:
+                            logger.info(f"📋 User {email} requires manual onboarding (exists in users table but has no memberships)")
+                            result = _normalize_role_context(email, [], tenant_id=tenant_id, tenant_slug=tenant_slug)
+                            result["needs_onboarding"] = True
+                            return result
+                    
+                    tenant_memberships = self._group_memberships(memberships)
+                    await set_cached_user_memberships(email, tenant_memberships)
 
-            result = _normalize_role_context(
-                email,
-                tenant_memberships,
-                tenant_id=tenant_id,
-                tenant_slug=tenant_slug,
-            )
-            await set_cached_user_profile(
-                email,
-                result,
-                tenant_id=tenant_id,
-                tenant_slug=tenant_slug,
-            )
-            return result
+                result = _normalize_role_context(
+                    email,
+                    tenant_memberships,
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
+                )
+                
+                # Check for onboarding even if cache existed but was empty
+                if not tenant_memberships:
+                    needs_onboarding = await self.auth_dao.check_user_exists_no_memberships(email)
+                    if needs_onboarding:
+                        result["needs_onboarding"] = True
+
+                await set_cached_user_profile(
+                    email,
+                    result,
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
+                )
+                return result
         except Exception as e:
             exc_type = type(e).__name__
             exc_msg = str(e) if str(e) else f"({exc_type})"
             logger.error(f"Error getting user role for {email}: {exc_type}: {exc_msg}")
             raise
+
+    async def provision_tenant(self, email: str, tenant_name: str, tenant_slug: str) -> dict:
+        """Process manual tenant provisioning requested by the user from UI."""
+        from shared.tenant_context import tenant_context
+        
+        logger.info(f"🚀 Manual provisioning started for {email}: {tenant_name} ({tenant_slug})")
+        
+        # 1. Perform provisioning
+        provision_result = await self.auth_dao.manual_provision_tenant(email, tenant_name, tenant_slug)
+        
+        # 2. Invalidate caches
+        await invalidate_user_auth_cache(email)
+        
+        # 3. Return fresh role context
+        return await self.get_user_role(
+            email, 
+            tenant_id=provision_result["tenant_id"],
+            tenant_slug=provision_result["tenant_slug"]
+        )
 
     def _group_memberships(self, memberships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         grouped: Dict[str, Dict[str, Any]] = {}

@@ -27,7 +27,8 @@ from ..schemas.models import (
     AdminManagementRequest,
     NotificationRequest,
     FeedbackRequest,
-    WidgetConfigRequest
+    WidgetConfigRequest,
+    ProvisionTenantRequest
 )
 
 # Version: 2.2 - Enhanced debugging with version check
@@ -2284,33 +2285,37 @@ async def get_user_profile(request: Request, user: dict = Depends(get_current_us
         logger.error(f"[EXIT] GET /users/profile - Error (elapsed: {elapsed_time:.3f}s)")
         logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-        
-        # Check if profile is serializable
-        try:
-            json.dumps(profile)
-            logger.info("✅ Profile is JSON serializable")
-        except Exception as e:
-            logger.error(f"❌ Profile is NOT JSON serializable: {e}")
-        
-        return {"success": True, "data": profile}
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
-        raise
-    except Exception as e:
-        exc_type = type(e).__name__
-        exc_str = str(e) if str(e) else exc_type
-        logger.error(f"❌ Error getting user profile: {exc_type}: {exc_str}")
-        import traceback
-        logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
-        # Return 503 Service Unavailable for database errors
-        # Clients should understand this means the service is temporarily unavailable
-        status_code = 503 if _is_database_error(e) else 500
-        raise HTTPException(
-            status_code=status_code,
-            detail="Database service temporarily unavailable" if status_code == 503 else "Internal server error"
+@router.post("/users/provision-tenant")
+async def provision_tenant(
+    data: ProvisionTenantRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Manual tenant provisioning endpoint.
+    Called from UI onboarding screen for users who exist in DB but have no tenant.
+    """
+    user_email = user.get("email")
+    logger.info(f"🚀 Provisioning request received from {user_email}: {data.tenant_name} ({data.tenant_slug})")
+    
+    if not user_email:
+        raise HTTPException(status_code=400, detail="User email not found")
+        
+    try:
+        profile_data = await auth_service.provision_tenant(
+            email=user_email,
+            tenant_name=data.tenant_name,
+            tenant_slug=data.tenant_slug
         )
-
+        
+        logger.info(f"✅ Provisioning successful for {user_email}. New tenant: {data.tenant_slug}")
+        return {"success": True, "data": profile_data}
+    except ValueError as e:
+        logger.warning(f"❌ Provisioning validation failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Provisioning failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Provisioning error: {str(e)}")
 
 @router.get("/debug/session")
 async def debug_session(request: Request):
