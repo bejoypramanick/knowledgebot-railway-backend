@@ -49,6 +49,9 @@ def _normalize_role_context(
                 break
 
     if active_membership is None and tenant_memberships:
+        # Fall back to the first membership in the list.
+        # Because _group_memberships now sorts non-default tenants first by join
+        # date, this will be the earliest real tenant the admin was added to.
         active_membership = tenant_memberships[0]
 
     active_roles = active_membership.get("roles", []) if active_membership else []
@@ -135,6 +138,12 @@ class AuthService:
 
         for membership in memberships:
             tenant_id = str(membership["tenant_id"])
+            # created_at from urm is a datetime; convert to ISO string for sorting
+            row_created_at = membership.get("created_at")
+            row_created_at_str = (
+                row_created_at.isoformat() if hasattr(row_created_at, "isoformat") else str(row_created_at or "")
+            )
+
             tenant_entry = grouped.setdefault(
                 tenant_id,
                 {
@@ -145,8 +154,15 @@ class AuthService:
                     "role_memberships": [],
                     "primary_role": "user",
                     "active_user_role_id": None,
+                    # Tracks the earliest urm.created_at across all role rows for
+                    # this tenant — used as the login-time sort key.
+                    "earliest_joined_at": row_created_at_str,
                 },
             )
+
+            # Keep the minimum (earliest) created_at across multiple role rows
+            if row_created_at_str < tenant_entry["earliest_joined_at"]:
+                tenant_entry["earliest_joined_at"] = row_created_at_str
 
             role_name = membership["role_name"]
             tenant_entry["roles"].append(role_name)
@@ -168,10 +184,15 @@ class AuthService:
                 else None
             )
 
+        # Sort order:
+        #   1. Non-default (real) tenants come first
+        #   2. Within real tenants: earliest urm.created_at (first tenant joined)
+        #   3. The "default" system tenant is always last — it should never
+        #      become the active context for a real multi-tenant admin.
         memberships_by_tenant.sort(
             key=lambda item: (
-                0 if item["tenant_slug"] == "default" else 1,
-                item["tenant_name"],
+                1 if item["tenant_slug"] == "default" else 0,
+                item.get("earliest_joined_at") or "",
             )
         )
         return memberships_by_tenant

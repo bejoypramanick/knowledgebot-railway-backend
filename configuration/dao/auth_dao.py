@@ -137,8 +137,12 @@ class AuthDAO:
             AND urm.is_active = true
             AND t.is_active = true
             ORDER BY
-                CASE WHEN t.slug = 'default' THEN 0 ELSE 1 END,
-                t.name,
+                -- Non-default (real) tenants come first so tenant_memberships[0]
+                -- is always the admin's first real tenant on login.
+                CASE WHEN t.slug = 'default' THEN 1 ELSE 0 END,
+                -- Within real tenants: earliest role mapping first (first joined = default)
+                urm.created_at ASC,
+                -- Within a tenant: highest-privilege role first
                 CASE r.role_name
                     WHEN 'admin' THEN 0
                     WHEN 'human_agent' THEN 1
