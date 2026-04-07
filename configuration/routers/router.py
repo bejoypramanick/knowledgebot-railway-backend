@@ -2249,6 +2249,15 @@ async def get_user_profile(request: Request, user: dict = Depends(get_current_us
         # Get numeric user ID from database (used for authorization, not display)
         user_numeric_id = await chat_log_service.get_user_id_by_email_cached(user_email)
 
+        # Enforcement: If user has no roles AND doesn't need onboarding, they are unauthorized
+        needs_onboarding = role_result.get("needs_onboarding", False)
+        
+        if not needs_onboarding and (not user_roles or user_roles == ["user"]):
+            # Check if they are truly authorized or just a random visitor
+            if not user_numeric_id:
+                logger.warning(f"🚫 Unauthorized access attempt by {user_email} - not in users table")
+                raise HTTPException(status_code=403, detail="Access denied: You are not authorized to access this system")
+
         # Return authenticated user profile with actual role
         logger.info("[TRANSFORM] Building user profile object")
         profile = {
@@ -2264,6 +2273,7 @@ async def get_user_profile(request: Request, user: dict = Depends(get_current_us
             "tenant_slug": active_tenant.get("tenant_slug") if active_tenant else None,
             "tenant_name": active_tenant.get("tenant_name") if active_tenant else None,
             "tenant_memberships": tenant_memberships,
+            "needs_onboarding": needs_onboarding,
             "preferences": {
                 "theme": "light",
                 "notifications": True
