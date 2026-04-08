@@ -177,6 +177,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
             tenant_slug=session_data.get("active_tenant_slug"),
             user_role_id=session_data.get("active_user_role_id"),
             user_email=session_data.get("email"),
+            is_platform_admin=session_data.get("role") == "superadmin",
         )
         try:
             response = await call_next(request)

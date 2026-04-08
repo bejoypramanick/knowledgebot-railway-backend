@@ -47,6 +47,7 @@ from shared.tenant_context import (
     get_current_tenant_slug,
     get_current_user_email,
     get_current_user_role_id,
+    get_is_platform_admin,
 )
 
 logger = get_otel_logger("sqlalchemy_db", "shared")
@@ -61,6 +62,7 @@ async def _apply_request_context(conn_or_session) -> None:
     tenant_slug = get_current_tenant_slug() or ""
     user_role_id = get_current_user_role_id() or ""
     user_email = get_current_user_email() or ""
+    is_platform_admin = "true" if get_is_platform_admin() else "false"
 
     await conn_or_session.execute(
         text(
@@ -69,7 +71,8 @@ async def _apply_request_context(conn_or_session) -> None:
                 set_config('app.current_tenant_id', :tenant_id, true),
                 set_config('app.current_tenant_slug', :tenant_slug, true),
                 set_config('app.current_user_role_id', :user_role_id, true),
-                set_config('app.current_user_email', :user_email, true)
+                set_config('app.current_user_email', :user_email, true),
+                set_config('app.is_platform_admin', :is_platform_admin, true)
             """
         ),
         {
@@ -77,6 +80,7 @@ async def _apply_request_context(conn_or_session) -> None:
             "tenant_slug": tenant_slug,
             "user_role_id": user_role_id,
             "user_email": user_email,
+            "is_platform_admin": is_platform_admin,
         },
     )
 

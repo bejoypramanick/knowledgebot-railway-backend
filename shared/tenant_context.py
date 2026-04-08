@@ -19,6 +19,7 @@ tenant_id_ctx_var: ContextVar[Optional[str]] = ContextVar("tenant_id", default=N
 tenant_slug_ctx_var: ContextVar[Optional[str]] = ContextVar("tenant_slug", default=None)
 user_role_id_ctx_var: ContextVar[Optional[str]] = ContextVar("user_role_id", default=None)
 user_email_ctx_var: ContextVar[Optional[str]] = ContextVar("tenant_user_email", default=None)
+is_platform_admin_ctx_var: ContextVar[bool] = ContextVar("is_platform_admin", default=False)
 
 
 def get_current_tenant_id() -> Optional[str]:
@@ -37,12 +38,17 @@ def get_current_user_email() -> Optional[str]:
     return user_email_ctx_var.get()
 
 
+def get_is_platform_admin() -> bool:
+    return is_platform_admin_ctx_var.get()
+
+
 def get_tenant_context() -> Dict[str, Optional[str]]:
     return {
         "tenant_id": get_current_tenant_id(),
         "tenant_slug": get_current_tenant_slug(),
         "user_role_id": get_current_user_role_id(),
         "user_email": get_current_user_email(),
+        "is_platform_admin": get_is_platform_admin(),
     }
 
 
@@ -82,12 +88,14 @@ def set_tenant_context(
     tenant_slug: Optional[str] = None,
     user_role_id: Optional[str] = None,
     user_email: Optional[str] = None,
+    is_platform_admin: Optional[bool] = None,
 ) -> Dict[str, Token]:
     return {
         "tenant_id": tenant_id_ctx_var.set(tenant_id if tenant_id is not None else tenant_id_ctx_var.get()),
         "tenant_slug": tenant_slug_ctx_var.set(tenant_slug if tenant_slug is not None else tenant_slug_ctx_var.get()),
         "user_role_id": user_role_id_ctx_var.set(user_role_id if user_role_id is not None else user_role_id_ctx_var.get()),
         "user_email": user_email_ctx_var.set(user_email if user_email is not None else user_email_ctx_var.get()),
+        "is_platform_admin": is_platform_admin_ctx_var.set(is_platform_admin if is_platform_admin is not None else is_platform_admin_ctx_var.get()),
     }
 
 
@@ -98,6 +106,7 @@ def reset_tenant_context(tokens: Dict[str, Token]) -> None:
     tenant_slug_ctx_var.reset(tokens["tenant_slug"])
     user_role_id_ctx_var.reset(tokens["user_role_id"])
     user_email_ctx_var.reset(tokens["user_email"])
+    is_platform_admin_ctx_var.reset(tokens["is_platform_admin"])
 
 
 @contextmanager
@@ -106,12 +115,14 @@ def tenant_context(
     tenant_slug: Optional[str] = None,
     user_role_id: Optional[str] = None,
     user_email: Optional[str] = None,
+    is_platform_admin: Optional[bool] = None,
 ) -> Iterator[None]:
     tokens = set_tenant_context(
         tenant_id=tenant_id,
         tenant_slug=tenant_slug,
         user_role_id=user_role_id,
         user_email=user_email,
+        is_platform_admin=is_platform_admin,
     )
     try:
         yield
