@@ -574,7 +574,7 @@ class ScrapingDAO:
                         COUNT(*) FILTER (WHERE processing_status = 'completed') as completed_children,
                         COUNT(*) FILTER (WHERE processing_status IN ('failed', 'cancelled')) as failed_children
                     FROM scraped_websites
-                    WHERE parent_id = :parent_id
+                    WHERE parent_id = CAST(:parent_id AS UUID)
                 """), {"parent_id": parent_id})).fetchone()
 
                 total = stats.total_children
@@ -604,7 +604,7 @@ class ScrapingDAO:
                     UPDATE scraped_websites
                     SET processing_status = 'completed',
                         updated_at = NOW()
-                    WHERE id = :parent_id
+                    WHERE id = CAST(:parent_id AS UUID)
                       AND processing_status NOT IN ('completed', 'failed', 'cancelled', 'deleted')
                     RETURNING OLD.processing_status AS old_status, NEW.processing_status AS new_status
                 """), {"parent_id": parent_id})).fetchone()

@@ -69,46 +69,46 @@ class WidgetConfigDAO:
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     result = await session.execute(text(select_query), params)
-                row = result.mappings().first()
-                
-                if row:
-                    logger.log_db_query(select_query, params, row)
-                    return dict(row)
-
-                if tenant_slug == "system":
-                    logger.info(
-                        f"ℹ️ No widget configuration found for system tenant {tenant_id}. "
-                        "Returning in-memory defaults without self-healing insert."
-                    )
-                    return self._system_tenant_widget_defaults()
-                
-                # SELF-HEALING: No row found for this tenant, seed a default one
-                logger.warning(f"⚠️ No widget configuration found for tenant {tenant_id}. Seeding default row...")
-                seed_query = """
-                    INSERT INTO widget_configuration (tenant_id, is_singleton)
-                    VALUES (CAST(:tenant_id AS UUID), true)
-                    ON CONFLICT DO NOTHING
-                    RETURNING 
-                        display_name, initial_message, auto_show_duration,
-                        keep_showing_suggested, theme, primary_color,
-                        use_primary_for_header, chat_bubble_color, align_bubble,
-                        display_chatbot, profile_picture_url, chat_icon_url,
-                        profile_picture_filename, chat_icon_filename,
-                        profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
-                        hil_enabled, response_policy, hil_disabled_message,
-                        allowed_origins
-                """
-                seed_result = await session.execute(text(seed_query), params)
-                await session.commit()
-                
-                # If ON CONFLICT DO NOTHING happened, fetch again
-                row = seed_result.mappings().first()
-                if not row:
-                    result = await session.execute(text(select_query), params)
                     row = result.mappings().first()
-                
-                logger.info(f"✅ Default widget configuration seeded successfully for tenant {tenant_id}")
-                return dict(row) if row else None
+                    
+                    if row:
+                        logger.log_db_query(select_query, params, row)
+                        return dict(row)
+
+                    if tenant_slug == "system":
+                        logger.info(
+                            f"ℹ️ No widget configuration found for system tenant {tenant_id}. "
+                            "Returning in-memory defaults without self-healing insert."
+                        )
+                        return self._system_tenant_widget_defaults()
+                    
+                    # SELF-HEALING: No row found for this tenant, seed a default one
+                    logger.warning(f"⚠️ No widget configuration found for tenant {tenant_id}. Seeding default row...")
+                    seed_query = """
+                        INSERT INTO widget_configuration (tenant_id, is_singleton)
+                        VALUES (CAST(:tenant_id AS UUID), true)
+                        ON CONFLICT DO NOTHING
+                        RETURNING 
+                            display_name, initial_message, auto_show_duration,
+                            keep_showing_suggested, theme, primary_color,
+                            use_primary_for_header, chat_bubble_color, align_bubble,
+                            display_chatbot, profile_picture_url, chat_icon_url,
+                            profile_picture_filename, chat_icon_filename,
+                            profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
+                            hil_enabled, response_policy, hil_disabled_message,
+                            allowed_origins
+                    """
+                    seed_result = await session.execute(text(seed_query), params)
+                    await session.commit()
+                    
+                    # If ON CONFLICT DO NOTHING happened, fetch again
+                    row = seed_result.mappings().first()
+                    if not row:
+                        result = await session.execute(text(select_query), params)
+                        row = result.mappings().first()
+                    
+                    logger.info(f"✅ Default widget configuration seeded successfully for tenant {tenant_id}")
+                    return dict(row) if row else None
 
         except Exception as e:
             logger.error(f"❌ Error in get_widget_config: {e}")
