@@ -266,11 +266,8 @@ class AuthDAO:
                 
                 await session.commit()
                 logger.info(
-                    "✅ Manually provisioned tenant %s by %s for admin=%s human_agent=%s",
-                    tenant_slug,
-                    requester_email,
-                    admin_email,
-                    human_agent_email,
+                    f"✅ Manually provisioned tenant {tenant_slug} by {requester_email} "
+                    f"for admin={admin_email} human_agent={human_agent_email}"
                 )
                 
                 return {
