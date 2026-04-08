@@ -1,0 +1,2 @@
+provider_name,token_limit,token_used,is_active,tokens_remaining
+gemini,2000000,0,TRUE,2000000

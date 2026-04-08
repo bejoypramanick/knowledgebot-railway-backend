@@ -1,0 +1,3 @@
+display_name,initial_message,auto_show_duration,keep_showing_suggested,theme,primary_color,use_primary_for_header,chat_bubble_color,align_bubble,display_chatbot,profile_picture_url,chat_icon_url,profile_picture_filename,chat_icon_filename,profile_zoom,chat_icon_zoom,profile_position,chat_icon_position,hil_enabled,response_policy,hil_disabled_message,is_singleton,allowed_origins
+Wiki Expert,Explore Wiki,4,FALSE,light,#ffffff,FALSE,#493bff,right,TRUE,,,,,1,1,"{""x"": 0, ""y"": 0}","{""x"": 0, ""y"": 0}",TRUE,30,"Human assistance is      
+  currently offline. Please leave a message or try again later.",TRUE,["https://dailogue.globistaan.com"]

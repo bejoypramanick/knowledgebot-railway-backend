@@ -2239,10 +2239,12 @@ async def get_user_profile(request: Request, user: dict = Depends(get_current_us
         if not user_roles or user_roles == ["user"]:
             logger.info(f"[INFO] User {user_email} has no special roles, defaulting to 'user' role")
         
-        # Determine primary role (admin > human_agent > user)
+        # Determine primary role (superadmin > admin > human_agent > user)
         logger.info("[TRANSFORM] Determining primary role")
         primary_role = role_result.get("primary_role") or (
-            "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
+            "superadmin"
+            if "superadmin" in user_roles
+            else ("admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user"))
         )
         logger.info(f"[RESULT] Primary role determined: {primary_role}")
         
@@ -2316,14 +2318,19 @@ async def provision_tenant(
         raise HTTPException(status_code=400, detail="User email not found")
         
     try:
-        profile_data = await auth_service.provision_tenant(
-            email=user_email,
+        provision_result = await auth_service.provision_tenant(
+            requester_email=user_email,
             tenant_name=data.tenant_name,
-            tenant_slug=data.tenant_slug
+            tenant_slug=data.tenant_slug,
+            admin_email=data.admin_email,
+            human_agent_email=data.human_agent_email,
         )
         
         logger.info(f"✅ Provisioning successful for {user_email}. New tenant: {data.tenant_slug}")
-        return {"success": True, "data": profile_data}
+        return {"success": True, "data": provision_result}
+    except PermissionError as e:
+        logger.warning(f"🚫 Provisioning permission denied for {user_email}: {e}")
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         logger.warning(f"❌ Provisioning validation failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))

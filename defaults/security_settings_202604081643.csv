@@ -1,0 +1,5 @@
+setting_name,setting_value,setting_type
+response_timeout,60,integer
+response_policy,0.05263157894736842,integer
+hil_enabled,TRUE,boolean
+hil_disabled_message,,string

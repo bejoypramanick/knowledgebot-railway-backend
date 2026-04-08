@@ -2,6 +2,9 @@
 Auth Service Layer
 Provides business logic for authentication operations
 """
+import csv
+import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
@@ -18,16 +21,20 @@ from shared.redis_tenant_auth_cache import (
 )
 
 from ..dao.auth_dao import AuthDAO
+from ..dao.chat_agent_config_dao import ChatAgentConfigDAO
+from ..dao.widget_config_dao import WidgetConfigDAO
 
 logger = get_otel_logger("auth_service", "configuration")
 
 
 def _role_priority(role_name: str) -> int:
-    if role_name == "admin":
+    if role_name == "superadmin":
         return 0
-    if role_name == "human_agent":
+    if role_name == "admin":
         return 1
-    return 2
+    if role_name == "human_agent":
+        return 2
+    return 3
 
 
 def _normalize_role_context(
@@ -85,6 +92,8 @@ class AuthService:
     
     def __init__(self):
         self.auth_dao = AuthDAO()  # Service manages its own DAO
+        self.widget_dao = WidgetConfigDAO()
+        self.chat_agent_dao = ChatAgentConfigDAO()
     
     
     async def get_user_role(
@@ -165,24 +174,122 @@ class AuthService:
             logger.error(f"Error getting user role for {email}: {exc_type}: {exc_msg}")
             raise
 
-    async def provision_tenant(self, email: str, tenant_name: str, tenant_slug: str) -> dict:
-        """Process manual tenant provisioning requested by the user from UI."""
+    def _defaults_dir(self) -> Path:
+        return Path(__file__).resolve().parents[2] / "defaults"
+
+    def _latest_defaults_file(self, prefix: str) -> Path:
+        matches = sorted(self._defaults_dir().glob(f"{prefix}_*.csv"))
+        if not matches:
+            raise FileNotFoundError(f"No defaults CSV found for {prefix}")
+        return matches[-1]
+
+    def _load_defaults_rows(self, prefix: str) -> List[Dict[str, str]]:
+        with self._latest_defaults_file(prefix).open("r", encoding="utf-8-sig", newline="") as handle:
+            return list(csv.DictReader(handle))
+
+    @staticmethod
+    def _parse_bool(value: Any, default: bool = False) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
+
+    @staticmethod
+    def _parse_int(value: Any, default: int = 0) -> int:
+        try:
+            return int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _parse_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _parse_json(value: Any, default: Any) -> Any:
+        if value in (None, ""):
+            return default
+        try:
+            return json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return default
+
+    async def _seed_tenant_defaults(self, tenant_id: str) -> None:
         from shared.tenant_context import tenant_context
-        
-        logger.info(f"🚀 Manual provisioning started for {email}: {tenant_name} ({tenant_slug})")
-        
-        # 1. Perform provisioning
-        provision_result = await self.auth_dao.manual_provision_tenant(email, tenant_name, tenant_slug)
-        
-        # 2. Invalidate caches
-        await invalidate_user_auth_cache(email)
-        
-        # 3. Return fresh role context
-        return await self.get_user_role(
-            email, 
-            tenant_id=provision_result["tenant_id"],
-            tenant_slug=provision_result["tenant_slug"]
-        )
+
+        widget_rows = self._load_defaults_rows("widget_configuration")
+        persona_rows = self._load_defaults_rows("persona_configurations")
+        security_rows = self._load_defaults_rows("security_settings")
+        llm_rows = self._load_defaults_rows("llm_providers")
+
+        widget_row = widget_rows[0] if widget_rows else None
+
+        with tenant_context(tenant_id=tenant_id):
+            if widget_row:
+                await self.widget_dao.update_widget_config({
+                    "display_name": widget_row.get("display_name") or "",
+                    "initial_message": widget_row.get("initial_message") or "",
+                    "auto_show_duration": self._parse_int(widget_row.get("auto_show_duration"), 5),
+                    "keep_showing_suggested": self._parse_bool(widget_row.get("keep_showing_suggested"), True),
+                    "theme": widget_row.get("theme") or "light",
+                    "primary_color": widget_row.get("primary_color") or "#2563eb",
+                    "use_primary_for_header": self._parse_bool(widget_row.get("use_primary_for_header"), True),
+                    "chat_bubble_color": widget_row.get("chat_bubble_color") or "#ffffff",
+                    "align_bubble": widget_row.get("align_bubble") or "right",
+                    "display_chatbot": self._parse_bool(widget_row.get("display_chatbot"), True),
+                    "profile_picture_url": widget_row.get("profile_picture_url") or "",
+                    "chat_icon_url": widget_row.get("chat_icon_url") or "",
+                    "profile_picture_filename": widget_row.get("profile_picture_filename") or "",
+                    "chat_icon_filename": widget_row.get("chat_icon_filename") or "",
+                    "profile_zoom": self._parse_float(widget_row.get("profile_zoom"), 1.0),
+                    "chat_icon_zoom": self._parse_float(widget_row.get("chat_icon_zoom"), 1.0),
+                    "profile_position": self._parse_json(widget_row.get("profile_position"), {"x": 0, "y": 0}),
+                    "chat_icon_position": self._parse_json(widget_row.get("chat_icon_position"), {"x": 0, "y": 0}),
+                    "hil_enabled": self._parse_bool(widget_row.get("hil_enabled"), True),
+                    "response_policy": self._parse_float(widget_row.get("response_policy"), 30.0),
+                    "hil_disabled_message": widget_row.get("hil_disabled_message") or "",
+                    "allowed_origins": self._parse_json(widget_row.get("allowed_origins"), []),
+                })
+
+            for row in security_rows:
+                setting_name = (row.get("setting_name") or "").strip()
+                if not setting_name:
+                    continue
+                await self.chat_agent_dao.upsert_security_setting(
+                    setting_name,
+                    (row.get("setting_value") or "").strip(),
+                    (row.get("setting_type") or "string").strip() or "string",
+                )
+
+            for row in persona_rows:
+                persona_name = (row.get("persona_name") or "").strip()
+                if not persona_name:
+                    continue
+                await self.chat_agent_dao.upsert_persona_configuration(
+                    persona_name=persona_name,
+                    system_prompt=row.get("system_prompt") or "",
+                    persona_description=row.get("persona_description") or None,
+                    is_active=self._parse_bool(row.get("is_active"), False),
+                )
+
+            for row in llm_rows:
+                provider_name = (row.get("provider_name") or "").strip()
+                if not provider_name:
+                    continue
+                await self.chat_agent_dao.update_llm_provider_tokens(
+                    provider=provider_name,
+                    limit=self._parse_int(row.get("token_limit"), 0),
+                    used=self._parse_int(row.get("token_used"), 0),
+                )
+
+    async def _require_superadmin(self, email: str) -> None:
+        memberships = await self.auth_dao.get_user_memberships(email)
+        if not any(membership.get("role_name") == "superadmin" for membership in memberships):
+            raise PermissionError("Only a superadmin can create a new tenant")
 
     def _group_memberships(self, memberships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         grouped: Dict[str, Dict[str, Any]] = {}
@@ -373,63 +480,30 @@ class AuthService:
             logger.error(f"Error in get_or_create_unique_id: {e}", exc_info=True)
             raise
 
-    async def provision_tenant(self, email: str, tenant_name: str, tenant_slug: str) -> Dict[str, Any]:
-        """
-        Manually provision a new tenant for a pre-provisioned user.
-        Includes database operations, configuration initialization, and cache invalidation.
-        """
+    async def provision_tenant(
+        self,
+        requester_email: str,
+        tenant_name: str,
+        tenant_slug: str,
+        admin_email: str,
+        human_agent_email: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Provision a tenant for a requested admin/human-agent pair from the superadmin UI."""
         try:
-            # 1. Perform database provisioning (Tables: tenants, user_role_mapping)
-            result = await self.auth_dao.manual_provision_tenant(email, tenant_name, tenant_slug)
-            tenant_id = result["tenant_id"]
-            
-            logger.info(f"🚀 Provisioned tenant {tenant_id} for {email}. Initializing default configurations...")
-            
-            # 2. Initialize default configurations for the new tenant
-            from ..dao.widget_config_dao import WidgetConfigDAO
-            from ..dao.chat_agent_config_dao import ChatAgentConfigDAO
-            widget_dao = WidgetConfigDAO()
-            agent_dao = ChatAgentConfigDAO()
-            
-            from shared.tenant_context import tenant_context
-            # We run initialization inside a tenant context to ensure RLS-compliant seeding
-            with tenant_context(tenant_id=tenant_id):
-                # A. Seed Widget Appearance Defaults
-                await widget_dao.save_widget_config({
-                    "display_name": "Knowledge Bot",
-                    "initial_message": "Hello! How can I help you today?",
-                    "theme": "light",
-                    "primary_color": "#2563eb",
-                    "auto_show_duration": 5,
-                    "keep_showing_suggested": True,
-                    "use_primary_for_header": True,
-                    "chat_bubble_color": "#ffffff",
-                    "align_bubble": "right",
-                    "display_chatbot": True
-                })
-                
-                # B. Seed Agent Behavior & Persona Defaults
-                await agent_dao.save_chat_agent_config(
-                    admin_emails=[email],
-                    human_agents=[],
-                    response_timeout=30,
-                    response_policy=120,
-                    hil_enabled=True,
-                    hil_disabled_message="Our human agents are currently offline. Please leave a message.",
-                    persona_name="Support Assistant",
-                    system_prompt="You are a professional and helpful customer support assistant. Answer questions clearly and concisely based on the available knowledge.",
-                    llm_tokens={
-                        "gemini-2.0-flash": {"limit": 1000000, "used": 0},
-                        "openai": {"limit": 100000, "used": 0}
-                    }
-                )
-            
-            # 3. Invalidate ALL authentication caches for this user
-            from shared.redis_tenant_auth_cache import invalidate_user_auth_cache
-            await invalidate_user_auth_cache(email)
-            
-            # 4. Return fresh profile
-            return await self.get_user_role(email, tenant_slug=tenant_slug)
+            await self._require_superadmin(requester_email)
+            result = await self.auth_dao.manual_provision_tenant(
+                requester_email=requester_email,
+                tenant_name=tenant_name,
+                tenant_slug=tenant_slug,
+                admin_email=admin_email,
+                human_agent_email=human_agent_email,
+            )
+            await self._seed_tenant_defaults(result["tenant_id"])
+
+            for email in filter(None, {requester_email, admin_email, human_agent_email}):
+                await invalidate_user_auth_cache(email)
+
+            return result
         except Exception as e:
-            logger.error(f"Error in manual tenant provisioning for {email}: {e}")
+            logger.error(f"Error in manual tenant provisioning for {requester_email}: {e}")
             raise

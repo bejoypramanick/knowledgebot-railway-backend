@@ -278,6 +278,84 @@ class ChatAgentConfigDAO:
             logger.log_db_query("update_persona", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
             raise
 
+    async def upsert_persona_configuration(
+        self,
+        persona_name: str,
+        system_prompt: str,
+        persona_description: Optional[str] = None,
+        is_active: bool = False,
+    ) -> None:
+        """Upsert persona configuration with optional description for tenant seeding."""
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+
+        try:
+            async with get_db_session() as session:
+                if is_active:
+                    deactivate_query = text(
+                        "UPDATE persona_configurations SET is_active = false WHERE tenant_id = CAST(:tenant_id AS UUID)"
+                    )
+                    await session.execute(deactivate_query, {"tenant_id": tenant_id})
+
+                query = text("""
+                    MERGE INTO persona_configurations AS target
+                    USING (VALUES (
+                        CAST(:tenant_id AS UUID),
+                        CAST(:persona_name AS VARCHAR),
+                        CAST(:persona_description AS TEXT),
+                        CAST(:system_prompt AS TEXT),
+                        CAST(:is_active AS BOOLEAN)
+                    )) AS source(tenant_id, persona_name, persona_description, system_prompt, is_active)
+                    ON target.tenant_id = source.tenant_id AND target.persona_name = source.persona_name
+                    WHEN MATCHED THEN
+                        UPDATE SET
+                            persona_description = source.persona_description,
+                            system_prompt = source.system_prompt,
+                            is_active = source.is_active,
+                            updated_at = NOW()
+                    WHEN NOT MATCHED THEN
+                        INSERT (
+                            tenant_id,
+                            persona_name,
+                            persona_description,
+                            system_prompt,
+                            is_active,
+                            created_at,
+                            updated_at
+                        )
+                        VALUES (
+                            source.tenant_id,
+                            source.persona_name,
+                            source.persona_description,
+                            source.system_prompt,
+                            source.is_active,
+                            NOW(),
+                            NOW()
+                        )
+                """)
+                params = {
+                    "tenant_id": tenant_id,
+                    "persona_name": persona_name,
+                    "persona_description": persona_description,
+                    "system_prompt": system_prompt,
+                    "is_active": is_active,
+                }
+                from shared.tenant_context import tenant_context
+                with tenant_context(tenant_id=tenant_id):
+                    await session.execute(query, params)
+                    await session.commit()
+        except Exception as e:
+            logger.log_db_query(
+                "upsert_persona_configuration",
+                {
+                    "persona_name": persona_name,
+                    "persona_description": persona_description,
+                    "is_active": is_active,
+                },
+                error=e,
+            )
+            raise
+
     async def add_human_agent(self, email: str) -> bool:
         """Add a human agent by email. Creates user if doesn't exist."""
         try:

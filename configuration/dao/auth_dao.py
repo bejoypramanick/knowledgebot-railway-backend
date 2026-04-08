@@ -146,18 +146,25 @@ class AuthDAO:
             logger.error(f"Error checking user existence: {e}")
             return False
 
-    async def manual_provision_tenant(self, email: str, tenant_name: str, tenant_slug: str) -> Dict[str, Any]:
-        """Manually provision a tenant and make the user an admin."""
+    async def manual_provision_tenant(
+        self,
+        requester_email: str,
+        tenant_name: str,
+        tenant_slug: str,
+        admin_email: str,
+        human_agent_email: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Provision a tenant, upsert requested users, and assign tenant-scoped roles."""
         try:
             import json
             async with get_db_session() as session:
-                # 1. Get user_id again (inside transaction)
+                # 1. Ensure the requesting user exists so the action can be audited
                 user_query = text("SELECT id FROM users WHERE email = :email AND is_active = true")
-                result = await session.execute(user_query, {"email": email})
+                result = await session.execute(user_query, {"email": requester_email})
                 user_row = result.fetchone()
                 if not user_row:
-                    raise ValueError(f"User {email} not found or inactive")
-                user_id = user_row.id
+                    raise ValueError(f"User {requester_email} not found or inactive")
+                requester_user_id = user_row.id
                 
                 # 2. Check if tenant slug already exists
                 check_tenant = text("SELECT id FROM tenants WHERE slug = :slug")
@@ -171,7 +178,11 @@ class AuthDAO:
                     VALUES (:slug, :name, 'Manually provisioned on first login', true, :metadata)
                     RETURNING id
                 """)
-                tenant_metadata = json.dumps({"provisioned_for": email})
+                tenant_metadata = json.dumps({
+                    "provisioned_by": requester_email,
+                    "admin_email": admin_email,
+                    "human_agent_email": human_agent_email,
+                })
                 result = await session.execute(create_tenant, {
                     "slug": tenant_slug, 
                     "name": tenant_name, 
@@ -182,45 +193,89 @@ class AuthDAO:
                     raise ValueError("Failed to create tenant")
                 tenant_id = tenant_row.id
                 
-                # 4. Get admin role ID
-                role_query = text("SELECT id FROM roles WHERE role_name = 'admin'")
+                # 4. Resolve required role IDs up front
+                role_query = text("""
+                    SELECT role_name, id
+                    FROM roles
+                    WHERE role_name IN ('admin', 'human_agent')
+                """)
                 result = await session.execute(role_query)
-                role_row = result.fetchone()
-                if not role_row:
+                role_rows = result.fetchall()
+                role_map = {row.role_name: row.id for row in role_rows}
+                if "admin" not in role_map:
                     raise ValueError("Admin role not found")
-                admin_role_id = role_row.id
+                if human_agent_email and "human_agent" not in role_map:
+                    raise ValueError("Human agent role not found")
 
                 # Apply context for RLS write policy
                 await session.execute(
                     text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
                     {"tenant_id": str(tenant_id)}
                 )
-                
-                # 5. Insert mapping
+
+                upsert_user_query = text("""
+                    INSERT INTO users (email, is_active, created_at, updated_at)
+                    VALUES (:email, true, NOW(), NOW())
+                    ON CONFLICT (email)
+                    DO UPDATE SET is_active = true, updated_at = NOW()
+                    RETURNING id
+                """)
                 mapping_query = text("""
                     INSERT INTO user_role_mapping (user_id, role_id, tenant_id, is_active, created_at, updated_at)
                     VALUES (:user_id, :role_id, :tenant_id, true, NOW(), NOW())
-                    ON CONFLICT (user_id, role_id, tenant_id) DO NOTHING
+                    ON CONFLICT (user_id, role_id, tenant_id)
+                    DO UPDATE SET is_active = true, updated_at = NOW()
                     RETURNING user_role_id
                 """)
-                result = await session.execute(mapping_query, {
-                    "user_id": user_id,
-                    "role_id": admin_role_id,
-                    "tenant_id": tenant_id
+
+                async def upsert_user(target_email: str) -> Any:
+                    result = await session.execute(upsert_user_query, {"email": target_email})
+                    user = result.fetchone()
+                    if not user:
+                        raise ValueError(f"Failed to upsert user {target_email}")
+                    return user.id
+
+                admin_user_id = await upsert_user(admin_email)
+                admin_mapping = await session.execute(mapping_query, {
+                    "user_id": admin_user_id,
+                    "role_id": role_map["admin"],
+                    "tenant_id": tenant_id,
                 })
-                mapping_row = result.fetchone()
+                admin_mapping_row = admin_mapping.fetchone()
+
+                human_agent_mapping_row = None
+                if human_agent_email:
+                    human_agent_user_id = await upsert_user(human_agent_email)
+                    human_agent_mapping = await session.execute(mapping_query, {
+                        "user_id": human_agent_user_id,
+                        "role_id": role_map["human_agent"],
+                        "tenant_id": tenant_id,
+                    })
+                    human_agent_mapping_row = human_agent_mapping.fetchone()
                 
                 await session.commit()
-                logger.info(f"✅ Manually provisioned tenant {tenant_slug} for user {email}")
+                logger.info(
+                    "✅ Manually provisioned tenant %s by %s for admin=%s human_agent=%s",
+                    tenant_slug,
+                    requester_email,
+                    admin_email,
+                    human_agent_email,
+                )
                 
                 return {
                     "tenant_id": str(tenant_id),
                     "tenant_slug": tenant_slug,
                     "tenant_name": tenant_name,
-                    "user_role_id": str(mapping_row.user_role_id) if mapping_row else None
+                    "provisioned_by_user_id": str(requester_user_id),
+                    "admin_email": admin_email,
+                    "admin_user_role_id": str(admin_mapping_row.user_role_id) if admin_mapping_row else None,
+                    "human_agent_email": human_agent_email,
+                    "human_agent_user_role_id": (
+                        str(human_agent_mapping_row.user_role_id) if human_agent_mapping_row else None
+                    ),
                 }
         except Exception as e:
-            logger.error(f"Error manually provisioning tenant for {email}: {e}")
+            logger.error(f"Error manually provisioning tenant for {requester_email}: {e}")
             raise
 
     async def get_user_memberships(self, email: str) -> List[Dict[str, Any]]:
