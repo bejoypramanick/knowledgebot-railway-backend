@@ -84,10 +84,10 @@ def set_tenant_context(
     user_email: Optional[str] = None,
 ) -> Dict[str, Token]:
     return {
-        "tenant_id": tenant_id_ctx_var.set(tenant_id),
-        "tenant_slug": tenant_slug_ctx_var.set(tenant_slug),
-        "user_role_id": user_role_id_ctx_var.set(user_role_id),
-        "user_email": user_email_ctx_var.set(user_email),
+        "tenant_id": tenant_id_ctx_var.set(tenant_id if tenant_id is not None else tenant_id_ctx_var.get()),
+        "tenant_slug": tenant_slug_ctx_var.set(tenant_slug if tenant_slug is not None else tenant_slug_ctx_var.get()),
+        "user_role_id": user_role_id_ctx_var.set(user_role_id if user_role_id is not None else user_role_id_ctx_var.get()),
+        "user_email": user_email_ctx_var.set(user_email if user_email is not None else user_email_ctx_var.get()),
     }
 
 

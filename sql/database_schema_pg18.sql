@@ -32,7 +32,7 @@ ALTER TABLE public.api_usage OWNER TO postgres;
 GRANT ALL ON TABLE public.api_usage TO postgres;
 GRANT ALL ON TABLE public.api_usage TO pg_database_owner;
 
-CREATE TABLE IF NOT EXISTS public.llm_providers ( id uuid DEFAULT uuidv7() NOT NULL, provider_name varchar(100) NOT NULL, token_limit int8 DEFAULT 0 NULL, token_used int8 DEFAULT 0 NULL, is_active bool DEFAULT true NULL, created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, tokens_remaining int8 GENERATED ALWAYS AS (token_limit - token_used) STORED NULL, token_utilization_percent numeric(5, 2) GENERATED ALWAYS AS (
+CREATE TABLE IF NOT EXISTS public.llm_providers ( id uuid DEFAULT uuidv7() NOT NULL, provider_name varchar(100) NOT NULL, token_limit int8 DEFAULT 0 NULL, token_used int8 DEFAULT 0 NULL, is_active bool DEFAULT true NULL, created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, tokens_remaining int8 GENERATED ALWAYS AS (token_limit - token_used) STORED NULL, token_utilization_percent numeric(10, 2) GENERATED ALWAYS AS (
 CASE
     WHEN token_limit = 0 THEN 0::numeric
     ELSE round(token_used::numeric / token_limit::numeric * 100::numeric, 2)
