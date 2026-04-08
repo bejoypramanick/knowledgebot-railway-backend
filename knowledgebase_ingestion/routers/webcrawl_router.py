@@ -24,8 +24,11 @@ logger = get_otel_logger("webcrawl_router", "knowledgebase-ingestion")
 async def _invalidate_kb_cache():
     """Invalidate all KB file cache keys in Redis DB7."""
     try:
-        from shared.redis_ui_cache import invalidate_kb_caches
-        await invalidate_kb_caches()
+        from shared.redis_ui_cache import cache_invalidate_pattern, KB_FILES_KEY_PREFIX
+        # Invalidate for ALL tenants to be safe on deletions
+        pattern = f"{KB_FILES_KEY_PREFIX}*"
+        count = await cache_invalidate_pattern(pattern)
+        logger.info(f"🗑️ [CACHE_INVALIDATE] Cleared {count} keys matching {pattern}")
     except Exception as e:
         logger.warning(f"⚠️ Failed to invalidate KB caches: {e}")
 
