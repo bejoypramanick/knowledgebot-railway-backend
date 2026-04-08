@@ -172,28 +172,45 @@ class AuthDAO:
                 if result.fetchone():
                     raise ValueError(f"Tenant slug '{tenant_slug}' is already taken")
 
-                # 3. Create tenant
+                # 3. Allocate the tenant ID up front and set session context before
+                # inserting. This avoids RLS issues on INSERT ... RETURNING when
+                # the newly created tenant is not yet visible to the current
+                # session until tenant context is established.
+                tenant_id_query = text("SELECT uuidv7() AS tenant_id")
+                result = await session.execute(tenant_id_query)
+                tenant_id_row = result.fetchone()
+                if not tenant_id_row:
+                    raise ValueError("Failed to allocate tenant ID")
+                tenant_id = tenant_id_row.tenant_id
+
+                await session.execute(
+                    text("SELECT set_config('app.current_user_email', :email, true)"),
+                    {"email": requester_email},
+                )
+                await session.execute(
+                    text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+                    {"tenant_id": str(tenant_id)},
+                )
+
+                # 4. Create tenant
                 create_tenant = text("""
-                    INSERT INTO tenants (slug, name, description, is_active, metadata)
-                    VALUES (:slug, :name, 'Manually provisioned on first login', true, :metadata)
-                    RETURNING id
+                    INSERT INTO tenants (id, slug, name, description, is_active, metadata)
+                    VALUES (:tenant_id, :slug, :name, 'Manually provisioned on first login', true, :metadata)
                 """)
                 tenant_metadata = json.dumps({
                     "provisioned_by": requester_email,
+                    "provisioned_for": requester_email,
                     "admin_email": admin_email,
                     "human_agent_email": human_agent_email,
                 })
-                result = await session.execute(create_tenant, {
+                await session.execute(create_tenant, {
+                    "tenant_id": tenant_id,
                     "slug": tenant_slug, 
                     "name": tenant_name, 
                     "metadata": tenant_metadata
                 })
-                tenant_row = result.fetchone()
-                if not tenant_row:
-                    raise ValueError("Failed to create tenant")
-                tenant_id = tenant_row.id
                 
-                # 4. Resolve required role IDs up front
+                # 5. Resolve required role IDs up front
                 role_query = text("""
                     SELECT role_name, id
                     FROM roles
@@ -206,12 +223,6 @@ class AuthDAO:
                     raise ValueError("Admin role not found")
                 if human_agent_email and "human_agent" not in role_map:
                     raise ValueError("Human agent role not found")
-
-                # Apply context for RLS write policy
-                await session.execute(
-                    text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
-                    {"tenant_id": str(tenant_id)}
-                )
 
                 upsert_user_query = text("""
                     INSERT INTO users (email, is_active, created_at, updated_at)
