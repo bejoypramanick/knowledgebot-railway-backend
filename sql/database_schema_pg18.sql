@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS public.llm_providers ( id uuid DEFAULT uuidv7() NOT N
 CASE
     WHEN token_limit = 0 THEN 0::numeric
     ELSE round(token_used::numeric / token_limit::numeric * 100::numeric, 2)
-END) STORED NULL, CONSTRAINT llm_providers_pkey PRIMARY KEY (id), CONSTRAINT llm_providers_provider_name_key UNIQUE (provider_name));
+END) STORED NULL, tenant_id uuid NOT NULL, CONSTRAINT llm_providers_pkey PRIMARY KEY (id), CONSTRAINT llm_providers_provider_name_key UNIQUE (provider_name), CONSTRAINT llm_providers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS idx_llm_providers_critical ON public.llm_providers USING btree (provider_name) WHERE ((tokens_remaining < 100000) AND (is_active = true));
 CREATE INDEX IF NOT EXISTS idx_llm_providers_is_active_id ON public.llm_providers USING btree (is_active DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_providers_lookup ON public.llm_providers USING btree (provider_name) INCLUDE (is_active, token_limit, token_used, tokens_remaining);
@@ -120,7 +120,7 @@ ALTER TABLE public.roles OWNER TO postgres;
 GRANT ALL ON TABLE public.roles TO postgres;
 GRANT ALL ON TABLE public.roles TO pg_database_owner;
 
-CREATE TABLE IF NOT EXISTS public.security_settings ( id uuid DEFAULT uuidv7() NOT NULL, setting_name varchar(100) NOT NULL, setting_value text NULL, setting_type varchar(50) DEFAULT 'string'::character varying NULL, description text NULL, created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT security_settings_pkey PRIMARY KEY (id), CONSTRAINT security_settings_setting_name_key UNIQUE (setting_name), CONSTRAINT security_settings_setting_type_check CHECK (((setting_type)::text = ANY (ARRAY[('string'::character varying)::text, ('integer'::character varying)::text, ('boolean'::character varying)::text, ('json'::character varying)::text]))));
+CREATE TABLE IF NOT EXISTS public.security_settings ( id uuid DEFAULT uuidv7() NOT NULL, setting_name varchar(100) NOT NULL, setting_value text NULL, setting_type varchar(50) DEFAULT 'string'::character varying NULL, description text NULL, created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, tenant_id uuid NOT NULL, CONSTRAINT security_settings_pkey PRIMARY KEY (id), CONSTRAINT security_settings_setting_name_key UNIQUE (setting_name), CONSTRAINT security_settings_setting_type_check CHECK (((setting_type)::text = ANY (ARRAY[('string'::character varying)::text, ('integer'::character varying)::text, ('boolean'::character varying)::text, ('json'::character varying)::text]))), CONSTRAINT security_settings_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS idx_security_settings_lookup ON public.security_settings USING btree (setting_name) INCLUDE (setting_value, setting_type);
 CREATE INDEX IF NOT EXISTS idx_security_settings_setting_name ON public.security_settings USING btree (setting_name);
 CREATE INDEX IF NOT EXISTS idx_security_settings_type ON public.security_settings USING btree (setting_type) INCLUDE (setting_name, setting_value);
