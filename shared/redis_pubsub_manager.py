@@ -506,13 +506,13 @@ class AgentEventSubscriber:
             self.pubsub = self.redis_client.pubsub()
 
             # Subscribe based on role
-            if self.role == 'admin':
+            if self.role in {'admin', 'superadmin'}:
                 # Admins ONLY subscribe to broadcast channel (all chats, view-only if not assigned)
                 broadcast_channel = get_broadcast_channel_name(
                     tenant_scope=self.tenant_scope
                 )
                 await self.pubsub.subscribe(broadcast_channel)
-                logger.info(f"🔌 Admin {self.agent_email} (ID: {self.agent_id}) subscribed to broadcast channel: {broadcast_channel}")
+                logger.info(f"🔌 Admin-equivalent {self.agent_email} (ID: {self.agent_id}) subscribed to broadcast channel: {broadcast_channel}")
             else:
                 # Human agents subscribe to personal channel (only their assigned chats)
                 agent_channel = get_agent_channel_name(

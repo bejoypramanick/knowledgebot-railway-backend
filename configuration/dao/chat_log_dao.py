@@ -42,13 +42,13 @@ class ChatLogDAO:
             return []
 
     async def get_all_admins(self) -> List[str]:
-        """Get all admin emails."""
+        """Get all admin-equivalent emails."""
         query = """
             SELECT DISTINCT u.email
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
-            WHERE r.role_name = 'admin'
+            WHERE r.role_name IN ('admin', 'superadmin')
         """
         try:
             logger.info(f"🔍 [DAO] Fetching all admins")
@@ -67,13 +67,13 @@ class ChatLogDAO:
             return []
 
     async def get_all_admin_ids(self) -> List[str]:
-        """Get all admin user IDs."""
+        """Get all admin-equivalent user IDs."""
         query = """
             SELECT DISTINCT u.id
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
-            WHERE r.role_name = 'admin'
+            WHERE r.role_name IN ('admin', 'superadmin')
         """
         try:
             logger.info(f"🔍 [DAO] Fetching all admin IDs")
@@ -92,7 +92,7 @@ class ChatLogDAO:
             return []
 
     async def check_user_role(self, email: str) -> Dict[str, bool]:
-        """Check if user is agent or admin."""
+        """Check if user is agent or admin-equivalent."""
         # Use CAST to ensure proper boolean type from PostgreSQL
         # This forces SQLAlchemy to handle the type conversion correctly
         query = """
@@ -104,7 +104,7 @@ class ChatLogDAO:
                 CAST(EXISTS(SELECT 1 FROM user_role_mapping urm
                       JOIN users u ON urm.user_id = u.id
                       JOIN roles r ON urm.role_id = r.id
-                      WHERE u.email = :email AND r.role_name = 'admin') AS BOOLEAN) as is_admin
+                      WHERE u.email = :email AND r.role_name IN ('admin', 'superadmin')) AS BOOLEAN) as is_admin
         """
         try:
             params = {"email": email}
