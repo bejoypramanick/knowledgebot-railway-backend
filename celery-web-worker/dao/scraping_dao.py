@@ -38,7 +38,7 @@ class ScrapingDAO:
         query = """
             UPDATE scraped_websites
             SET processing_status = :status, error_message = :error_message, updated_at = NOW()
-            WHERE id = :website_id
+            WHERE id = :website_id AND processing_status != 'deleted'
         """
         params = {"status": status, "error_message": error_message, "website_id": website_id}
 
@@ -408,7 +408,7 @@ class ScrapingDAO:
                 storage_backend_state = :storage_backend_state,
                 processing_status = 'completed',
                 updated_at = NOW()
-            WHERE id = :website_id
+            WHERE id = :website_id AND processing_status != 'deleted'
         """
 
         params = {
@@ -487,7 +487,7 @@ class ScrapingDAO:
                     metadata = metadata || CAST(:metadata AS jsonb),
                     processing_status = 'completed',
                     updated_at = NOW()
-                WHERE id = :website_id
+                WHERE id = :website_id AND processing_status != 'deleted'
                 RETURNING OLD.metadata AS previous_metadata, OLD.processing_status AS old_status, NEW.processing_status AS new_status
             """
         else:
@@ -507,7 +507,7 @@ class ScrapingDAO:
                     metadata = metadata || CAST(:metadata AS jsonb),
                     processed_content_s3_key = :processed_content_s3_key,
                     updated_at = NOW()
-                WHERE id = :website_id
+                WHERE id = :website_id AND processing_status != 'deleted'
                 RETURNING OLD.metadata AS previous_metadata, OLD.processing_status AS old_status, NEW.processing_status AS new_status
             """
 

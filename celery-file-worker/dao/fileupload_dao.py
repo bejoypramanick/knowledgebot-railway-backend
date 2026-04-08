@@ -23,7 +23,7 @@ class FileUploadDAO:
         query = """
             UPDATE file_uploads
             SET processing_status = :status, error_message = :error_message, updated_at = NOW()
-            WHERE id = :file_id
+            WHERE id = :file_id AND processing_status != 'deleted'
         """
         params = {"file_id": file_id, "status": status, "error_message": error_message}
 
@@ -95,7 +95,7 @@ class FileUploadDAO:
                 total_pages = :total_pages,
                 processing_status = 'completed',
                 updated_at = NOW()
-            WHERE id = :file_id
+            WHERE id = :file_id AND processing_status != 'deleted'
         """
 
         params = {
