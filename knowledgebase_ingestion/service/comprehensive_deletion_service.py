@@ -201,17 +201,6 @@ class ComprehensiveDeletionService:
                         deletion_report["cleanup_summary"]["db_records_affected"] = 1
                         logger.info(f"   🗑️  Hard deleted from database")
                     else:
-                        # Ensure CHECK constraint allows 'deleted' status
-                        await conn.execute("ALTER TABLE file_uploads DROP CONSTRAINT IF EXISTS valid_processing_status")
-                        await conn.execute("ALTER TABLE file_uploads DROP CONSTRAINT IF EXISTS file_uploads_processing_status_check")
-                        await conn.execute("""
-                            ALTER TABLE file_uploads ADD CONSTRAINT valid_processing_status CHECK (
-                                processing_status::text = ANY (ARRAY[
-                                    'pending'::text, 'processing'::text, 'completed'::text,
-                                    'failed'::text, 'cancelled'::text, 'deleted'::text
-                                ])
-                            )
-                        """)
                         # Soft delete: mark as deleted with audit trail
                         await conn.execute(
                             """UPDATE file_uploads
