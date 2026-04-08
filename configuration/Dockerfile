@@ -39,6 +39,7 @@ RUN echo "🐍 Installing Python dependencies..." && \
 
 # Copy application code
 COPY shared/ ./shared/
+COPY defaults/ ./defaults/
 COPY configuration/ ./configuration/
 RUN echo "📁 Application code copied"
 
@@ -55,4 +56,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
 
 # Run the application
 CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${configuration_PORT:-${PORT:-8004}} --log-level info --access-log"]
-
