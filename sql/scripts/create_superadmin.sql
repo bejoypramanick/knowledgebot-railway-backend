@@ -7,10 +7,10 @@
 --
 -- Behavior:
 --   - Ensures the "superadmin" role exists.
---   - Ensures the all-zero tenant exists as the system tenant.
+--   - Ensures a system tenant exists, using PostgreSQL's default uuidv7().
 --   - Ensures the given email exists in public.users.
 --   - Ensures a user_role_mapping row exists for:
---       (user, superadmin role, 00000000-0000-0000-0000-000000000000)
+--       (user, superadmin role, system tenant)
 --
 -- Idempotent:
 --   - Safe to run multiple times for the same email.
@@ -22,7 +22,7 @@ DECLARE
     v_superadmin_email text := 'replace-me@example.com';
     v_superadmin_role_id uuid;
     v_superadmin_user_id uuid;
-    v_system_tenant_id uuid := '00000000-0000-0000-0000-000000000000'::uuid;
+    v_system_tenant_id uuid;
 BEGIN
     IF v_superadmin_email IS NULL OR btrim(v_superadmin_email) = '' THEN
         RAISE EXCEPTION 'v_superadmin_email must be set before running this script';
@@ -41,22 +41,29 @@ BEGIN
     FROM public.roles
     WHERE role_name = 'superadmin';
 
-    INSERT INTO public.tenants (id, slug, name, description, is_active, metadata)
+    INSERT INTO public.tenants (slug, name, description, is_active, metadata)
     VALUES (
-        v_system_tenant_id,
         'system',
         'System Tenant',
         'Global platform tenant for system-level roles such as superadmin.',
         true,
         '{"seeded_by":"create_superadmin.sql"}'::jsonb
     )
-    ON CONFLICT (id) DO UPDATE
-    SET slug = EXCLUDED.slug,
-        name = EXCLUDED.name,
+    ON CONFLICT (slug) DO UPDATE
+    SET name = EXCLUDED.name,
         description = EXCLUDED.description,
         is_active = true,
         metadata = COALESCE(public.tenants.metadata, '{}'::jsonb) || EXCLUDED.metadata,
-        updated_at = CURRENT_TIMESTAMP;
+        updated_at = CURRENT_TIMESTAMP
+    RETURNING id
+    INTO v_system_tenant_id;
+
+    IF v_system_tenant_id IS NULL THEN
+        SELECT id
+        INTO v_system_tenant_id
+        FROM public.tenants
+        WHERE slug = 'system';
+    END IF;
 
     INSERT INTO public.users (email, is_active, created_at, updated_at)
     VALUES (v_superadmin_email, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
