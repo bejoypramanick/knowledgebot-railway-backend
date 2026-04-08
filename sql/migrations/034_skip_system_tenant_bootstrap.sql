@@ -68,34 +68,18 @@ BEGIN
     INSERT INTO public.llm_providers (
         tenant_id,
         provider_name,
-        provider_type,
-        model_name,
-        api_key_encrypted,
-        endpoint_url,
-        is_enabled,
-        priority_order,
-        rate_limit_per_minute,
-        max_tokens_per_request,
         token_limit,
         token_used,
-        last_reset_at,
+        is_active,
         created_at,
         updated_at
     )
     SELECT
         NEW.id,
         lp.provider_name,
-        lp.provider_type,
-        lp.model_name,
-        lp.api_key_encrypted,
-        lp.endpoint_url,
-        lp.is_enabled,
-        lp.priority_order,
-        lp.rate_limit_per_minute,
-        lp.max_tokens_per_request,
         lp.token_limit,
-        lp.token_used,
-        lp.last_reset_at,
+        0,
+        lp.is_active,
         CURRENT_TIMESTAMP,
         CURRENT_TIMESTAMP
     FROM public.llm_providers AS lp

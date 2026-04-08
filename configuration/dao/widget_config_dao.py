@@ -16,10 +16,38 @@ class WidgetConfigDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
+    @staticmethod
+    def _system_tenant_widget_defaults() -> Dict[str, Any]:
+        return {
+            "display_name": "System Tenant",
+            "initial_message": "Hi! What can I help you with?",
+            "auto_show_duration": 30,
+            "keep_showing_suggested": False,
+            "theme": "light",
+            "primary_color": "#007bff",
+            "use_primary_for_header": True,
+            "chat_bubble_color": "#f8f9fa",
+            "align_bubble": "right",
+            "display_chatbot": False,
+            "profile_picture_url": None,
+            "chat_icon_url": None,
+            "profile_picture_filename": None,
+            "chat_icon_filename": None,
+            "profile_zoom": 1.00,
+            "chat_icon_zoom": 1.00,
+            "profile_position": {"x": 0, "y": 0},
+            "chat_icon_position": {"x": 20, "y": 20},
+            "hil_enabled": True,
+            "response_policy": 30,
+            "hil_disabled_message": "Human assistance is currently offline. Please leave a message or try again later.",
+            "allowed_origins": [],
+        }
+
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
         """Get main widget configuration with self-healing row creation."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        from shared.tenant_context import get_current_tenant_id, get_current_tenant_slug, DEFAULT_TENANT_ID
         tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        tenant_slug = get_current_tenant_slug()
 
         select_query = """
             SELECT
@@ -46,6 +74,13 @@ class WidgetConfigDAO:
                 if row:
                     logger.log_db_query(select_query, params, row)
                     return dict(row)
+
+                if tenant_slug == "system":
+                    logger.info(
+                        f"ℹ️ No widget configuration found for system tenant {tenant_id}. "
+                        "Returning in-memory defaults without self-healing insert."
+                    )
+                    return self._system_tenant_widget_defaults()
                 
                 # SELF-HEALING: No row found for this tenant, seed a default one
                 logger.warning(f"⚠️ No widget configuration found for tenant {tenant_id}. Seeding default row...")
