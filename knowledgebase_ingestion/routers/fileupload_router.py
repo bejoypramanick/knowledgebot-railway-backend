@@ -20,6 +20,7 @@ from knowledgebase_ingestion.dao.webcrawl_dao import WebCrawlDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery
 from shared.log_sanitizer import hash_pii
+from shared.s3_file_storage import s3_file_storage
 
 logger = get_otel_logger("fileupload_router", "knowledgebase-ingestion")
 
@@ -468,7 +469,6 @@ async def download_processed_content(file_id: str, request: Request = None):
 
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text
-        from shared.s3_file_storage import s3_file_storage
 
         async with get_db_session() as session:
             # Try file_uploads table first
@@ -656,7 +656,6 @@ async def upload_file_async(
             logger.info(f"   Size: {file_size} bytes")
             logger.info(f"   Type: upload")
 
-            from shared.s3_file_storage import s3_file_storage
 
             success, s3_result = await s3_file_storage.upload_file(
                 file_data=file_bytes,

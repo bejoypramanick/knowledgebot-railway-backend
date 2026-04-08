@@ -31,6 +31,7 @@ from utils.validation import (
 )
 from utils.files import calculate_sha256
 from service.file_service import FileService
+from shared.s3_file_storage import s3_file_storage
 
 logger = get_otel_logger("processing_service", "celery-file-worker")
 
@@ -541,7 +542,6 @@ async def process_file_content(
 
         # Delete from S3
         try:
-            from shared.s3_file_storage import s3_file_storage
             deleted = await s3_file_storage.delete_file(s3_key)
             if deleted:
                 logger.info(f"✅ [S3] Deleted file from S3: {s3_key}")
