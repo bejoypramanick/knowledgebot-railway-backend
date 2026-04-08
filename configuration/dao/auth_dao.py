@@ -2,6 +2,7 @@
 Authentication Data Access Object for Configuration Service
 Handles database operations for user authentication and role management
 """
+import json
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -153,10 +154,10 @@ class AuthDAO:
         tenant_slug: str,
         admin_email: str,
         human_agent_email: Optional[str] = None,
+        defaults_payload: Optional[Dict[str, List[Dict[str, str]]]] = None,
     ) -> Dict[str, Any]:
         """Provision a tenant, upsert requested users, and assign tenant-scoped roles."""
         try:
-            import json
             async with get_db_session() as session:
                 # 1. Ensure the requesting user exists so the action can be audited
                 user_query = text("SELECT id FROM users WHERE email = :email AND is_active = true")
@@ -263,6 +264,148 @@ class AuthDAO:
                         "tenant_id": tenant_id,
                     })
                     human_agent_mapping_row = human_agent_mapping.fetchone()
+
+                defaults_payload = defaults_payload or {}
+
+                widget_rows = defaults_payload.get("widget_configuration", [])
+                widget_row = widget_rows[0] if widget_rows else None
+                if widget_row:
+                    await session.execute(text("""
+                        INSERT INTO widget_configuration (
+                            tenant_id, is_singleton, display_name, initial_message, auto_show_duration,
+                            keep_showing_suggested, theme, primary_color, use_primary_for_header,
+                            chat_bubble_color, align_bubble, display_chatbot, profile_picture_url,
+                            chat_icon_url, profile_picture_filename, chat_icon_filename, profile_zoom,
+                            chat_icon_zoom, profile_position, chat_icon_position, hil_enabled,
+                            response_policy, hil_disabled_message, allowed_origins, updated_at
+                        )
+                        VALUES (
+                            :tenant_id, true, :display_name, :initial_message, :auto_show_duration,
+                            :keep_showing_suggested, :theme, :primary_color, :use_primary_for_header,
+                            :chat_bubble_color, :align_bubble, :display_chatbot, :profile_picture_url,
+                            :chat_icon_url, :profile_picture_filename, :chat_icon_filename, :profile_zoom,
+                            :chat_icon_zoom, CAST(:profile_position AS JSONB), CAST(:chat_icon_position AS JSONB),
+                            :hil_enabled, :response_policy, :hil_disabled_message, CAST(:allowed_origins AS JSONB), NOW()
+                        )
+                        ON CONFLICT (tenant_id, is_singleton) WHERE is_singleton = true
+                        DO UPDATE SET
+                            display_name = EXCLUDED.display_name,
+                            initial_message = EXCLUDED.initial_message,
+                            auto_show_duration = EXCLUDED.auto_show_duration,
+                            keep_showing_suggested = EXCLUDED.keep_showing_suggested,
+                            theme = EXCLUDED.theme,
+                            primary_color = EXCLUDED.primary_color,
+                            use_primary_for_header = EXCLUDED.use_primary_for_header,
+                            chat_bubble_color = EXCLUDED.chat_bubble_color,
+                            align_bubble = EXCLUDED.align_bubble,
+                            display_chatbot = EXCLUDED.display_chatbot,
+                            profile_picture_url = EXCLUDED.profile_picture_url,
+                            chat_icon_url = EXCLUDED.chat_icon_url,
+                            profile_picture_filename = EXCLUDED.profile_picture_filename,
+                            chat_icon_filename = EXCLUDED.chat_icon_filename,
+                            profile_zoom = EXCLUDED.profile_zoom,
+                            chat_icon_zoom = EXCLUDED.chat_icon_zoom,
+                            profile_position = EXCLUDED.profile_position,
+                            chat_icon_position = EXCLUDED.chat_icon_position,
+                            hil_enabled = EXCLUDED.hil_enabled,
+                            response_policy = EXCLUDED.response_policy,
+                            hil_disabled_message = EXCLUDED.hil_disabled_message,
+                            allowed_origins = EXCLUDED.allowed_origins,
+                            updated_at = EXCLUDED.updated_at
+                    """), {
+                        "tenant_id": tenant_id,
+                        "display_name": widget_row.get("display_name") or "",
+                        "initial_message": widget_row.get("initial_message") or "",
+                        "auto_show_duration": int(float(str(widget_row.get("auto_show_duration") or 5))),
+                        "keep_showing_suggested": str(widget_row.get("keep_showing_suggested") or "true").strip().lower() in {"1", "true", "t", "yes", "y"},
+                        "theme": widget_row.get("theme") or "light",
+                        "primary_color": widget_row.get("primary_color") or "#2563eb",
+                        "use_primary_for_header": str(widget_row.get("use_primary_for_header") or "true").strip().lower() in {"1", "true", "t", "yes", "y"},
+                        "chat_bubble_color": widget_row.get("chat_bubble_color") or "#ffffff",
+                        "align_bubble": widget_row.get("align_bubble") or "right",
+                        "display_chatbot": str(widget_row.get("display_chatbot") or "true").strip().lower() in {"1", "true", "t", "yes", "y"},
+                        "profile_picture_url": widget_row.get("profile_picture_url") or "",
+                        "chat_icon_url": widget_row.get("chat_icon_url") or "",
+                        "profile_picture_filename": widget_row.get("profile_picture_filename") or "",
+                        "chat_icon_filename": widget_row.get("chat_icon_filename") or "",
+                        "profile_zoom": float(str(widget_row.get("profile_zoom") or 1.0)),
+                        "chat_icon_zoom": float(str(widget_row.get("chat_icon_zoom") or 1.0)),
+                        "profile_position": json.dumps(json.loads(widget_row.get("profile_position") or '{"x": 0, "y": 0}')),
+                        "chat_icon_position": json.dumps(json.loads(widget_row.get("chat_icon_position") or '{"x": 0, "y": 0}')),
+                        "hil_enabled": str(widget_row.get("hil_enabled") or "true").strip().lower() in {"1", "true", "t", "yes", "y"},
+                        "response_policy": float(str(widget_row.get("response_policy") or 30.0)),
+                        "hil_disabled_message": widget_row.get("hil_disabled_message") or "",
+                        "allowed_origins": json.dumps(json.loads(widget_row.get("allowed_origins") or "[]")),
+                    })
+
+                for row in defaults_payload.get("security_settings", []):
+                    setting_name = (row.get("setting_name") or "").strip()
+                    if not setting_name:
+                        continue
+                    await session.execute(text("""
+                        INSERT INTO security_settings (tenant_id, setting_name, setting_value, setting_type, updated_at)
+                        VALUES (:tenant_id, :setting_name, :setting_value, :setting_type, NOW())
+                        ON CONFLICT (tenant_id, setting_name)
+                        DO UPDATE SET
+                            setting_value = EXCLUDED.setting_value,
+                            setting_type = EXCLUDED.setting_type,
+                            updated_at = EXCLUDED.updated_at
+                    """), {
+                        "tenant_id": tenant_id,
+                        "setting_name": setting_name,
+                        "setting_value": (row.get("setting_value") or "").strip(),
+                        "setting_type": (row.get("setting_type") or "string").strip() or "string",
+                    })
+
+                for row in defaults_payload.get("persona_configurations", []):
+                    persona_name = (row.get("persona_name") or "").strip()
+                    if not persona_name:
+                        continue
+                    await session.execute(text("""
+                        INSERT INTO persona_configurations (
+                            tenant_id, persona_name, persona_description, system_prompt, is_active, created_at, updated_at
+                        )
+                        VALUES (
+                            :tenant_id, :persona_name, :persona_description, :system_prompt, :is_active, NOW(), NOW()
+                        )
+                        ON CONFLICT (tenant_id, persona_name)
+                        DO UPDATE SET
+                            persona_description = EXCLUDED.persona_description,
+                            system_prompt = EXCLUDED.system_prompt,
+                            is_active = EXCLUDED.is_active,
+                            updated_at = EXCLUDED.updated_at
+                    """), {
+                        "tenant_id": tenant_id,
+                        "persona_name": persona_name,
+                        "persona_description": row.get("persona_description") or None,
+                        "system_prompt": row.get("system_prompt") or "",
+                        "is_active": str(row.get("is_active") or "false").strip().lower() in {"1", "true", "t", "yes", "y"},
+                    })
+
+                for row in defaults_payload.get("llm_providers", []):
+                    provider_name = (row.get("provider_name") or "").strip()
+                    if not provider_name:
+                        continue
+                    await session.execute(text("""
+                        INSERT INTO llm_providers (
+                            tenant_id, provider_name, token_limit, token_used, is_active, created_at, updated_at
+                        )
+                        VALUES (
+                            :tenant_id, :provider_name, :token_limit, :token_used, :is_active, NOW(), NOW()
+                        )
+                        ON CONFLICT (tenant_id, provider_name)
+                        DO UPDATE SET
+                            token_limit = EXCLUDED.token_limit,
+                            token_used = EXCLUDED.token_used,
+                            is_active = EXCLUDED.is_active,
+                            updated_at = EXCLUDED.updated_at
+                    """), {
+                        "tenant_id": tenant_id,
+                        "provider_name": provider_name,
+                        "token_limit": int(float(str(row.get("token_limit") or 0))),
+                        "token_used": int(float(str(row.get("token_used") or 0))),
+                        "is_active": str(row.get("is_active") or "true").strip().lower() in {"1", "true", "t", "yes", "y"},
+                    })
                 
                 await session.commit()
                 logger.info(

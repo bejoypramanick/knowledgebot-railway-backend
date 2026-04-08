@@ -187,6 +187,14 @@ class AuthService:
         with self._latest_defaults_file(prefix).open("r", encoding="utf-8-sig", newline="") as handle:
             return list(csv.DictReader(handle))
 
+    def _load_provisioning_defaults(self) -> Dict[str, List[Dict[str, str]]]:
+        return {
+            "widget_configuration": self._load_defaults_rows("widget_configuration"),
+            "persona_configurations": self._load_defaults_rows("persona_configurations"),
+            "security_settings": self._load_defaults_rows("security_settings"),
+            "llm_providers": self._load_defaults_rows("llm_providers"),
+        }
+
     @staticmethod
     def _parse_bool(value: Any, default: bool = False) -> bool:
         if isinstance(value, bool):
@@ -491,14 +499,15 @@ class AuthService:
         """Provision a tenant for a requested admin/human-agent pair from the superadmin UI."""
         try:
             await self._require_superadmin(requester_email)
+            defaults_payload = self._load_provisioning_defaults()
             result = await self.auth_dao.manual_provision_tenant(
                 requester_email=requester_email,
                 tenant_name=tenant_name,
                 tenant_slug=tenant_slug,
                 admin_email=admin_email,
                 human_agent_email=human_agent_email,
+                defaults_payload=defaults_payload,
             )
-            await self._seed_tenant_defaults(result["tenant_id"])
 
             for email in filter(None, {requester_email, admin_email, human_agent_email}):
                 await invalidate_user_auth_cache(email)
