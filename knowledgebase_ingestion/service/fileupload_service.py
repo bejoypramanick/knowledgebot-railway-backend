@@ -408,26 +408,12 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
         try:
             async with get_db_session() as session:
-                # Ensure CHECK constraint allows 'deleted' status (auto-migrate)
-                await session.execute(text(
-                    "ALTER TABLE file_uploads DROP CONSTRAINT IF EXISTS valid_processing_status"
-                ))
-                await session.execute(text(
-                    "ALTER TABLE file_uploads DROP CONSTRAINT IF EXISTS file_uploads_processing_status_check"
-                ))
-                await session.execute(text("""
-                    ALTER TABLE file_uploads ADD CONSTRAINT valid_processing_status CHECK (
-                        processing_status::text = ANY (ARRAY[
-                            'pending'::text, 'processing'::text, 'completed'::text,
-                            'failed'::text, 'cancelled'::text, 'deleted'::text
-                        ])
-                    )
-                """))
                 await session.execute(
                     text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP")
                 )
                 await session.commit()
                 logger.info(f"   ✅ All file records marked as deleted (status updated, records retained)")
+
         except Exception as e:
             logger.error(f"❌ [DB_UPDATE_FILES_ERROR] Error marking files as deleted: {e}")
             errors.append(f"File status update failed: {e}")
