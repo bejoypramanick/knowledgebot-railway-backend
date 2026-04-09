@@ -99,6 +99,7 @@ class ProfileService:
         user_data: Dict[str, Any],
         preferred_tenant_id: Optional[str] = None,
         preferred_tenant_slug: Optional[str] = None,
+        use_cache: bool = True,
     ) -> Dict[str, Any]:
         """
         Fetch user profile from configuration service with retry logic.
@@ -113,14 +114,15 @@ class ProfileService:
             httpx.HTTPError: If all retries fail
         """
         user_email = user_data.get("email", "")
-        cached_profile = await get_cached_user_profile(
-            user_email,
-            tenant_id=preferred_tenant_id,
-            tenant_slug=preferred_tenant_slug,
-        )
-        if cached_profile is not None:
-            logger.info(f"✅ Profile cache hit for {user_email}")
-            return _normalize_profile_payload(cached_profile)
+        if use_cache:
+            cached_profile = await get_cached_user_profile(
+                user_email,
+                tenant_id=preferred_tenant_id,
+                tenant_slug=preferred_tenant_slug,
+            )
+            if cached_profile is not None:
+                logger.info(f"✅ Profile cache hit for {user_email}")
+                return _normalize_profile_payload(cached_profile)
 
         headers = {
             'X-User-UID': user_data.get('uid', ''),

@@ -113,6 +113,7 @@ async def create_session_endpoint(
                 user_data,
                 preferred_tenant_id=preferred_tenant_id,
                 preferred_tenant_slug=preferred_tenant_slug,
+                use_cache=False,
             )
             user_data.update(profile)
             logger.info(
