@@ -505,10 +505,10 @@ def _inject_identity_headers(request: Request, headers: Dict[str, str]) -> None:
 
     # Forward auth context if available
     if hasattr(request.state, 'user'):
-        headers['X-User-UID'] = request.state.user.get('uid', '')
-        headers['X-User-Email'] = request.state.user.get('email', '')
-        headers['X-User-Name'] = request.state.user.get('name', '')
-        headers['X-User-Role'] = request.state.user.get('role', '')
+        headers['X-User-UID'] = request.state.user.get('uid') or ''
+        headers['X-User-Email'] = request.state.user.get('email') or ''
+        headers['X-User-Name'] = request.state.user.get('name') or ''
+        headers['X-User-Role'] = request.state.user.get('role') or ''
         request_user_email = request.state.user.get("email", "") or request_user_email
 
     if request_tenant_id:
@@ -684,11 +684,11 @@ async def proxy_agent_message(request: Request):
 
         # Forward to configuration service with authenticated user info
         forward_headers = {
-            "X-User-Email": user_email,
-            "X-User-Role": getattr(request.state, "user_role", ""),
-            "X-User-Role-ID": getattr(request.state, "user_role_id", ""),
-            "X-Tenant-ID": getattr(request.state, "tenant_id", ""),
-            "X-Tenant-Slug": getattr(request.state, "tenant_slug", ""),
+            "X-User-Email": user_email or "",
+            "X-User-Role": getattr(request.state, "user_role", "") or "",
+            "X-User-Role-ID": getattr(request.state, "user_role_id", "") or "",
+            "X-Tenant-ID": getattr(request.state, "tenant_id", "") or "",
+            "X-Tenant-Slug": getattr(request.state, "tenant_slug", "") or "",
             "Content-Type": "application/json",
         }
         _sign_internal_headers(
