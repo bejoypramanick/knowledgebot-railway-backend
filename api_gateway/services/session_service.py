@@ -70,7 +70,6 @@ class SessionService:
             "active_tenant_name": user_data.get("tenant_name"),
             "active_user_role_id": user_data.get("active_user_role_id"),
             "tenant_memberships": user_data.get("tenant_memberships", []),
-            "tenant_locked": bool(user_data.get("tenant_id")),  # Lock immediately if tenant is already assigned
             "created_at": int(time.time()),
             "expires_at": int(time.time()) + SESSION_MAX_AGE,
             # Security: Bind session to IP and User-Agent

@@ -348,10 +348,6 @@ async def switch_tenant(
     if not session_data:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
-    if session_data.get("tenant_locked"):
-        logger.warning(f"🚫 Blocking tenant switch attempt for locked session {session_id[:8]}")
-        raise HTTPException(status_code=403, detail="Tenant context is already locked for this session. Please log out to switch tenants.")
-
     memberships = session_data.get("tenant_memberships", [])
     selected_membership = None
 
@@ -375,7 +371,6 @@ async def switch_tenant(
             "active_tenant_slug": selected_membership.get("tenant_slug"),
             "active_tenant_name": selected_membership.get("tenant_name"),
             "active_user_role_id": selected_membership.get("active_user_role_id"),
-            "tenant_locked": True,  # Lock the tenant for the remainder of the session
         },
     )
     if not updated_session:
