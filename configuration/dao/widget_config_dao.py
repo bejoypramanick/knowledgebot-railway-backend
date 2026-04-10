@@ -5,6 +5,7 @@ Handles database operations for widget configuration
 from typing import Dict, List, Any, Optional, Tuple
 import json
 
+from fastapi import HTTPException
 from sqlalchemy import text
 from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
@@ -15,6 +16,15 @@ logger = get_otel_logger("widget_dao", "configuration")
 class WidgetConfigDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
+
+    @staticmethod
+    def _require_active_tenant_id() -> str:
+        from shared.tenant_context import get_current_tenant_id
+
+        tenant_id = get_current_tenant_id()
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="Active tenant context is required for widget configuration")
+        return tenant_id
 
     @staticmethod
     def _system_tenant_widget_defaults() -> Dict[str, Any]:
@@ -45,8 +55,8 @@ class WidgetConfigDAO:
 
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
         """Get main widget configuration with self-healing row creation."""
-        from shared.tenant_context import get_current_tenant_id, get_current_tenant_slug, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        from shared.tenant_context import get_current_tenant_slug
+        tenant_id = self._require_active_tenant_id()
         tenant_slug = get_current_tenant_slug()
 
         select_query = """
@@ -116,8 +126,7 @@ class WidgetConfigDAO:
 
     async def get_suggested_messages(self) -> List[str]:
         """Get suggested messages for the widget."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        tenant_id = self._require_active_tenant_id()
 
         query = """
             SELECT message_text
@@ -195,8 +204,7 @@ class WidgetConfigDAO:
             # Note: idx_widget_configuration_tenant_singleton is (tenant_id, is_singleton) WHERE is_singleton = true
             # PostgreSQL requires target columns to match index columns.
             # Explicitly specifying tenant_id in INSERT is better for clarity although default works.
-            from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-            tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+            tenant_id = self._require_active_tenant_id()
             params["tenant_id"] = tenant_id
             columns.append("tenant_id")
             placeholders.append(":tenant_id")
@@ -226,8 +234,7 @@ class WidgetConfigDAO:
             logger.info(f"📋 [DAO] update_suggested_messages called with {len(messages)} messages: {messages}")
             async with get_db_session() as session:
                 # Get the widget config ID for THIS tenant
-                from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-                tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+                tenant_id = self._require_active_tenant_id()
                 config_id_query = "SELECT id FROM widget_configuration WHERE is_singleton = true AND tenant_id = CAST(:tenant_id AS UUID)"
                 params = {"tenant_id": tenant_id}
                 logger.log_db_operation(config_id_query, params)
@@ -296,8 +303,7 @@ class WidgetConfigDAO:
 
             url_column, filename_column = column_mapping[image_type]
 
-            from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-            tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+            tenant_id = self._require_active_tenant_id()
 
             query = f"""
                 UPDATE widget_configuration
@@ -323,8 +329,7 @@ class WidgetConfigDAO:
 
     async def get_image_filenames(self) -> dict:
         """Get current image filenames from DB for S3 deletion."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        tenant_id = self._require_active_tenant_id()
 
         query = """
             SELECT profile_picture_filename, chat_icon_filename
@@ -369,8 +374,7 @@ class WidgetConfigDAO:
 
     async def add_suggested_message(self, message: str, index: int):
         """Add a suggested message."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        tenant_id = self._require_active_tenant_id()
 
         query = """
             INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
