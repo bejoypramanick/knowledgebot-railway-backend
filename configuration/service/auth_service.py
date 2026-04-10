@@ -58,10 +58,13 @@ def _normalize_role_context(
                 break
 
     if active_membership is None and tenant_memberships:
-        # Fall back to the first membership in the list.
-        # Because _group_memberships now sorts non-default tenants first by join
-        # date, this will be the earliest real tenant the admin was added to.
-        active_membership = tenant_memberships[0]
+        # Only auto-select if the user belongs to exactly ONE tenant.
+        # If they belong to multiple, we leave active_membership as None
+        # to force an intermediate selection step in the UI.
+        if len(tenant_memberships) == 1:
+            active_membership = tenant_memberships[0]
+        else:
+            logger.info(f"📋 User {email} has {len(tenant_memberships)} tenants. Skipping auto-selection to force UI picker.")
 
     active_roles = active_membership.get("roles", []) if active_membership else []
     if not active_roles:

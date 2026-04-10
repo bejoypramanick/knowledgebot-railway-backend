@@ -158,7 +158,7 @@ class WebCrawlDAO:
         query = """
             UPDATE scraped_websites
             SET processing_status = :status, error_message = :error_message, updated_at = NOW()
-            WHERE id = :website_id
+            WHERE id = :website_id AND processing_status != 'deleted'
         """
         params = {"website_id": website_id, "status": status, "error_message": error_message}
         try:
@@ -211,7 +211,7 @@ class WebCrawlDAO:
         query = """
             UPDATE scraped_websites
             SET celery_task_id = :task_id, updated_at = NOW()
-            WHERE id = :website_id
+            WHERE id = :website_id AND processing_status != 'deleted'
         """
         params = {"website_id": website_id, "task_id": task_id}
         try:

@@ -194,15 +194,17 @@ class ComprehensiveDeletionService:
                     logger.info(f"💾 [DB_TRANSACTION] Updating database...")
                     if hard_delete:
                         # Hard delete: remove from database
-                        await conn.execute(
-                            "DELETE FROM file_uploads WHERE id = $1",
+                        status_str = await conn.execute(
+                            "DELETE FROM file_uploads WHERE id = $1::uuid",
                             file_id
                         )
-                        deletion_report["cleanup_summary"]["db_records_affected"] = 1
-                        logger.info(f"   🗑️  Hard deleted from database")
+                        # status_str is e.g. "DELETE 1"
+                        affected = int(status_str.split()[-1])
+                        deletion_report["cleanup_summary"]["db_records_affected"] = affected
+                        logger.info(f"   🗑️  Hard deleted from database ({affected} rows affected)")
                     else:
                         # Soft delete: mark as deleted with audit trail
-                        await conn.execute(
+                        status_str = await conn.execute(
                             """UPDATE file_uploads
                             SET processing_status = 'deleted',
                                 storage_document_name = NULL,
@@ -212,11 +214,13 @@ class ComprehensiveDeletionService:
                                 processed_content_s3_key = NULL,
                                 updated_at = NOW(),
                                 error_message = 'Comprehensively deleted'
-                            WHERE id = $1""",
+                            WHERE id = $1::uuid""",
                             file_id
                         )
-                        deletion_report["cleanup_summary"]["db_records_affected"] = 1
-                        logger.info(f"   📌 Soft deleted in database (audit trail retained)")
+                        # status_str is e.g. "UPDATE 1" or "UPDATE 0"
+                        affected = int(status_str.split()[-1])
+                        deletion_report["cleanup_summary"]["db_records_affected"] = affected
+                        logger.info(f"   📌 Soft deleted in database ({affected} rows affected)")
 
                     # Transaction committed successfully
                     deletion_report["success"] = True
@@ -345,34 +349,46 @@ class ComprehensiveDeletionService:
                             "DELETE FROM scraped_websites WHERE id = $1",
                             website_id
                         )
+                        status1 = await conn.execute(
+                            "DELETE FROM scraped_websites WHERE id = $1::uuid",
+                            website_id
+                        )
+                        affected = int(status1.split()[-1])
+                        
                         if child_pages:
-                            await conn.execute(
-                                "DELETE FROM scraped_websites WHERE parent_id = $1",
+                            status2 = await conn.execute(
+                                "DELETE FROM scraped_websites WHERE parent_id = $1::uuid",
                                 website_id
                             )
-                        deletion_report["cleanup_summary"]["db_records_affected"] = len(all_pages)
-                        logger.info(f"   🗑️  Hard deleted {len(all_pages)} records")
+                            affected += int(status2.split()[-1])
+                        
+                        deletion_report["cleanup_summary"]["db_records_affected"] = affected
+                        logger.info(f"   🗑️  Hard deleted from database ({affected} rows affected)")
                     else:
                         # Soft delete: mark as deleted
-                        await conn.execute(
+                        status1 = await conn.execute(
                             """UPDATE scraped_websites
                             SET processing_status = 'deleted',
                                 updated_at = NOW(),
                                 error_message = 'Comprehensively deleted'
-                            WHERE id = $1""",
+                            WHERE id = $1::uuid""",
                             website_id
                         )
+                        affected = int(status1.split()[-1])
+                        
                         if child_pages:
-                            await conn.execute(
+                            status2 = await conn.execute(
                                 """UPDATE scraped_websites
                                 SET processing_status = 'deleted',
                                     updated_at = NOW(),
                                     error_message = 'Comprehensively deleted'
-                                WHERE parent_id = $1""",
+                                WHERE parent_id = $1::uuid""",
                                 website_id
                             )
-                        deletion_report["cleanup_summary"]["db_records_affected"] = len(all_pages)
-                        logger.info(f"   📌 Soft deleted {len(all_pages)} records")
+                            affected += int(status2.split()[-1])
+                            
+                        deletion_report["cleanup_summary"]["db_records_affected"] = affected
+                        logger.info(f"   📌 Soft deleted in database ({affected} rows affected)")
 
                     # Transaction committed successfully
                     deletion_report["success"] = True

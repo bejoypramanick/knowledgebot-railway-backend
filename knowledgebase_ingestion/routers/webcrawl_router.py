@@ -25,10 +25,20 @@ async def _invalidate_kb_cache():
     """Invalidate all KB file cache keys in Redis DB7."""
     try:
         from shared.redis_ui_cache import cache_invalidate_pattern, KB_FILES_KEY_PREFIX
-        # Invalidate for ALL tenants to be safe on deletions
-        pattern = f"{KB_FILES_KEY_PREFIX}*"
-        count = await cache_invalidate_pattern(pattern)
-        logger.info(f"🗑️ [CACHE_INVALIDATE] Cleared {count} keys matching {pattern}")
+        
+        # Aggressive multi-pattern invalidation to catch all tenant/global variants
+        patterns = [
+            f"{KB_FILES_KEY_PREFIX}*",       # Standard: ui_cache:kb_files:*
+            f"*{KB_FILES_KEY_PREFIX}*",      # Prefixed: *ui_cache:kb_files:*
+            "*kb_files*"                     # Broad: *kb_files*
+        ]
+        
+        total_deleted = 0
+        for pattern in patterns:
+            count = await cache_invalidate_pattern(pattern)
+            total_deleted += count
+            
+        logger.info(f"🗑️ [CACHE_INVALIDATE] Purged {total_deleted} KB cache keys")
     except Exception as e:
         logger.warning(f"⚠️ Failed to invalidate KB caches: {e}")
 

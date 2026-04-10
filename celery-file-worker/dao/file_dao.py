@@ -33,7 +33,7 @@ class FileDAO:
         query = """
             UPDATE file_uploads
             SET processing_status = :status, error_message = :error_message, updated_at = NOW()
-            WHERE id = :file_id
+            WHERE id = :file_id AND processing_status != 'deleted'
         """
         params = {"status": status, "error_message": error_message, "file_id": file_id}
         try:

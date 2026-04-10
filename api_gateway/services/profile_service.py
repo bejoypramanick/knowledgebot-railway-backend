@@ -40,7 +40,8 @@ def _normalize_profile_payload(profile_data: Dict[str, Any]) -> Dict[str, Any]:
                 active_membership = membership
                 break
     elif tenant_memberships:
-        active_membership = tenant_memberships[0]
+        if len(tenant_memberships) == 1:
+            active_membership = tenant_memberships[0]
 
     if active_membership:
         tenant_id = tenant_id or active_membership.get("tenant_id")
@@ -49,9 +50,11 @@ def _normalize_profile_payload(profile_data: Dict[str, Any]) -> Dict[str, Any]:
         active_user_role_id = active_user_role_id or active_membership.get("active_user_role_id")
 
     if not role and tenant_memberships:
-        role = (active_membership or tenant_memberships[0]).get("primary_role")
+        # Fall back to user role if no active membership is selected
+        role = active_membership.get("primary_role") if active_membership else "user"
     if not roles and tenant_memberships:
-        roles = (active_membership or tenant_memberships[0]).get("roles")
+        # Fall back to user roles if no active membership is selected
+        roles = active_membership.get("roles") if active_membership else ["user"]
 
     return {
         "role": role or "user",
