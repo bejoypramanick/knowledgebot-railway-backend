@@ -67,10 +67,10 @@ def _normalize_role_context(
             logger.info(f"📋 User {email} has {len(tenant_memberships)} tenants. Skipping auto-selection to force UI picker.")
 
     active_roles = active_membership.get("roles", []) if active_membership else []
-    if not active_roles:
+    if not active_roles and not tenant_memberships:
         active_roles = ["user"]
 
-    primary_role = active_membership.get("primary_role") if active_membership else "user"
+    primary_role = active_membership.get("primary_role") if active_membership else ("user" if not tenant_memberships else None)
     active_user_role_id = active_membership.get("active_user_role_id") if active_membership else None
 
     active_tenant = None

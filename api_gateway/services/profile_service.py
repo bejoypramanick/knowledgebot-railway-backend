@@ -49,16 +49,14 @@ def _normalize_profile_payload(profile_data: Dict[str, Any]) -> Dict[str, Any]:
         tenant_name = tenant_name or active_membership.get("tenant_name")
         active_user_role_id = active_user_role_id or active_membership.get("active_user_role_id")
 
-    if not role and tenant_memberships:
-        # Fall back to user role if no active membership is selected
-        role = active_membership.get("primary_role") if active_membership else "user"
-    if not roles and tenant_memberships:
-        # Fall back to user roles if no active membership is selected
-        roles = active_membership.get("roles") if active_membership else ["user"]
+    if role is None and tenant_memberships:
+        role = active_membership.get("primary_role") if active_membership else None
+    if roles is None and tenant_memberships:
+        roles = active_membership.get("roles") if active_membership else []
 
     return {
-        "role": role or "user",
-        "roles": roles or ["user"],
+        "role": role or ("user" if not tenant_memberships else None),
+        "roles": roles or (["user"] if not tenant_memberships else []),
         "active_user_role_id": active_user_role_id,
         "tenant_id": tenant_id,
         "tenant_slug": tenant_slug,

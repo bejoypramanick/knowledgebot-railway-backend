@@ -2228,11 +2228,12 @@ async def get_user_profile(request: Request, user: dict = Depends(get_current_us
         )
         logger.info(f"[RESULT] Role result retrieved: {role_result}")
 
-        user_roles = role_result.get("roles", ["user"])
+        user_roles = role_result.get("roles") or []
         logger.info(f"[RESULT] User roles: {user_roles}")
         active_tenant = role_result.get("active_tenant")
         tenant_memberships = role_result.get("tenant_memberships", [])
         active_user_role_id = role_result.get("active_user_role_id")
+        has_pending_tenant_selection = bool(tenant_memberships) and not active_tenant
         
         # If user has no roles, they might not be in user_role_mapping table
         # This is OK - they're a regular user
@@ -2241,10 +2242,12 @@ async def get_user_profile(request: Request, user: dict = Depends(get_current_us
         
         # Determine primary role (superadmin > admin > human_agent > user)
         logger.info("[TRANSFORM] Determining primary role")
-        primary_role = role_result.get("primary_role") or (
+        primary_role = role_result.get("primary_role") if has_pending_tenant_selection else (
+            role_result.get("primary_role") or (
             "superadmin"
             if "superadmin" in user_roles
             else ("admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user"))
+            )
         )
         logger.info(f"[RESULT] Primary role determined: {primary_role}")
         
@@ -2254,7 +2257,7 @@ async def get_user_profile(request: Request, user: dict = Depends(get_current_us
         # Enforcement: If user has no roles AND doesn't need onboarding, they are unauthorized
         needs_onboarding = role_result.get("needs_onboarding", False)
         
-        if not needs_onboarding and (not user_roles or user_roles == ["user"]):
+        if not needs_onboarding and not has_pending_tenant_selection and (not user_roles or user_roles == ["user"]):
             # Check if they are truly authorized or just a random visitor
             if not user_numeric_id:
                 logger.warning(f"🚫 Unauthorized access attempt by {user_email} - not in users table")
