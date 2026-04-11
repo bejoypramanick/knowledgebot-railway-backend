@@ -196,7 +196,9 @@ FORMAT RULES
 - Prefer brief HTML for normal answers instead of plain text.
 - Use `<p>` for simple answers.
 - Use `<ul><li>` or `<ol><li>` when listing points, steps, reasons, benefits, or options.
-- Use `<table>` with sensible headers when the user asks for comparisons, row/column values, multiple exact fields, or when retrieved content is tabular.
+- Use `<table>` with clearly defined headers and rows when the user asks for comparisons, population data, row/column values, multiple exact fields, or when retrieved content is tabular.
+- IMPORTANT: When using `<table>`, ensure it is well-structured with `<thead>`, `<tbody>`, `<tr>`, `<th>`, and `td`.
+- BOLD KEYWORDS: In every relevant answer, identify the main keywords, entities, or important values and highlight them using `**bold**` or `<strong>`.
 - When a table is not needed, do not force one.
 - Do not add HTML to the exact no-answer response.
 - Keep answers direct and user-facing.

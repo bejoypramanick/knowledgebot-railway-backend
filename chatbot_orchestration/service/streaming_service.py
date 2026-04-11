@@ -151,49 +151,77 @@ class StreamingService:
 
         lines = response_text.splitlines()
         parts: list[str] = []
-        paragraph: list[str] = []
-        bullets: list[str] = []
+        current_block: list[str] = []
+        block_type: str | None = None  # None, 'p', 'ul', 'table'
 
         def format_inline(text: str) -> str:
             text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
             text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
             return text
 
-        def flush_paragraph() -> None:
-            nonlocal paragraph
-            if paragraph:
-                parts.append(f"<p>{format_inline(' '.join(paragraph).strip())}</p>")
-                paragraph = []
+        def flush_block() -> None:
+            nonlocal current_block, block_type
+            if not current_block:
+                return
 
-        def flush_bullets() -> None:
-            nonlocal bullets
-            if bullets:
-                items = "".join(
-                    f"<li>{format_inline(item.strip())}</li>" for item in bullets if item.strip()
-                )
-                if items:
-                    parts.append(f"<ul>{items}</ul>")
-                bullets = []
+            if block_type == "ul":
+                items = "".join(f"<li>{format_inline(item)}</li>" for item in current_block if item)
+                parts.append(f"<ul>{items}</ul>")
+            elif block_type == "table":
+                # Basic markdown table parser
+                table_html = ['<table style="width:100%; border-collapse:collapse; border:1px solid #e2e8f0; margin:1rem 0;">']
+                for i, row_text in enumerate(current_block):
+                    if i == 1 and all(c in " |:-" for c in row_text):  # Skip separator row
+                        continue
+                    cells = [c.strip() for c in row_text.split("|") if c.strip() or (c == "" and row_text.count("|") > 1)]
+                    if not cells: continue
+                    
+                    row_style = ' style="background-color:#f8fafc; border-bottom:2px solid #e2e8f0;"' if i == 0 else ' style="border-bottom:1px solid #f1f5f9;"'
+                    table_html.append(f"<tr{row_style}>")
+                    for cell in cells:
+                        tag = "th" if i == 0 else "td"
+                        cell_style = ' style="padding:8px 12px; text-align:left; font-weight:700;"' if i == 0 else ' style="padding:8px 12px;"'
+                        table_html.append(f"<{tag}{cell_style}>{format_inline(cell)}</{tag}>")
+                    table_html.append("</tr>")
+                table_html.append("</table>")
+                parts.append("".join(table_html))
+            else:
+                parts.append(f"<p>{format_inline(' '.join(current_block))}</p>")
+
+            current_block = []
+            block_type = None
 
         for raw_line in lines:
             line = raw_line.strip()
             if not line:
-                flush_paragraph()
-                flush_bullets()
+                flush_block()
                 continue
 
+            # Detect Table
+            if "|" in line and (line.count("|") >= 2):
+                if block_type != "table":
+                    flush_block()
+                    block_type = "table"
+                current_block.append(line)
+                continue
+
+            # Detect Bullets
             bullet_match = re.match(r"^[*-]\s+(.+)$", line)
             if bullet_match:
-                flush_paragraph()
-                bullets.append(bullet_match.group(1))
+                if block_type != "ul":
+                    flush_block()
+                    block_type = "ul"
+                current_block.append(bullet_match.group(1))
                 continue
 
-            flush_bullets()
-            paragraph.append(line)
+            # Default to paragraph
+            if block_type != "p" and block_type is not None:
+                flush_block()
+            
+            block_type = "p"
+            current_block.append(line)
 
-        flush_paragraph()
-        flush_bullets()
-
+        flush_block()
         return "".join(parts) if parts else response_text
 
     def _enforce_grounded_citation_policy(
