@@ -142,6 +142,60 @@ class StreamingService:
 
         return re.sub(r"\[\s*(\d+(?:\s*,\s*\d+)+)\s*\]", repl, response_text)
 
+    def _format_markdownish_response_as_html(self, response_text: str) -> str:
+        """Convert markdown-like plain text into lightweight HTML for chat rendering."""
+        if not response_text:
+            return response_text
+        if re.search(r"<(?:p|ul|ol|li|table|tr|td|th|div|blockquote|h[1-6]|pre)\b", response_text, flags=re.IGNORECASE):
+            return response_text
+
+        lines = response_text.splitlines()
+        parts: list[str] = []
+        paragraph: list[str] = []
+        bullets: list[str] = []
+
+        def format_inline(text: str) -> str:
+            text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+            text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
+            return text
+
+        def flush_paragraph() -> None:
+            nonlocal paragraph
+            if paragraph:
+                parts.append(f"<p>{format_inline(' '.join(paragraph).strip())}</p>")
+                paragraph = []
+
+        def flush_bullets() -> None:
+            nonlocal bullets
+            if bullets:
+                items = "".join(
+                    f"<li>{format_inline(item.strip())}</li>" for item in bullets if item.strip()
+                )
+                if items:
+                    parts.append(f"<ul>{items}</ul>")
+                bullets = []
+
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                flush_paragraph()
+                flush_bullets()
+                continue
+
+            bullet_match = re.match(r"^[*-]\s+(.+)$", line)
+            if bullet_match:
+                flush_paragraph()
+                bullets.append(bullet_match.group(1))
+                continue
+
+            flush_bullets()
+            paragraph.append(line)
+
+        flush_paragraph()
+        flush_bullets()
+
+        return "".join(parts) if parts else response_text
+
     def _enforce_grounded_citation_policy(
         self,
         message_type: str | None,
@@ -1602,6 +1656,8 @@ class StreamingService:
                         full_response,
                         grounding_received_from_rag=grounding_received_from_rag,
                     )
+                    if full_response != NO_ANSWER_RESPONSE:
+                        full_response = self._format_markdownish_response_as_html(full_response)
                     if full_response != before_enforcement:
                         # Dev-friendly diagnostic: show why we blanked the answer.
                         # WARNING: This logs model output (may include user/KB content). Keep brief.

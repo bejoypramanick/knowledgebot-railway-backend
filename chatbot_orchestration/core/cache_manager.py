@@ -19,6 +19,7 @@ the 400 error from Gemini (can't send cached_content AND tools/system_instructio
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -36,6 +37,7 @@ DEFAULT_CACHE_TTL_SECONDS = 3600
 
 REDIS_CACHE_METADATA_KEY = "gemini:explicit_cache:metadata"
 REDIS_CACHE_SESSIONS_KEY = "gemini:explicit_cache:active_sessions"
+CACHE_PROMPT_VERSION = os.getenv("GEMINI_CACHE_PROMPT_VERSION", "2026-04-11-v2")
 
 
 def _count_tokens_with_sdk(client, model_name: str, content: str) -> Optional[int]:
@@ -89,6 +91,22 @@ class GeminiCacheManager:
             "last_error": None,
         }
 
+    def _build_prompt_fingerprint(
+        self,
+        system_prompt: str,
+        model_name: str,
+        serialized_tool_schema: str,
+    ) -> str:
+        payload = "\n".join(
+            [
+                CACHE_PROMPT_VERSION,
+                model_name or "",
+                system_prompt or "",
+                serialized_tool_schema or "",
+            ]
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
     def get_last_ensure_stats(self) -> dict:
         return dict(self._last_ensure_stats)
 
@@ -126,13 +144,21 @@ class GeminiCacheManager:
             await client.delete(REDIS_CACHE_METADATA_KEY)
             return None
 
-    async def _store_metadata(self, cache_name: str, model_name: str, has_tools: bool = False) -> None:
+    async def _store_metadata(
+        self,
+        cache_name: str,
+        model_name: str,
+        has_tools: bool = False,
+        prompt_fingerprint: Optional[str] = None,
+    ) -> None:
         client = await self._get_redis_client()
         payload = {
             "cache_name": cache_name,
             "model_name": model_name,
             "has_tools": has_tools,
             "created_at": time.time(),
+            "prompt_fingerprint": prompt_fingerprint,
+            "prompt_version": CACHE_PROMPT_VERSION,
         }
         await client.set(REDIS_CACHE_METADATA_KEY, json.dumps(payload))
         logger.info(
@@ -215,9 +241,20 @@ class GeminiCacheManager:
                 "last_error": None,
             }
             metadata = await self._load_metadata()
+            from ..tools.converters import convert_tools_to_gemini_format
+
+            gemini_tools = convert_tools_to_gemini_format(tool_functions)
+            serialized_tool_schema = _serialize_gemini_tools(gemini_tools)
+            prompt_fingerprint = self._build_prompt_fingerprint(
+                system_prompt,
+                model_name,
+                serialized_tool_schema,
+            )
+
             if metadata:
                 cached_name = metadata.get("cache_name")
-                if cached_name:
+                cached_fingerprint = metadata.get("prompt_fingerprint")
+                if cached_name and cached_fingerprint == prompt_fingerprint:
                     self._cache_name = cached_name
                     self._cache_created_at = float(metadata.get("created_at") or time.time())
                     self._has_tools = bool(metadata.get("has_tools", False))
@@ -231,21 +268,24 @@ class GeminiCacheManager:
                         f"created_at={metadata.get('created_at')}"
                     )
                     return cached_name
+                if cached_name and cached_fingerprint != prompt_fingerprint:
+                    logger.info(
+                        "🧹 [CACHE_PROMPT_MISMATCH] "
+                        f"cache_name={cached_name} "
+                        f"stored_version={metadata.get('prompt_version')} "
+                        f"current_version={CACHE_PROMPT_VERSION}"
+                    )
 
             # Need to create new cache
             try:
                 from ..core.ai import get_genai_client
-                from ..tools.converters import convert_tools_to_gemini_format
 
                 client = get_genai_client()
                 if not client:
                     logger.warning("GenAI client not available, skipping cache creation")
                     return None
 
-                # Convert tool functions to Gemini format
-                gemini_tools = convert_tools_to_gemini_format(tool_functions)
                 logger.info(f"Converted {len(tool_functions)} tool functions to {len(gemini_tools)} Gemini tools for caching")
-                serialized_tool_schema = _serialize_gemini_tools(gemini_tools)
                 tool_schema_chars = len(serialized_tool_schema)
                 tool_schema_tokens = _count_tokens_with_sdk(client, model_name, serialized_tool_schema)
                 system_prompt_tokens = _count_tokens_with_sdk(client, model_name, system_prompt)
@@ -322,7 +362,12 @@ class GeminiCacheManager:
                 # Store the system prompt and tools for reuse
                 self._cached_system_prompt = system_prompt
                 self._cached_tool_functions = tool_functions
-                await self._store_metadata(self._cache_name, model_name, has_tools=self._has_tools)
+                await self._store_metadata(
+                    self._cache_name,
+                    model_name,
+                    has_tools=self._has_tools,
+                    prompt_fingerprint=prompt_fingerprint,
+                )
 
                 logger.info(f"Created Gemini cache: {self._cache_name}")
                 if cached_content.usage_metadata:
