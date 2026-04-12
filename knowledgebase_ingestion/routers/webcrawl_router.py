@@ -6,6 +6,7 @@ import os
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
+from uuid import UUID
 
 from knowledgebase_ingestion.utils.auth import extract_user_from_request
 from knowledgebase_ingestion.utils.logging import get_otel_logger
@@ -19,6 +20,14 @@ from shared.celery_dispatcher import web_celery
 from shared.log_sanitizer import hash_pii
 
 logger = get_otel_logger("webcrawl_router", "knowledgebase-ingestion")
+
+
+def _validate_uuid_id(value: str, label: str) -> str:
+    """Normalize UUID path params before asyncpg sees them."""
+    try:
+        return str(UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail=f"Invalid {label}: expected UUID")
 
 
 async def _invalidate_kb_cache():
@@ -85,6 +94,8 @@ async def get_web_processing_status(request: Request = None):
 async def get_web_item_processing_status(item_id: str, request: Request = None):
     """Get processing status for a single website"""
     try:
+        item_id = _validate_uuid_id(item_id, "website id")
+
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
         
@@ -221,6 +232,8 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
         Complete deletion report with cleanup summary and child pages affected
     """
     try:
+        website_id = _validate_uuid_id(website_id, "website id")
+
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
