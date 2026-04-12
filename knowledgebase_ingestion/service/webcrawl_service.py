@@ -19,6 +19,35 @@ logger = get_otel_logger("webcrawl_service", "knowledgebase-ingestion")
 # Singleton DAO instance
 _webcrawl_dao = None
 
+CRAWLER_BROWSER_OPTION_KEYS = (
+    "crawler_user_agent",
+    "crawler_headers",
+    "crawler_cookies",
+    "crawler_enable_stealth",
+    "crawler_magic",
+    "crawler_simulate_user",
+    "crawler_override_navigator",
+    "crawler_wait_until",
+    "crawler_wait_for",
+    "crawler_wait_for_timeout",
+    "crawler_page_timeout",
+    "crawler_delay_before_return_html",
+    "crawler_locale",
+    "crawler_timezone_id",
+    "crawler_viewport_width",
+    "crawler_viewport_height",
+)
+
+
+def _redact_crawler_options(options: Dict[str, Any]) -> Dict[str, Any]:
+    """Return options safe for logs without exposing cookies or custom headers."""
+    redacted = dict(options or {})
+    if redacted.get("crawler_cookies"):
+        redacted["crawler_cookies"] = "[redacted]"
+    if redacted.get("crawler_headers"):
+        redacted["crawler_headers"] = "[redacted]"
+    return redacted
+
 def get_webcrawl_dao() -> WebCrawlDAO:
     """Get singleton WebCrawlDAO instance."""
     global _webcrawl_dao
@@ -99,6 +128,7 @@ async def queue_website_for_scraping(
     tenant_id: str = None,
     tenant_slug: str = None,
     user_email: str = None,
+    crawler_options: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Queue website for scraping via Celery.
@@ -177,7 +207,9 @@ async def queue_website_for_scraping(
             'tenant_slug': tenant_slug,
             'user_email': user_email,
         }
-        logger.info(f"✅ [OPTIONS] Built options dict: {options}")
+        if crawler_options:
+            options.update(crawler_options)
+        logger.info(f"✅ [OPTIONS] Built options dict: {_redact_crawler_options(options)}")
 
         # Create DB record first with a placeholder task_id so we get the website_id
         placeholder_task_id = str(uuid.uuid4())
@@ -441,6 +473,11 @@ async def validate_scraping_request(request_data: Dict[str, Any]) -> Dict[str, A
         max_concurrent = request_data.get('max_concurrent', 10)
         delay_between_requests = request_data.get('delay_between_requests', 0.0)
         replace_existing = request_data.get('replace_existing', False)
+        crawler_options = {
+            key: request_data[key]
+            for key in CRAWLER_BROWSER_OPTION_KEYS
+            if key in request_data and request_data[key] is not None
+        }
         
         # Validate parameter ranges
         # max_depth=0 is allowed (scans only main page, no child links)
@@ -475,7 +512,8 @@ async def validate_scraping_request(request_data: Dict[str, Any]) -> Dict[str, A
             "max_pages": max_pages,
             "max_concurrent": max_concurrent,
             "delay_between_requests": delay_between_requests,
-            "replace_existing": replace_existing
+            "replace_existing": replace_existing,
+            "crawler_options": crawler_options,
         }
     except Exception as e:
         logger.error(f"❌ Error validating scraping request: {e}")

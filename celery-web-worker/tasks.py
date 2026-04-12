@@ -13,6 +13,15 @@ from shared.tenant_context import tenant_context
 logger = get_otel_logger("celery_tasks", "celery-web-worker")
 
 
+def _redact_crawler_options(options: Dict[str, Any]) -> Dict[str, Any]:
+    redacted = dict(options or {})
+    if redacted.get("crawler_cookies"):
+        redacted["crawler_cookies"] = "[redacted]"
+    if redacted.get("crawler_headers"):
+        redacted["crawler_headers"] = "[redacted]"
+    return redacted
+
+
 @celery_app.task(bind=True, max_retries=2)
 def scrape_website_task(
     self,
@@ -39,8 +48,8 @@ def scrape_website_task(
     logger.info(f"🔄 [RETRY_INFO] Retry Count: {retry_count}, Max Retries: {self.max_retries}")
     logger.info(f"🌐 [WEBSITE_PARAMS] Website ID: {website_id}")
     logger.info(f"🌐 [WEBSITE_PARAMS] URL: {url}")
-    logger.info(f"🌐 [WEBSITE_PARAMS] Options: {options}")
-    logger.info(f"📊 [REQUEST_INFO] Full request: {self.request}")
+    logger.info(f"🌐 [WEBSITE_PARAMS] Options: {_redact_crawler_options(options)}")
+    logger.info(f"📊 [REQUEST_INFO] Host={self.request.hostname}, retries={retry_count}, delivery={self.request.delivery_info}")
 
     try:
         logger.info("=" * 80)
@@ -73,7 +82,7 @@ def scrape_website_task(
         logger.info(f"   Parameters:")
         logger.info(f"     - website_id: {website_id}")
         logger.info(f"     - url: {url}")
-        logger.info(f"     - options: {options}")
+        logger.info(f"     - options: {_redact_crawler_options(options)}")
         logger.info(f"     - celery_task_id: {task_id}")
 
         # Get or create event loop for this worker process

@@ -111,13 +111,28 @@ logger.info("=" * 80)
 # Add methods to log when tasks are sent
 original_send_task = web_celery.send_task
 
+def _redact_crawler_payload(value):
+    """Avoid logging custom crawl cookies or headers in Celery payloads."""
+    if isinstance(value, dict):
+        redacted = {k: _redact_crawler_payload(v) for k, v in value.items()}
+        if redacted.get("crawler_cookies"):
+            redacted["crawler_cookies"] = "[redacted]"
+        if redacted.get("crawler_headers"):
+            redacted["crawler_headers"] = "[redacted]"
+        return redacted
+    if isinstance(value, list):
+        return [_redact_crawler_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_crawler_payload(item) for item in value)
+    return value
+
 def logged_send_task(*args, **kwargs):
     """Wrapper to log all send_task calls"""
     logger.info("=" * 80)
     logger.info("📤 [WEB_CELERY_SEND_TASK] web_celery.send_task() called")
     logger.info("=" * 80)
-    logger.info(f"   Args: {args}")
-    logger.info(f"   Kwargs: {kwargs}")
+    logger.info(f"   Args: {_redact_crawler_payload(args)}")
+    logger.info(f"   Kwargs: {_redact_crawler_payload(kwargs)}")
     try:
         result = original_send_task(*args, **kwargs)
         logger.info(f"✅ [WEB_CELERY_SEND_RESULT] Task sent successfully")

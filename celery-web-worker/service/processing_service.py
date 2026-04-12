@@ -5,6 +5,7 @@ Handles website scraping, extraction, and pgvector ingestion.
 import asyncio
 import time
 import os
+import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
 import logging
@@ -33,6 +34,36 @@ logging.getLogger('crawl4ai').setLevel(logging.WARNING)
 
 CRAWL4AI_FETCH_RETRIES = int(os.environ.get("CRAWL4AI_FETCH_RETRIES", "2"))
 CRAWL4AI_FETCH_RETRY_DELAY_SECONDS = float(os.environ.get("CRAWL4AI_FETCH_RETRY_DELAY_SECONDS", "2"))
+CRAWL4AI_DEFAULT_USER_AGENT = os.environ.get(
+    "CRAWL4AI_USER_AGENT",
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    ),
+)
+CRAWL4AI_DEFAULT_WAIT_UNTIL = os.environ.get("CRAWL4AI_WAIT_UNTIL", "networkidle")
+CRAWL4AI_DEFAULT_PAGE_TIMEOUT_MS = int(os.environ.get("CRAWL4AI_PAGE_TIMEOUT_MS", "90000"))
+CRAWL4AI_DEFAULT_DELAY_BEFORE_HTML = float(os.environ.get("CRAWL4AI_DELAY_BEFORE_HTML", "1.5"))
+CRAWL4AI_DEFAULT_LOCALE = os.environ.get("CRAWL4AI_LOCALE", "en-US")
+CRAWL4AI_DEFAULT_TIMEZONE_ID = os.environ.get("CRAWL4AI_TIMEZONE_ID", "America/New_York")
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _json_env(name: str, default: Any) -> Any:
+    raw_value = os.environ.get(name)
+    if not raw_value:
+        return default
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        logger.warning(f"⚠️ Invalid JSON in {name}; ignoring value: {exc}")
+        return default
 
 
 class ProcessingService:
@@ -126,7 +157,8 @@ class ProcessingService:
 
             pages_uploaded = await self._crawlWebsitePages(
                 crawl_config=request.crawl_config,
-                job_context=job_context
+                job_context=job_context,
+                options=request.options or {},
             )
 
             # ========== PHASE 2.5: CHECK PARENT COMPLETION ==========
@@ -188,7 +220,8 @@ class ProcessingService:
     async def _crawlWebsitePages(
             self,
             crawl_config: CrawlConfig,
-            job_context: JobContext
+            job_context: JobContext,
+            options: Optional[Dict[str, Any]] = None,
         ) -> int:
             """Stream each page: crawl → process → upload → record. Return page count only."""
             pages_uploaded = 0
@@ -197,7 +230,7 @@ class ProcessingService:
 
             logger.info(f"📄 [PIPELINE] Starting page-by-page streaming...")
 
-            async for page_data in self._crawlPagesWithBFS(crawl_config, job_context):
+            async for page_data in self._crawlPagesWithBFS(crawl_config, job_context, options or {}):
                 metrics = await self._processPageInPipeline(page_data, job_context, crawl_config)
                 if metrics:
                     pages_uploaded += 1
@@ -444,7 +477,8 @@ class ProcessingService:
     async def _crawlPagesWithBFS(
         self,
         crawl_config: CrawlConfig,
-        job_context: JobContext
+        job_context: JobContext,
+        options: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[PageData, None]:
         """Async generator yielding PageData one at a time"""
         try:
@@ -492,7 +526,12 @@ class ProcessingService:
 
             visited_urls.add(self._normalize_url(current_url))
 
-            result = await self._fetchPageHTML(current_url, semaphore, crawl_config.delay_between_requests)
+            result = await self._fetchPageHTML(
+                current_url,
+                semaphore,
+                crawl_config.delay_between_requests,
+                options=options or {},
+            )
             if result:
                 page_url, page_html, title, description, session_id = result
                 pages_yielded += 1
@@ -530,7 +569,8 @@ class ProcessingService:
         self,
         page_url: str,
         semaphore: asyncio.Semaphore,
-        delay: float
+        delay: float,
+        options: Optional[Dict[str, Any]] = None,
     ) -> Optional[Tuple[str, str, Optional[str], Optional[str], Optional[str]]]:
         """
         Fetch single page via crawl4ai with HTML cleaning.
@@ -539,7 +579,8 @@ class ProcessingService:
         Returns: (url, cleaned_html, title, description, session_id)
         """
         async with semaphore:
-            from crawl4ai import AsyncWebCrawler, BrowserConfig
+            from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+            options = options or {}
 
             # JavaScript to unhide all hidden elements
             js_code = """
@@ -551,23 +592,61 @@ class ProcessingService:
             });
             """
 
-            browser_config = BrowserConfig(headless=True)
+            headers = dict(_json_env("CRAWL4AI_HEADERS_JSON", {}) or {})
+            headers.update(options.get("crawler_headers") or {})
+
+            cookies = options.get("crawler_cookies")
+            if cookies is None:
+                cookies = _json_env("CRAWL4AI_COOKIES_JSON", None)
+
+            browser_config = BrowserConfig(
+                headless=True,
+                user_agent=options.get("crawler_user_agent") or CRAWL4AI_DEFAULT_USER_AGENT,
+                headers=headers or None,
+                cookies=cookies,
+                enable_stealth=bool(options.get(
+                    "crawler_enable_stealth",
+                    _env_bool("CRAWL4AI_ENABLE_STEALTH", True),
+                )),
+                viewport_width=int(options.get("crawler_viewport_width") or 1366),
+                viewport_height=int(options.get("crawler_viewport_height") or 900),
+            )
+            run_config = CrawlerRunConfig(
+                js_code=js_code,
+                wait_until=options.get("crawler_wait_until") or CRAWL4AI_DEFAULT_WAIT_UNTIL,
+                wait_for=options.get("crawler_wait_for"),
+                wait_for_timeout=options.get("crawler_wait_for_timeout"),
+                page_timeout=int(options.get("crawler_page_timeout") or CRAWL4AI_DEFAULT_PAGE_TIMEOUT_MS),
+                delay_before_return_html=float(
+                    options.get("crawler_delay_before_return_html")
+                    or CRAWL4AI_DEFAULT_DELAY_BEFORE_HTML
+                ),
+                remove_overlay_elements=False,
+                remove_forms=False,
+                magic=bool(options.get("crawler_magic", _env_bool("CRAWL4AI_MAGIC", True))),
+                simulate_user=bool(options.get(
+                    "crawler_simulate_user",
+                    _env_bool("CRAWL4AI_SIMULATE_USER", True),
+                )),
+                override_navigator=bool(options.get(
+                    "crawler_override_navigator",
+                    _env_bool("CRAWL4AI_OVERRIDE_NAVIGATOR", True),
+                )),
+                locale=options.get("crawler_locale") or CRAWL4AI_DEFAULT_LOCALE,
+                timezone_id=options.get("crawler_timezone_id") or CRAWL4AI_DEFAULT_TIMEZONE_ID,
+                user_agent=options.get("crawler_user_agent") or CRAWL4AI_DEFAULT_USER_AGENT,
+            )
             attempts = max(1, CRAWL4AI_FETCH_RETRIES + 1)
 
             for attempt in range(1, attempts + 1):
                 try:
-                    async with AsyncWebCrawler() as crawler:
+                    async with AsyncWebCrawler(config=browser_config) as crawler:
                         # Get page as-is without any removal
                         # Extract text content from full page using Kreuzberg
                         logger.info(f"🔍 [CRAWL4AI] Fetching {page_url} (attempt {attempt}/{attempts})...")
                         result = await crawler.arun(
                             url=page_url,
-                            timeout=30,
-                            js_code=js_code,
-                            browser_config=browser_config,
-                            remove_overlay_elements=False,  # Keep overlays
-                            remove_unwanted_elements=False,  # Keep all elements
-                            remove_forms=False               # Keep forms
+                            config=run_config,
                         )
 
                         if result.success and result.html:

@@ -311,6 +311,7 @@ async def scrape_website_async_endpoint(request: Request = None):
             tenant_id=tenant_id,
             tenant_slug=tenant_slug,
             user_email=user_email,
+            crawler_options=validation_result.get('crawler_options') or {},
         )
         
         if result.get('success'):
