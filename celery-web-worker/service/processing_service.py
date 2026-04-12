@@ -31,6 +31,9 @@ logger = get_otel_logger("processing_service", "celery-web-worker")
 # Reduce crawl4ai logging verbosity (it logs database migrations at INFO level)
 logging.getLogger('crawl4ai').setLevel(logging.WARNING)
 
+CRAWL4AI_FETCH_RETRIES = int(os.environ.get("CRAWL4AI_FETCH_RETRIES", "2"))
+CRAWL4AI_FETCH_RETRY_DELAY_SECONDS = float(os.environ.get("CRAWL4AI_FETCH_RETRY_DELAY_SECONDS", "2"))
+
 
 class ProcessingService:
     """Handle website scraping and content processing with value objects"""
@@ -190,6 +193,7 @@ class ProcessingService:
             """Stream each page: crawl → process → upload → record. Return page count only."""
             pages_uploaded = 0
             start_time = time.time()
+            self._last_fetch_error = None
 
             logger.info(f"📄 [PIPELINE] Starting page-by-page streaming...")
 
@@ -199,6 +203,9 @@ class ProcessingService:
                     pages_uploaded += 1
 
             if pages_uploaded == 0:
+                last_error = getattr(self, "_last_fetch_error", None)
+                if last_error:
+                    raise Exception(f"No pages successfully processed. Last fetch error: {last_error}")
                 raise Exception("No pages successfully processed")
 
             total_time = time.time() - start_time
@@ -532,54 +539,70 @@ class ProcessingService:
         Returns: (url, cleaned_html, title, description, session_id)
         """
         async with semaphore:
-            try:
-                from crawl4ai import AsyncWebCrawler, BrowserConfig
+            from crawl4ai import AsyncWebCrawler, BrowserConfig
 
-                # JavaScript to unhide all hidden elements
-                js_code = """
-                document.querySelectorAll('table, p, div, span, [style*="display: none"], [style*="visibility: hidden"], .hidden, [hidden]').forEach(el => {
-                    el.style.display = el.tagName === 'TABLE' ? 'table' : 'block';
-                    el.style.visibility = 'visible !important';
-                    el.style.opacity = '1';
-                    el.hidden = false;
-                });
-                """
+            # JavaScript to unhide all hidden elements
+            js_code = """
+            document.querySelectorAll('table, p, div, span, [style*="display: none"], [style*="visibility: hidden"], .hidden, [hidden]').forEach(el => {
+                el.style.display = el.tagName === 'TABLE' ? 'table' : 'block';
+                el.style.visibility = 'visible !important';
+                el.style.opacity = '1';
+                el.hidden = false;
+            });
+            """
 
-                browser_config = BrowserConfig(headless=True)
+            browser_config = BrowserConfig(headless=True)
+            attempts = max(1, CRAWL4AI_FETCH_RETRIES + 1)
 
-                async with AsyncWebCrawler() as crawler:
-                    # Get page as-is without any removal
-                    # Extract text content from full page using Kreuzberg
-                    logger.info(f"🔍 [CRAWL4AI] Fetching {page_url}...")
-                    result = await crawler.arun(
-                        url=page_url,
-                        timeout=30,
-                        js_code=js_code,
-                        browser_config=browser_config,
-                        remove_overlay_elements=False,  # Keep overlays
-                        remove_unwanted_elements=False,  # Keep all elements
-                        remove_forms=False               # Keep forms
-                    )
+            for attempt in range(1, attempts + 1):
+                try:
+                    async with AsyncWebCrawler() as crawler:
+                        # Get page as-is without any removal
+                        # Extract text content from full page using Kreuzberg
+                        logger.info(f"🔍 [CRAWL4AI] Fetching {page_url} (attempt {attempt}/{attempts})...")
+                        result = await crawler.arun(
+                            url=page_url,
+                            timeout=30,
+                            js_code=js_code,
+                            browser_config=browser_config,
+                            remove_overlay_elements=False,  # Keep overlays
+                            remove_unwanted_elements=False,  # Keep all elements
+                            remove_forms=False               # Keep forms
+                        )
 
-                    if result.success and result.html:
-                        if delay > 0:
-                            await asyncio.sleep(delay)
-                        logger.info(f"✅ [CRAWL4AI] Fetched HTML: {len(result.html)} bytes from {page_url}")
+                        if result.success and result.html:
+                            if delay > 0:
+                                await asyncio.sleep(delay)
+                            logger.info(f"✅ [CRAWL4AI] Fetched HTML: {len(result.html)} bytes from {page_url}")
 
-                        # Extract title and description from metadata
-                        title = None
-                        description = None
-                        if result.metadata:
-                            title = result.metadata.get('title')
-                            description = result.metadata.get('description')
+                            # Extract title and description from metadata
+                            title = None
+                            description = None
+                            if result.metadata:
+                                title = result.metadata.get('title')
+                                description = result.metadata.get('description')
 
-                        return (page_url, result.html, title, description, result.session_id)
+                            return (page_url, result.html, title, description, result.session_id)
 
-                    logger.warning(f"⚠️ Failed to fetch {page_url}")
-                    return None
-            except Exception as e:
-                logger.error(f"❌ Error fetching {page_url}: {e}")
-                return None
+                        error_message = (
+                            getattr(result, "error_message", None)
+                            or getattr(result, "error", None)
+                            or getattr(result, "status_code", None)
+                            or "crawl4ai returned no HTML"
+                        )
+                        self._last_fetch_error = f"{page_url}: {error_message}"
+                        logger.warning(
+                            f"⚠️ [CRAWL4AI] Failed to fetch {page_url} "
+                            f"(attempt {attempt}/{attempts}): {error_message}"
+                        )
+                except Exception as e:
+                    self._last_fetch_error = f"{page_url}: {e}"
+                    logger.error(f"❌ [CRAWL4AI] Error fetching {page_url} (attempt {attempt}/{attempts}): {e}")
+
+                if attempt < attempts:
+                    await asyncio.sleep(CRAWL4AI_FETCH_RETRY_DELAY_SECONDS * attempt)
+
+            return None
 
     async def _extractLinksFromHTML(
         self, html: str, page_url: str, base_domain: str, visited_urls: set

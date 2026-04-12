@@ -104,6 +104,72 @@ class RedisMessageQueue:
         """Check if web Redis connection is available"""
         return self._web_connection is not None
 
+    def _get_connection(self, worker_type: str):
+        """Return the Redis connection for the requested worker type."""
+        return self._web_connection if worker_type == "web" else self._file_connection
+
+    def _set_connection(self, worker_type: str, connection) -> None:
+        """Store a Redis connection for the requested worker type."""
+        if worker_type == "web":
+            self._web_connection = connection
+        else:
+            self._file_connection = connection
+
+    def _redis_url_for_worker(self, worker_type: str) -> Optional[str]:
+        """Return the Redis URL for the requested worker type."""
+        return self.web_redis_url if worker_type == "web" else self.file_redis_url
+
+    def _reset_connection(self, worker_type: str):
+        """Reconnect after Railway/Redis closes an idle or stale socket."""
+        redis_url = self._redis_url_for_worker(worker_type)
+        if not redis_url:
+            self._set_connection(worker_type, None)
+            return None
+
+        current = self._get_connection(worker_type)
+        if current is not None:
+            try:
+                current.close()
+            except Exception:
+                pass
+
+        try:
+            connection = redis.from_url(redis_url)
+            connection.ping()
+            self._set_connection(worker_type, connection)
+            logger.info(f"✅ Reconnected {worker_type} Redis: {_redact_redis_url(redis_url)}")
+            return connection
+        except Exception as e:
+            logger.error(f"❌ Failed to reconnect {worker_type} Redis: {e}")
+            self._set_connection(worker_type, None)
+            return None
+
+    def _with_redis_retry(self, worker_type: str, operation_name: str, operation):
+        """Run a Redis operation, reconnecting once if the socket is stale."""
+        connection = self._get_connection(worker_type)
+        if connection is None:
+            connection = self._reset_connection(worker_type)
+            if connection is None:
+                return None
+
+        try:
+            return operation(connection)
+        except (redis.ConnectionError, redis.TimeoutError, TimeoutError, OSError) as e:
+            logger.warning(
+                f"⚠️ Redis {operation_name} failed for {worker_type}; reconnecting and retrying once: {e}"
+            )
+            connection = self._reset_connection(worker_type)
+            if connection is None:
+                return None
+            try:
+                return operation(connection)
+            except Exception as retry_error:
+                logger.error(f"❌ Redis {operation_name} retry failed for {worker_type}: {retry_error}")
+                return None
+        except Exception as e:
+            logger.error(f"❌ Redis {operation_name} failed for {worker_type}: {e}")
+            return None
+
     # ========== FILE PROCESSING MESSAGES ==========
 
     def publish_file_task(
@@ -214,90 +280,83 @@ class RedisMessageQueue:
     def publish_extract_task(self, message: Dict[str, Any]) -> bool:
         """Publish an extraction job for the dedicated Kreuzberg worker."""
         worker_type = message.get("worker_type", "file")
-        connection = self._web_connection if worker_type == "web" else self._file_connection
-        if connection is None:
-            logger.error(f"❌ {worker_type} Redis not available, cannot publish extraction task")
-            return False
+        message_json = json.dumps(message)
 
-        try:
-            message_json = json.dumps(message)
+        def _publish(connection):
             connection.rpush(self.EXTRACT_TASK_QUEUE, message_json)
+            return True
+
+        published = self._with_redis_retry(worker_type, "publish extraction task", _publish)
+        if published:
             logger.info(
                 f"📤 [EXTRACT] Published {worker_type} task:"
                 f" job_id={message.get('job_id')}"
                 f" document_id={message.get('document_id')}"
             )
             return True
-        except Exception as e:
-            logger.error(f"❌ Failed to publish extraction task: {e}")
-            return False
+
+        logger.error(f"❌ {worker_type} Redis not available, cannot publish extraction task")
+        return False
 
     def get_extract_task(self, timeout: int = 1, worker_type: str = "file") -> Optional[Dict[str, Any]]:
         """Get an extraction task from the dedicated Kreuzberg worker queue."""
-        connection = self._web_connection if worker_type == "web" else self._file_connection
-        if connection is None:
-            return None
-
-        try:
+        def _pop(connection):
             result = connection.blpop(self.EXTRACT_TASK_QUEUE, timeout=timeout)
             if result:
                 _, message_json = result
-                message = json.loads(message_json)
-                logger.info(
-                    f"📥 [EXTRACT] Received {worker_type} task:"
-                    f" job_id={message.get('job_id')}"
-                    f" document_id={message.get('document_id')}"
-                )
-                return message
+                return json.loads(message_json)
             return None
-        except Exception as e:
-            logger.error(f"❌ Error getting extraction task: {e}")
-            return None
+
+        message = self._with_redis_retry(worker_type, "get extraction task", _pop)
+        if message:
+            logger.info(
+                f"📥 [EXTRACT] Received {worker_type} task:"
+                f" job_id={message.get('job_id')}"
+                f" document_id={message.get('document_id')}"
+            )
+        return message
 
     def publish_extract_result(self, message: Dict[str, Any]) -> bool:
         """Publish the extraction result for downstream workers."""
         worker_type = message.get("worker_type", "file")
-        connection = self._web_connection if worker_type == "web" else self._file_connection
-        if connection is None:
-            logger.error(f"❌ {worker_type} Redis not available, cannot publish extraction result")
-            return False
+        queue_name = message.get("reply_channel") or self.EXTRACT_RESULT_QUEUE
+        message_json = json.dumps(message)
 
-        try:
-            queue_name = message.get("reply_channel") or self.EXTRACT_RESULT_QUEUE
-            message_json = json.dumps(message)
+        def _publish(connection):
             connection.rpush(queue_name, message_json)
+            return True
+
+        published = self._with_redis_retry(worker_type, "publish extraction result", _publish)
+        if published:
             logger.info(
                 f"📤 [EXTRACT_RESULT] Published {worker_type} result:"
                 f" job_id={message.get('job_id')}"
                 f" status={message.get('status')}"
             )
             return True
-        except Exception as e:
-            logger.error(f"❌ Failed to publish extraction result: {e}")
-            return False
+
+        logger.error(f"❌ {worker_type} Redis not available, cannot publish extraction result")
+        return False
 
     def get_extract_result(self, timeout: int = 0, queue_name: Optional[str] = None, worker_type: str = "file") -> Optional[Dict[str, Any]]:
         """Get an extraction result message."""
-        connection = self._web_connection if worker_type == "web" else self._file_connection
-        if connection is None:
-            return None
+        result_queue = queue_name or self.EXTRACT_RESULT_QUEUE
 
-        try:
-            result_queue = queue_name or self.EXTRACT_RESULT_QUEUE
+        def _pop(connection):
             result = connection.blpop(result_queue, timeout=timeout)
             if result:
                 _, message_json = result
-                message = json.loads(message_json)
-                logger.info(
-                    f"📥 [EXTRACT_RESULT] Received {worker_type} result:"
-                    f" job_id={message.get('job_id')}"
-                    f" status={message.get('status')}"
-                )
-                return message
+                return json.loads(message_json)
             return None
-        except Exception as e:
-            logger.error(f"❌ Error getting extraction result: {e}")
-            return None
+
+        message = self._with_redis_retry(worker_type, "get extraction result", _pop)
+        if message:
+            logger.info(
+                f"📥 [EXTRACT_RESULT] Received {worker_type} result:"
+                f" job_id={message.get('job_id')}"
+                f" status={message.get('status')}"
+            )
+        return message
 
     # ========== WEBSITE PROCESSING MESSAGES ==========
 
