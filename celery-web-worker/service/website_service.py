@@ -101,12 +101,13 @@ class WebsiteService:
 
             if result.get("success"):
                 logger.info(f"✅ [CELERY] Website ID {website_id} processed successfully")
-                
-                # Don't mark parent as completed immediately
-                # The parent will be marked as "completed" by check_and_update_parent_completion()
-                # when all children finish processing
-                logger.info(f"📋 [PARENT] Keeping parent {website_id} in 'processing' state until all children complete")
-                # Status will be updated by check_and_update_parent_completion() in processing_service
+
+                if options.get("max_depth", 2) == 0:
+                    logger.info(f"📋 [PARENT] Single-page scrape completed for {website_id}")
+                else:
+                    # Multi-page parents are marked complete by check_and_update_parent_completion()
+                    # after all child pages finish processing.
+                    logger.info(f"📋 [PARENT] Waiting for child pages before completing parent {website_id}")
             else:
                 error_msg = result.get("error", "Unknown processing error")
                 logger.error(f"❌ [CELERY] Website ID {website_id} processing failed: {error_msg}")

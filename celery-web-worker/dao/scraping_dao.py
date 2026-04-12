@@ -7,8 +7,19 @@ import json
 from sqlalchemy import text
 from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
+from shared.redis_ui_cache import invalidate_kb_caches
 
 logger = get_otel_logger("scraping_dao", "celery-web-worker")
+
+
+async def _invalidate_kb_file_list_cache() -> None:
+    """Best-effort invalidation so UI polling sees worker-side status updates."""
+    try:
+        deleted = await invalidate_kb_caches()
+        logger.debug(f"🗑️ [KB_CACHE_INVALIDATE] Purged {deleted} KB file-list cache keys")
+    except Exception as cache_err:
+        logger.warning(f"⚠️ [KB_CACHE_INVALIDATE] Failed to purge KB file-list cache: {cache_err}")
+
 
 class ScrapingDAO:
     def __init__(self):
@@ -56,6 +67,7 @@ class ScrapingDAO:
                     )
                 else:
                     logger.debug(f"✅ [WEB_UPDATE_SUCCESS] Website {website_id} status updated to {status}")
+                    await _invalidate_kb_file_list_cache()
                 return result
 
         except Exception as e:
@@ -533,6 +545,7 @@ class ScrapingDAO:
                 if result:
                     logger.info(f"   Previous metadata: {result.previous_metadata}")
                     logger.info(f"   Status transition: {result.old_status} -> {result.new_status}")
+                    await _invalidate_kb_file_list_cache()
 
                 if mark_completed:
                     logger.info(f"✅ [UPDATE_WEBSITE_PAGE_SUCCESS] Website record updated and marked as completed")
@@ -613,6 +626,7 @@ class ScrapingDAO:
                     return False
 
                 await session.commit()
+                await _invalidate_kb_file_list_cache()
 
                 if completed == total:
                     logger.info(f"✅ [PARENT_COMPLETE] All {total} children completed for parent {parent_id}")
