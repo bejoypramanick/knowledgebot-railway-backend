@@ -30,10 +30,12 @@ class ScrapingDAO:
 
     async def update_website_status(self, website_id: str, status: str, error_message: str = None):
         """Update website processing status."""
-        logger.info(f"💾 [WEB_UPDATE_START] Updating website status")
-        logger.info(f"   Website ID: {website_id}")
-        logger.info(f"   New Status: {status}")
-        logger.info(f"   Error Message: {error_message}")
+        if error_message:
+            logger.info(
+                f"💾 [WEB_UPDATE_START] Updating website {website_id} status to {status}: {error_message}"
+            )
+        else:
+            logger.debug(f"💾 [WEB_UPDATE_START] Updating website {website_id} status to {status}")
 
         query = """
             UPDATE scraped_websites
@@ -42,22 +44,18 @@ class ScrapingDAO:
         """
         params = {"status": status, "error_message": error_message, "website_id": website_id}
 
-        logger.info(f"📝 [WEB_UPDATE_SQL] SQL Query:")
-        logger.info(f"    {query}")
-        logger.info(f"📊 [WEB_UPDATE_PARAMS] Parameters:")
-        logger.info(f"    :status: {params['status']}")
-        logger.info(f"    :error_message: {params['error_message']}")
-        logger.info(f"    :website_id: {params['website_id']}")
-
         try:
-            logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 await session.commit()
-                logger.log_db_query(query, params, "UPDATE 1")
 
-                logger.info(f"✅ [WEB_UPDATE_SUCCESS] Website status updated")
-                logger.info(f"   New Status: {status}")
+                if result.rowcount == 0:
+                    logger.warning(
+                        f"⚠️ [WEB_UPDATE_SKIPPED] Website {website_id} status was not updated "
+                        f"(missing or already deleted)"
+                    )
+                else:
+                    logger.debug(f"✅ [WEB_UPDATE_SUCCESS] Website {website_id} status updated to {status}")
                 return result
 
         except Exception as e:
