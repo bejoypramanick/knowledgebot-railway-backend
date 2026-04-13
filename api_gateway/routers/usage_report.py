@@ -394,7 +394,11 @@ function metadataSummary(meta) {
   if(meta.webpage_name) parts.push(`page="${meta.webpage_name}"`);
   if(meta.source_url) parts.push(`url=${meta.source_url}`);
   if(meta.website_id) parts.push(`site=${meta.website_id.substring(0,8)}`);
-  return parts.join(' · ') || JSON.stringify(meta);
+  
+  if (parts.length === 0 && Object.keys(meta).length > 0) {
+    return 'Keys: ' + Object.keys(meta).join(', ');
+  }
+  return parts.join(' · ') || '-';
 }
 function payloadChars(meta) {
   return meta.input_character_count || meta.system_prompt_character_count || 0;
