@@ -1,6 +1,6 @@
 import os
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Dict
 from shared.otel_logger import get_otel_logger
 from shared.usage_tracking import estimate_text_tokens, text_payload_details, text_payload_stats, track_model_usage
 # Configuration from environment variables with defaults
