@@ -195,7 +195,7 @@ async def track_model_usage(
         "total_tokens": total_tokens,
         "cost_cents": round(cost_usd * 100.0),
         "api_call_type": api_call_type,
-        "request_metadata": json.dumps(metadata),
+        "request_metadata": json.dumps(metadata, default=str),
     }
 
     logger.info(f"📊 [TRANSFORM] request_metadata for log: {params['request_metadata']}")
