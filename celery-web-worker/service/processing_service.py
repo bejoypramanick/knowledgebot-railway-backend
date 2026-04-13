@@ -285,10 +285,17 @@ class ProcessingService:
                 # Check if we have chunks
                 if chunks:
                     # Generate embeddings using our model-agnostic utility
-                    logger.info(f"🧬 Generating embeddings for {len(chunks)} chunks...")
+                    logger.info(f"🧬 Generating embeddings for {len(chunks)} chunks from {page_data.page_url}...")
                     from shared.embeddings import batch_generate_embeddings
                     chunk_texts = [c.get("text") or c.get("content", "") for c in chunks]
-                    embeddings = await batch_generate_embeddings(chunk_texts)
+                    
+                    # Pass source information for better usage observability
+                    usage_metadata = {
+                        "source_url": page_data.page_url,
+                        "website_id": job_context.website_id,
+                        "ingestion_workflow": "web_scrape_pipeline"
+                    }
+                    embeddings = await batch_generate_embeddings(chunk_texts, request_metadata=usage_metadata)
                     
                     # Attach embeddings to chunks
                     for i, embedding in enumerate(embeddings):

@@ -64,37 +64,25 @@ def text_payload_stats(value: Any) -> Dict[str, Any]:
 
 def text_payload_details(value: Any, *, max_chars: Optional[int] = None) -> Dict[str, Any]:
     """Return the actual text payload, capped to keep usage rows bounded."""
-    if max_chars is None:
-        max_chars = int(os.getenv("USAGE_TRACKING_MAX_TEXT_CHARS", "20000"))
+    limit = max_chars or int(os.getenv("USAGE_TRACKING_MAX_TEXT_CHARS", "20000"))
 
     if value is None:
-        parts = []
+        text_parts = []
     elif isinstance(value, list):
-        parts = ["" if item is None else str(item) for item in value]
+        text_parts = ["" if item is None else str(item) for item in value]
     else:
-        parts = [str(value)]
+        text_parts = [str(value)]
 
-    remaining = max(0, max_chars)
-    captured = []
-    truncated = False
-    for part in parts:
-        if remaining <= 0:
-            truncated = truncated or bool(part)
-            captured.append("")
-            continue
-        if len(part) > remaining:
-            captured.append(part[:remaining])
-            truncated = True
-            remaining = 0
-        else:
-            captured.append(part)
-            remaining -= len(part)
+    # Join multiple chunks into one searchable block for the usage row
+    full_text = "\n---\n".join(text_parts)
+    captured_text = full_text[:limit]
+    is_truncated = len(full_text) > limit
 
     return {
-        "input_text_capture": "enabled",
-        "input_text_chunks": captured,
-        "input_text_truncated": truncated,
-        "input_text_capture_limit_chars": max_chars,
+        "input_text_chunks": [captured_text] if captured_text else [],
+        "input_text_truncated": is_truncated,
+        "input_text_capture": "first_batch_joined",
+        "input_text_capture_limit_chars": limit,
     }
 
 

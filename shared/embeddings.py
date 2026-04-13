@@ -83,7 +83,7 @@ def _log_embedding_config_once(*, action: str, provider: str, model: str, dimens
         # Never fail an embedding call because of logging.
         return
 
-async def _litellm_embed(texts: List[str], provider: str, model: str) -> List[List[float]]:
+async def _litellm_embed(texts: List[str], provider: str, model: str, request_metadata: Optional[Dict] = None) -> List[List[float]]:
     import asyncio as _asyncio
     from litellm import embedding
 
@@ -113,6 +113,7 @@ async def _litellm_embed(texts: List[str], provider: str, model: str) -> List[Li
         if not prompt_tokens:
             prompt_tokens = estimate_text_tokens(texts)
             total_tokens = prompt_tokens
+        
         usage_metadata = {
             "embedding_provider": provider,
             "embedding_model": model,
@@ -123,6 +124,11 @@ async def _litellm_embed(texts: List[str], provider: str, model: str) -> List[Li
             **text_payload_stats(texts),
             **text_payload_details(texts),
         }
+        
+        # Merge extra request metadata if provided (e.g. source_url)
+        if request_metadata:
+            usage_metadata.update(request_metadata)
+
         tracked = await track_model_usage(
             provider="gemini" if provider == "google" else provider,
             model=model,
@@ -171,7 +177,7 @@ def _is_google_model_not_found_error(exc: Exception) -> bool:
     error_text = str(exc)
     return "404" in error_text or "NOT_FOUND" in error_text
 
-async def generate_embedding(query: str) -> List[float]:
+async def generate_embedding(query: str, request_metadata: Optional[Dict] = None) -> List[float]:
     """Generate an embedding vector using the configured provider."""
     provider = os.getenv("EMBEDDING_PROVIDER", EMBEDDING_PROVIDER).lower()
     model = os.getenv("EMBEDDING_MODEL", EMBEDDING_MODEL)
@@ -180,7 +186,7 @@ async def generate_embedding(query: str) -> List[float]:
     
     try:
         if USE_LITELLM_EMBEDDINGS:
-            embeddings = await _litellm_embed([query], provider, model)
+            embeddings = await _litellm_embed([query], provider, model, request_metadata)
             return embeddings[0] if embeddings else []
 
         if provider == "google":
@@ -259,7 +265,7 @@ async def generate_embedding(query: str) -> List[float]:
         logger.error(f"❌ Embedding error ({provider}): {e}")
         return []
 
-async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
+async def batch_generate_embeddings(texts: List[str], request_metadata: Optional[Dict] = None) -> List[List[float]]:
     """Helper for batch processing embeddings if supported by provider."""
     provider = os.getenv("EMBEDDING_PROVIDER", EMBEDDING_PROVIDER).lower()
     model = os.getenv("EMBEDDING_MODEL", EMBEDDING_MODEL)
@@ -276,9 +282,9 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
                 all_embeddings: List[List[float]] = []
                 for i in range(0, len(texts), _GOOGLE_BATCH_EMBED_LIMIT):
                     batch = texts[i:i + _GOOGLE_BATCH_EMBED_LIMIT]
-                    all_embeddings.extend(await _litellm_embed(batch, provider, model))
+                    all_embeddings.extend(await _litellm_embed(batch, provider, model, request_metadata))
                 return all_embeddings
-            return await _litellm_embed(texts, provider, model)
+            return await _litellm_embed(texts, provider, model, request_metadata)
 
         if provider == "google":
             client = get_genai_client()

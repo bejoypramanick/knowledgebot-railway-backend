@@ -659,7 +659,15 @@ function render() {
     </tr>
     <tr class="msg-row" style="display:none">
       <td colspan="11">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+          <div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
+            ${meta.source_url ? `<div style="font-size:11px;color:var(--accent);font-weight:600">Source: <a href="${meta.source_url}" target="_blank" style="color:inherit;text-decoration:none">${meta.source_url}</a></div>` : ''}
+          </div>
+          <div style="font-size:10px;color:var(--muted);background:rgba(0,0,0,.04);padding:4px 8px;border-radius:4px">
+            Model: ${r.model} | Provider: ${r.provider}
+          </div>
+        </div>
         ${renderPayloadText(meta)}
       </td>
     </tr>`;
