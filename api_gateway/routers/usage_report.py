@@ -289,17 +289,12 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <div class="insight-grid" id="usage-insights"></div>
 
-<div class="summary-actions">
-  <button onclick="togglePanel('details-panel','details-toggle')" id="details-toggle">Show details</button>
-  <button class="secondary" onclick="togglePanel('charts-panel','charts-toggle')" id="charts-toggle">Show charts</button>
-  <button class="secondary" onclick="downloadExcel()">Download Excel</button>
-</div>
 
-<div id="charts-panel" class="hidden-panel">
+<div id="charts-panel">
   <div class="section"><h2>Charts</h2><div class="chart-grid" id="charts-grid"></div></div>
 </div>
 
-<div id="details-panel" class="hidden-panel">
+<div id="details-panel">
 <div class="section"><h2>Chat Sessions <span style="font-size:13px;color:var(--muted);font-weight:400">(click to expand messages)</span></h2><div class="table-wrap" style="max-height:700px"><table>
   <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Input tokens">Prompt Tokens</th><th title="Output tokens">Completion Tokens</th><th title="System prompt + history + tool overhead">Context Tokens</th><th title="Current user + bot message text tokens">Message Tokens</th><th>Status</th></tr></thead>
   <tbody id="sessions-table"></tbody>
