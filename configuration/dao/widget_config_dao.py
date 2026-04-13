@@ -19,11 +19,14 @@ class WidgetConfigDAO:
 
     @staticmethod
     def _require_active_tenant_id() -> str:
-        from shared.tenant_context import get_current_tenant_id
+        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
 
         tenant_id = get_current_tenant_id()
         if not tenant_id:
-            raise HTTPException(status_code=400, detail="Active tenant context is required for widget configuration")
+            # Fallback to default tenant to allow service-level operations (like warming global cache)
+            # without a request context.
+            logger.info("ℹ️ No active tenant context found; falling back to DEFAULT_TENANT_ID")
+            return DEFAULT_TENANT_ID
         return tenant_id
 
     @staticmethod
