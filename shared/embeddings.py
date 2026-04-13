@@ -113,24 +113,38 @@ async def _litellm_embed(texts: List[str], provider: str, model: str) -> List[Li
         if not prompt_tokens:
             prompt_tokens = estimate_text_tokens(texts)
             total_tokens = prompt_tokens
-        await track_model_usage(
+        usage_metadata = {
+            "embedding_provider": provider,
+            "embedding_model": model,
+            "litellm_model": litellm_model,
+            "batch_size": len(texts),
+            "dimensions": dimensionality,
+            "token_source": "provider_usage" if usage else "estimated_text_tokens",
+            **text_payload_stats(texts),
+            **text_payload_details(texts),
+        }
+        tracked = await track_model_usage(
             provider="gemini" if provider == "google" else provider,
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=0,
             total_tokens=total_tokens,
             api_call_type="embedding",
-            request_metadata={
-                "embedding_provider": provider,
-                "embedding_model": model,
-                "litellm_model": litellm_model,
-                "batch_size": len(texts),
-                "dimensions": dimensionality,
-                "token_source": "provider_usage" if usage else "estimated_text_tokens",
-                **text_payload_stats(texts),
-                **text_payload_details(texts),
-            },
+            request_metadata=usage_metadata,
         )
+        if tracked:
+            logger.info(
+                "Tracked LiteLLM embedding usage metadata "
+                f"provider={provider} model={model} batch_size={len(texts)} "
+                f"chars={usage_metadata.get('input_character_count')} "
+                f"bytes={usage_metadata.get('input_size_bytes')} "
+                f"text_chunks={len(usage_metadata.get('input_text_chunks') or [])}"
+            )
+        else:
+            logger.warning(
+                "LiteLLM embedding usage tracking returned false "
+                f"provider={provider} model={model} batch_size={len(texts)}"
+            )
     except Exception as usage_error:
         logger.warning(f"⚠️ Failed to track LiteLLM embedding usage: {usage_error}")
     data = resp.get("data") if isinstance(resp, dict) else getattr(resp, "data", None)

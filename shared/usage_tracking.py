@@ -193,7 +193,7 @@ async def track_model_usage(
         ) VALUES (
             CAST(:session_id AS UUID), CAST(:message_id AS UUID), :provider, :model,
             :prompt_tokens, :completion_tokens, :total_tokens, :cost_cents,
-            :api_call_type, :request_metadata
+            :api_call_type, CAST(:request_metadata AS jsonb)
         )
     """
     params = {
@@ -231,6 +231,11 @@ async def track_model_usage(
                 },
             )
             await db.commit()
+        logger.info(
+            "Tracked model usage "
+            f"provider={provider} model={model} call={api_call_type} "
+            f"total_tokens={total_tokens} metadata_keys={sorted(metadata.keys())}"
+        )
         return True
     except Exception as exc:
         logger.warning(
