@@ -265,7 +265,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <div class="section" id="token-log-section">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:8px">
-    <h2 style="margin:0">API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per request)</span></h2>
+    <h2 style="margin:0">Knowledge Ingestion <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per ingestion request)</span></h2>
     <div style="display:flex;gap:8px">
       <button onclick="toggleAllRows('token-log-table', this)" id="btn-toggle-all" style="padding:4px 10px;font-size:11px;border-radius:6px;cursor:pointer;background:var(--card);border:1px solid var(--border);font-weight:600;color:var(--accent)">Expand All</button>
     </div>
@@ -321,6 +321,9 @@ function callTypeLabel(callType) {
     cache_create: 'Gemini cache creation',
   };
   return labels[callType] || callType || 'Unknown';
+}
+function isIngestionUsage(row) {
+  return ['embedding','equation_vision'].includes(row.api_call_type || '');
 }
 function groupByCallType(rows) {
   const grouped = {};
@@ -429,6 +432,7 @@ function render() {
   const files = filterByDate(RAW.files, days);
   const websites = filterByDate(RAW.websites, days);
   const tokenLog = filterByDate(RAW.token_usage_log||[], days);
+  const ingestionTokenLog = tokenLog.filter(isIngestionUsage);
 
   document.getElementById('subtitle').textContent =
     `Last ${days} days \\u00b7 Generated ${new Date().toISOString().replace('T',' ').substring(0,16)} UTC`;
@@ -456,11 +460,7 @@ function render() {
   // Note: totalPromptTokens in DB includes totalCacheReadTokens.
   // Subtract cached tokens to show standard input separately.
   const standardInputTokens = Math.max(0, totalPromptTokens - totalCacheReadTokens);
-  const otherApiTokens = tokenLog
-    .filter(r => !['agent_stream','rag'].includes(r.api_call_type||''))
-    .reduce((a,r) => a + (r.total_tokens||0), 0);
-
-  const groupedCalls = groupByCallType(tokenLog);
+  const ingestionTokens = ingestionTokenLog.reduce((a,r) => a + (r.total_tokens||0), 0);
 
   // === TOKEN SUMMARY ===
   document.getElementById('token-summary').innerHTML = `
@@ -468,8 +468,8 @@ function render() {
     <div class="token-grid">
       <div class="token-item">
         <div class="token-label">Total Reported Tokens</div>
-        <div class="token-value">${fmt(totalPromptTokens + totalCompletionTokens + otherApiTokens)}</div>
-        <div class="token-detail">Chat, cache, embeddings, vision, and other logged calls</div>
+        <div class="token-value">${fmt(totalPromptTokens + totalCompletionTokens + ingestionTokens)}</div>
+        <div class="token-detail">Chat sessions plus knowledge ingestion calls</div>
       </div>
       <div class="token-item">
         <div class="token-label">Standard Input</div>
@@ -492,9 +492,9 @@ function render() {
         <div class="token-detail">Cache creation tokens from logged API calls</div>
       </div>
       <div class="token-item">
-        <div class="token-label">Other API Usage</div>
-        <div class="token-value" style="font-size:20px">${fmt(otherApiTokens)}</div>
-        <div class="token-detail">${fmt(otherApiTokens)} tokens from embeddings, vision, and other logged calls</div>
+        <div class="token-label">Knowledge Ingestion</div>
+        <div class="token-value" style="font-size:20px">${fmt(ingestionTokens)}</div>
+        <div class="token-detail">${fmt(ingestionTokens)} tokens from embeddings and vision OCR</div>
       </div>
     </div>
   `;
@@ -506,7 +506,7 @@ function render() {
     <div class="kpi"><div class="label">Output Tokens (Completion)</div><div class="value cyan">${fmt(totalCompletionTokens)}</div><div class="sub">Chat completion tokens</div></div>
     <div class="kpi"><div class="label">Cache Read Tokens</div><div class="value accent2">${fmt(totalCacheReadTokens)}</div><div class="sub">Reported cached input tokens</div></div>
     <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">Reported cache creation tokens</div></div>
-    <div class="kpi"><div class="label">Other API Tokens</div><div class="value red">${fmt(otherApiTokens)}</div><div class="sub">Embeddings, vision, and logged calls</div></div>
+    <div class="kpi"><div class="label">Knowledge Ingestion Tokens</div><div class="value red">${fmt(ingestionTokens)}</div><div class="sub">Embeddings and vision OCR</div></div>
     <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmt(fileTokens)} tokens indexed</div></div>
   `;
 
@@ -544,8 +544,8 @@ function render() {
     sessionsEl.appendChild(sessionRow);
   });
 
-  // === TOKEN USAGE LOG TABLE ===
-  document.getElementById('token-log-table').innerHTML = tokenLog.slice(0,300).map(r => {
+  // === KNOWLEDGE INGESTION TABLE ===
+  document.getElementById('token-log-table').innerHTML = ingestionTokenLog.slice(0,300).map(r => {
     const meta = parseMeta(r.request_metadata);
     const cache = getCacheTokens(r.request_metadata);
     const chunks = payloadTextChunks(meta);
@@ -729,6 +729,7 @@ function downloadExcel() {
   const sessions = filterByDate(RAW.sessions, days);
   const chatMsgs = filterByDate(RAW.chat_messages||[], days);
   const tokenLog = filterByDate(RAW.token_usage_log||[], days);
+  const ingestionTokenLog = tokenLog.filter(isIngestionUsage);
 
   const wb = XLSX.utils.book_new();
 
@@ -782,8 +783,8 @@ function downloadExcel() {
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stepsData), 'Agent Run Steps');
 
-  // Sheet 4: API Token Usage Log
-  const tokenLogData = tokenLog.map(r => {
+  // Sheet 4: Knowledge Ingestion
+  const tokenLogData = ingestionTokenLog.map(r => {
     const meta = parseMeta(r.request_metadata);
     const cache = getCacheTokens(r.request_metadata);
     return {
@@ -809,10 +810,10 @@ function downloadExcel() {
       'Context': metadataSummary(meta)
     };
   });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tokenLogData), 'API Token Usage');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tokenLogData), 'Knowledge Ingestion');
 
   // Sheet 5: Usage By Call Type
-  const groupedUsageData = groupByCallType(tokenLog).map(g => ({
+  const groupedUsageData = groupByCallType(ingestionTokenLog).map(g => ({
     'Call Type': callTypeLabel(g.call_type),
     'Raw Call Type': g.call_type,
     'Requests': g.requests,
@@ -827,7 +828,7 @@ function downloadExcel() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(groupedUsageData), 'Usage By Call Type');
 
   // Sheet 6: Largest Token Calls
-  const topCallsData = [...tokenLog].sort((a,b) => (b.total_tokens||0) - (a.total_tokens||0)).slice(0,100).map(r => {
+  const topCallsData = [...ingestionTokenLog].sort((a,b) => (b.total_tokens||0) - (a.total_tokens||0)).slice(0,100).map(r => {
     const meta = parseMeta(r.request_metadata);
     return {
       'Created': r.created_at||'',
