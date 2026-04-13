@@ -213,15 +213,6 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 .source-cell{max-width:220px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.35}
 .source-link{color:inherit;text-decoration:none;overflow-wrap:anywhere;word-break:break-word}
 .hidden-panel{display:none}
-.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:32px}
-.chart-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px}
-.chart-card h3{font-size:15px;margin-bottom:12px}
-.bar-row{display:grid;grid-template-columns:minmax(100px,150px) 1fr auto;gap:10px;align-items:center;margin:9px 0;font-size:12px}
-.bar-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
-.bar-track{height:12px;background:#e9ecef;border-radius:6px;overflow:hidden}
-.bar-fill{height:100%;background:var(--accent);border-radius:6px;min-width:2px}
-.bar-fill.green{background:var(--green)}.bar-fill.orange{background:var(--orange)}.bar-fill.cyan{background:var(--cyan)}.bar-fill.red{background:var(--red)}
-.bar-value{font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
 @media (max-width: 760px) {
   body{padding:12px}
   h1{font-size:24px}
@@ -230,16 +221,14 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
   .toolbar button{flex:1 1 calc(50% - 8px);padding:10px 8px}
   .toolbar span{display:none}
   .summary-actions button{flex:1 1 100%;padding:12px}
-  .kpi-grid,.token-grid,.insight-grid,.chart-grid{grid-template-columns:1fr;gap:12px;margin-bottom:20px}
-  .kpi,.token-summary,.insight,.chart-card{padding:14px;border-radius:8px}
+  .kpi-grid,.token-grid,.insight-grid{grid-template-columns:1fr;gap:12px;margin-bottom:20px}
+  .kpi,.token-summary,.insight{padding:14px;border-radius:8px}
   .kpi .value{font-size:24px}
   .token-item .token-value{font-size:22px}
   .section h2{font-size:17px}
   .table-wrap{max-height:420px}
   table{font-size:12px}
   th,td{padding:8px}
-  .bar-row{grid-template-columns:1fr;gap:5px}
-  .bar-value{font-size:11px}
 }
 </style>
 </head>
@@ -267,10 +256,6 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <div class="insight-grid" id="usage-insights"></div>
 
-
-<div id="charts-panel">
-  <div class="section"><h2>Charts</h2><div class="chart-grid" id="charts-grid"></div></div>
-</div>
 
 <div id="details-panel">
 <div class="section"><h2>Chat Sessions <span style="font-size:13px;color:var(--muted);font-weight:400">(click to expand messages)</span></h2><div class="table-wrap" style="max-height:700px"><table>
@@ -417,16 +402,6 @@ function renderPayloadText(meta) {
       <pre style="white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:260px;overflow:auto;font-family:'SF Mono','Fira Code',monospace;font-size:11px;line-height:1.5">${escHtml(chunk)}</pre>
     </div>`).join('')}`;
 }
-function togglePanel(panelId, buttonId) {
-  const panel = document.getElementById(panelId);
-  const button = document.getElementById(buttonId);
-  const isHidden = panel.style.display === 'none' || !panel.style.display;
-  panel.style.display = isHidden ? 'block' : 'none';
-  if(button) {
-    const label = panelId === 'charts-panel' ? 'charts' : 'details';
-    button.textContent = `${isHidden ? 'Hide' : 'Show'} ${label}`;
-  }
-}
 function toggleAllRows(tableId, btn) {
   const table = document.getElementById(tableId);
   const rows = Array.from(table.querySelectorAll('.msg-row'));
@@ -438,19 +413,6 @@ function toggleAllRows(tableId, btn) {
   
   btn.textContent = isExpand ? 'Collapse All' : 'Expand All';
 }
-function renderBars(rows, valueKey, labelKey, formatter, colorClass='') {
-  const maxValue = Math.max(1, ...rows.map(r => r[valueKey] || 0));
-  return rows.map(r => {
-    const value = r[valueKey] || 0;
-    const pct = Math.max(1, Math.round((value / maxValue) * 100));
-    return `<div class="bar-row">
-      <div class="bar-label" title="${escHtml(r[labelKey])}">${escHtml(r[labelKey])}</div>
-      <div class="bar-track"><div class="bar-fill ${colorClass}" style="width:${pct}%"></div></div>
-      <div class="bar-value">${formatter(value)}</div>
-    </div>`;
-  }).join('');
-}
-
 // === SET DAYS ===
 function setDays(d) {
   currentDays = d;
@@ -550,31 +512,6 @@ function render() {
 
   // === INSIGHTS ===
   document.getElementById('usage-insights').innerHTML = '';
-
-  // === CHARTS (HIDDEN BY DEFAULT) ===
-  const tokenRows = [
-    {label:'Standard input', value:standardInputTokens},
-    {label:'Output', value:totalCompletionTokens},
-    {label:'Cache read', value:totalCacheReadTokens},
-    {label:'Cache write', value:totalCacheWriteTokens},
-    {label:'Other API', value:otherApiTokens},
-    {label:'Indexed files', value:fileTokens},
-    {label:'Indexed websites', value:webTokens}
-  ].filter(r => r.value > 0);
-  const callTypeTokenRows = groupedCalls
-    .map(g => ({label:callTypeLabel(g.call_type), value:g.total || (g.prompt + g.completion)}))
-    .filter(r => r.value > 0)
-    .slice(0,10);
-  document.getElementById('charts-grid').innerHTML = `
-    <div class="chart-card">
-      <h3>Token Breakdown</h3>
-      ${renderBars(tokenRows, 'value', 'label', fmt, 'cyan') || '<p style="color:var(--muted);font-size:13px">No token data in this window</p>'}
-    </div>
-    <div class="chart-card">
-      <h3>Tokens By Call Type</h3>
-      ${renderBars(callTypeTokenRows, 'value', 'label', fmt, 'orange') || '<p style="color:var(--muted);font-size:13px">No API rows in this window</p>'}
-    </div>
-  `;
 
   // === HELPERS FOR MESSAGES ===
   const chatMsgs = filterByDate(RAW.chat_messages||[], days);
