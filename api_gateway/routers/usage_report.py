@@ -286,7 +286,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 </table></div></div>
 
 <div class="section"><h2>API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per request)</span></h2><div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Tools</th><th>Source</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -583,7 +583,6 @@ function render() {
 
   // === TOKEN USAGE LOG TABLE ===
   document.getElementById('token-log-table').innerHTML = tokenLog.slice(0,300).map(r => {
-    const meta = parseMeta(r.request_metadata);
     const cache = getCacheTokens(r.request_metadata);
     return `<tr>
       <td>${fmtDateTime(r.created_at)}</td>
@@ -593,9 +592,6 @@ function render() {
       <td class="token-cell">${fmt(r.prompt_tokens)}</td>
       <td class="token-cell">${fmt(r.completion_tokens)}</td>
       <td class="token-cell">${fmt(cache.read + cache.write)}</td>
-      <td>${fmt(meta.tool_call_count||0)}</td>
-      <td>${trunc(meta.token_source||'actual/logged',28)}</td>
-      <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>`;
   }).join('');
 }
