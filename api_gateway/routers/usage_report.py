@@ -217,7 +217,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 .mini-table td{padding:6px 8px}
 .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 .status-ok{background:var(--green)}.status-warn{background:var(--orange)}.status-muted{background:var(--muted)}
-.metadata-snippet{font-family:'SF Mono','Fira Code',monospace;font-size:10px;color:var(--muted);max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.metadata-snippet{font-family:'SF Mono','Fira Code',monospace;font-size:10px;color:var(--muted);white-space:pre-wrap;word-break:break-all}
 .hidden-panel{display:none}
 .chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:32px}
 .chart-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px}
@@ -306,7 +306,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 </table></div></div>
 
 <div class="section"><h2>API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per request)</span></h2><div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Chars</th><th>Words</th><th>Size</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -383,8 +383,10 @@ function metadataSummary(meta) {
   if(meta.cache_ttl_seconds) parts.push(`ttl=${meta.cache_ttl_seconds}s`);
   if(meta.tool_call_count) parts.push(`tools=${meta.tool_call_count}`);
   if(meta.standard_input_tokens) parts.push(`standard_in=${fmt(meta.standard_input_tokens)}`);
-  if(meta.token_source) parts.push(`source=${meta.token_source}`);
-  return parts.join(' · ') || JSON.stringify(meta).substring(0,140);
+  if(meta.token_source) parts.push(`token_src=${meta.token_source}`);
+  if(meta.source_url) parts.push(`url=${meta.source_url}`);
+  if(meta.website_id) parts.push(`site=${meta.website_id.substring(0,8)}`);
+  return parts.join(' · ') || JSON.stringify(meta);
 }
 function payloadChars(meta) {
   return meta.input_character_count || meta.system_prompt_character_count || 0;
@@ -619,11 +621,10 @@ function render() {
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
-      <td style="max-width:200px" class="mono"><div class="bd-text-preview" title="${meta.source_url||''}" onclick="event.stopPropagation();if(this.title)window.open(this.title,'_blank')">${meta.source_url ? meta.source_url.split('/').pop() || meta.source_url : '-'}</div></td>
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
-      <td colspan="12">
+      <td colspan="11">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
