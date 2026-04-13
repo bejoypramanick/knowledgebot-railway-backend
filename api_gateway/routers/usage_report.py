@@ -416,7 +416,12 @@ function fmtBytes(bytes) {
 }
 function payloadTextChunks(meta) {
   const chunks = meta.input_text_chunks;
-  if(Array.isArray(chunks)) return chunks;
+  if(Array.isArray(chunks)) {
+    if(chunks.length === 1 && (meta.batch_size || 0) > 1 && chunks[0] && chunks[0].includes('\\n---\\n')) {
+      return chunks[0].split('\\n---\\n');
+    }
+    return chunks;
+  }
   if(meta.input_text) return [meta.input_text];
   return [];
 }
