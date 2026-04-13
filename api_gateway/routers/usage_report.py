@@ -347,8 +347,6 @@ function parseMeta(meta) {
   if(typeof meta === 'string') { try { return JSON.parse(meta); } catch(e) { return {}; } }
   return meta || {};
 }
-const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
-
 function callTypeLabel(callType) {
   const labels = {
     agent_stream: 'Chat responses',
@@ -495,6 +493,8 @@ function render() {
   const otherApiTokens = tokenLog
     .filter(r => !['agent_stream','rag'].includes(r.api_call_type||''))
     .reduce((a,r) => a + (r.total_tokens||0), 0);
+
+  const groupedCalls = groupByCallType(tokenLog);
 
   // === TOKEN SUMMARY ===
   document.getElementById('token-summary').innerHTML = `
