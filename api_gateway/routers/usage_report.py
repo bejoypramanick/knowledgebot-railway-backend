@@ -387,7 +387,13 @@ function payloadTextChunks(meta) {
 }
 function renderPayloadText(meta) {
   const chunks = payloadTextChunks(meta);
-  if(!chunks.length) return '<span style="color:var(--muted)">No text payload captured for this row</span>';
+  if(!chunks.length) {
+    const keys = Object.keys(meta || {}).sort();
+    const hint = keys.length
+      ? `Metadata keys present: ${keys.map(escHtml).join(', ')}`
+      : 'No request metadata was stored with this usage row.';
+    return `<span style="color:var(--muted)">No text payload captured for this row. This usually means the row was recorded before text capture was deployed, by a worker still running older code, or by a non-text request.</span><div style="font-size:11px;color:var(--muted);margin-top:6px">${hint}</div>`;
+  }
   const truncNote = meta.input_text_truncated ? `<div style="color:var(--orange);font-size:12px;margin-bottom:8px">Text was truncated at ${fmt(meta.input_text_capture_limit_chars||0)} characters for storage safety.</div>` : '';
   return `${truncNote}${chunks.map((chunk, idx) => `
     <div style="margin:8px 0">

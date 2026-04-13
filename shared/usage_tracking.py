@@ -90,6 +90,7 @@ def text_payload_details(value: Any, *, max_chars: Optional[int] = None) -> Dict
             remaining -= len(part)
 
     return {
+        "input_text_capture": "enabled",
         "input_text_chunks": captured,
         "input_text_truncated": truncated,
         "input_text_capture_limit_chars": max_chars,
