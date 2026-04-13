@@ -510,7 +510,7 @@ function render() {
     <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">Reported cache creation tokens</div></div>
     <div class="kpi"><div class="label">Knowledge Ingestion Tokens</div><div class="value red">${fmt(ingestionTokens)}</div><div class="sub">Embeddings</div></div>
     <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmtBytes(fileSizeBytes)} total · ${fmt(fileTokens)} tokens indexed</div></div>
-    <div class="kpi"><div class="label">Websites Scraped</div><div class="value cyan">${fmt(totalWebsites)}</div><div class="sub">${fmtBytes(websiteSizeBytes)} total · ${fmt(webTokens)} tokens indexed</div></div>
+    <div class="kpi"><div class="label">WebPages Scraped</div><div class="value cyan">${fmt(totalWebsites)}</div><div class="sub">${fmtBytes(websiteSizeBytes)} total · ${fmt(webTokens)} tokens indexed</div></div>
   `;
 
   // === INSIGHTS ===
