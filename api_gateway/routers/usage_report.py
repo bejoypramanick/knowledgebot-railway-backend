@@ -285,7 +285,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
-<div class="section"><h2>API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(actual Gemini usage per request)</span></h2><div class="table-wrap"><table>
+<div class="section"><h2>API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per request)</span></h2><div class="table-wrap"><table>
   <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Tools</th><th>Source</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
