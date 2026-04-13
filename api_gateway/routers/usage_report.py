@@ -486,17 +486,7 @@ function render() {
 
   // === INSIGHTS ===
   const groupedCalls = groupByCallType(tokenLog);
-  const capturedTypes = new Set(tokenLog.map(r => r.api_call_type || 'unknown'));
-  const estimatedRows = tokenLog.filter(r => ((parseMeta(r.request_metadata).token_source||'').toLowerCase().includes('estimated'))).length;
-  const toolRows = tokenLog.filter(r => (parseMeta(r.request_metadata).tool_call_count||0) > 0).length;
   const topCalls = [...tokenLog].sort((a,b) => (b.total_tokens||0) - (a.total_tokens||0)).slice(0,8);
-  const coverageRows = [
-    {name:'Chat generation', ok: capturedTypes.has('agent_stream'), detail:'Actual Gemini usage from Pydantic AI run.usage()'},
-    {name:'Tool calls and returns', ok: (RAW.run_steps||[]).length > 0 || toolRows > 0, detail:'Agent run steps plus per-call tool counts'},
-    {name:'Embeddings', ok: capturedTypes.has('embedding'), detail:'Google/LiteLLM/OpenAI embedding calls logged'},
-    {name:'Equation vision OCR', ok: capturedTypes.has('equation_vision'), detail:'Gemini image extraction calls logged per image'},
-    {name:'Gemini cache creation', ok: capturedTypes.has('cache_create'), detail:'Cache write tokens and TTL metadata logged'}
-  ];
 
   document.getElementById('usage-insights').innerHTML = `
     <div class="insight">
@@ -514,18 +504,6 @@ function render() {
           </tr>`).join('') || '<tr><td colspan="6" style="color:var(--muted)">No API token log rows in this window</td></tr>'}
         </tbody>
       </table>
-    </div>
-    <div class="insight">
-      <h3>Capture Coverage</h3>
-      <table class="mini-table">
-        <tbody>
-          ${coverageRows.map(r => `<tr>
-            <td><span class="status-dot ${r.ok?'status-ok':'status-warn'}"></span>${r.name}</td>
-            <td style="color:var(--muted)">${r.ok?'captured':'no rows in window'}</td>
-          </tr><tr><td colspan="2" style="color:var(--muted);font-size:11px;padding-top:0">${r.detail}</td></tr>`).join('')}
-        </tbody>
-      </table>
-      <p style="margin-top:10px">${fmt(estimatedRows)} of ${fmt(tokenLog.length)} API rows use estimated token counts because provider usage metadata was unavailable.</p>
     </div>
     <div class="insight">
       <h3>Largest Token Calls</h3>
