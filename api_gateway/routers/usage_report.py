@@ -193,14 +193,6 @@ tr:hover td{background:rgba(79,70,229,.04)}
 .loading{text-align:center;padding:40px;color:var(--muted)}
 .table-wrap{overflow-x:auto;max-height:500px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
 th[title]{cursor:help;border-bottom:2px dashed var(--border)}
-.legend{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:32px;font-size:13px;line-height:1.8}
-.legend h3{font-size:15px;margin-bottom:12px;color:var(--text)}
-.legend-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:16px}
-.legend-section{padding:8px 0}
-.legend-section h4{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px}
-.legend dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}
-.legend dt{font-weight:600;color:var(--accent);white-space:nowrap}
-.legend dd{color:var(--text);margin:0}
 .token-summary{background:linear-gradient(135deg,#f0f9ff,#eef2ff);border:1px solid #bfdbfe;border-radius:12px;padding:20px;margin-bottom:32px}
 .token-summary h2{font-size:20px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #bfdbfe;color:#1d4ed8}
 .token-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
@@ -239,12 +231,10 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
   .toolbar span{display:none}
   .summary-actions button{flex:1 1 100%;padding:12px}
   .kpi-grid,.token-grid,.insight-grid,.chart-grid{grid-template-columns:1fr;gap:12px;margin-bottom:20px}
-  .kpi,.token-summary,.insight,.chart-card,.legend{padding:14px;border-radius:8px}
+  .kpi,.token-summary,.insight,.chart-card{padding:14px;border-radius:8px}
   .kpi .value{font-size:24px}
   .token-item .token-value{font-size:22px}
   .section h2{font-size:17px}
-  .legend-grid{grid-template-columns:1fr}
-  .legend dl{grid-template-columns:1fr}
   .table-wrap{max-height:420px}
   table{font-size:12px}
   th,td{padding:8px}
@@ -268,20 +258,6 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
   <button onclick="setDays(365)" id="btn-365">All Time</button>
   <span style="flex:1"></span>
   <button onclick="downloadExcel()">Download Excel</button>
-</div>
-
-<div class="legend" id="legend-panel">
-<h3>Report Notes <span style="font-size:12px;color:var(--muted);font-weight:400;cursor:pointer" onclick="document.getElementById('legend-detail').style.display=document.getElementById('legend-detail').style.display==='none'?'block':'none'">[show/hide]</span></h3>
-<div id="legend-detail" class="legend-grid" style="display:none">
-  <div class="legend-section">
-    <h4>What is Included</h4>
-    <dl>
-      <dt>Chat</dt><dd>Prompt, completion, cache read/write, tool calls, and per-session totals</dd>
-      <dt>Knowledge ingestion</dt><dd>Indexed content token counts and table-formatting model calls</dd>
-      <dt>Other API calls</dt><dd>Embeddings, Gemini Vision equation extraction, and cache creation</dd>
-    </dl>
-  </div>
-</div>
 </div>
 
 <!-- Token Summary -->
