@@ -271,7 +271,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     </div>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total</th><th>Prompt</th><th>Output</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -323,7 +323,7 @@ function callTypeLabel(callType) {
   return labels[callType] || callType || 'Unknown';
 }
 function isIngestionUsage(row) {
-  return ['embedding','equation_vision'].includes(row.api_call_type || '');
+  return (row.api_call_type || '') === 'embedding';
 }
 function groupByCallType(rows) {
   const grouped = {};
@@ -494,7 +494,7 @@ function render() {
       <div class="token-item">
         <div class="token-label">Knowledge Ingestion</div>
         <div class="token-value" style="font-size:20px">${fmt(ingestionTokens)}</div>
-        <div class="token-detail">${fmt(ingestionTokens)} tokens from embeddings and vision OCR</div>
+        <div class="token-detail">${fmt(ingestionTokens)} tokens from embeddings</div>
       </div>
     </div>
   `;
@@ -506,7 +506,7 @@ function render() {
     <div class="kpi"><div class="label">Output Tokens (Completion)</div><div class="value cyan">${fmt(totalCompletionTokens)}</div><div class="sub">Chat completion tokens</div></div>
     <div class="kpi"><div class="label">Cache Read Tokens</div><div class="value accent2">${fmt(totalCacheReadTokens)}</div><div class="sub">Reported cached input tokens</div></div>
     <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">Reported cache creation tokens</div></div>
-    <div class="kpi"><div class="label">Knowledge Ingestion Tokens</div><div class="value red">${fmt(ingestionTokens)}</div><div class="sub">Embeddings and vision OCR</div></div>
+    <div class="kpi"><div class="label">Knowledge Ingestion Tokens</div><div class="value red">${fmt(ingestionTokens)}</div><div class="sub">Embeddings</div></div>
     <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmt(fileTokens)} tokens indexed</div></div>
   `;
 
@@ -547,15 +547,12 @@ function render() {
   // === KNOWLEDGE INGESTION TABLE ===
   document.getElementById('token-log-table').innerHTML = ingestionTokenLog.slice(0,300).map(r => {
     const meta = parseMeta(r.request_metadata);
-    const cache = getCacheTokens(r.request_metadata);
     const chunks = payloadTextChunks(meta);
     return `<tr class="session-row" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'table-row':'none';this.classList.toggle('open')">
       <td>${fmtDateTime(r.created_at)}</td>
       <td>${callTypeLabel(r.api_call_type)}</td>
       <td>${r.model||'-'}</td>
-      <td class="token-cell">${fmt(r.total_tokens || ((r.prompt_tokens||0)+(r.completion_tokens||0)))}</td>
-      <td class="token-cell">${fmt(r.prompt_tokens)}</td>
-      <td class="token-cell">${fmt(r.completion_tokens)}</td>
+      <td class="token-cell">${fmt(r.total_tokens || r.prompt_tokens || 0)}</td>
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
@@ -563,7 +560,7 @@ function render() {
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
-      <td colspan="12">
+      <td colspan="9">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
@@ -786,7 +783,6 @@ function downloadExcel() {
   // Sheet 4: Knowledge Ingestion
   const tokenLogData = ingestionTokenLog.map(r => {
     const meta = parseMeta(r.request_metadata);
-    const cache = getCacheTokens(r.request_metadata);
     return {
       'Created': r.created_at||'',
       'Session ID': r.session_id||'',
@@ -794,11 +790,7 @@ function downloadExcel() {
       'Provider': r.provider||'',
       'Model': r.model||'',
       'Call Type': callTypeLabel(r.api_call_type),
-      'Prompt Tokens': r.prompt_tokens||0,
-      'Completion Tokens': r.completion_tokens||0,
-      'Total Tokens': r.total_tokens||0,
-      'Cache Tokens': cache.read + cache.write,
-      'Standard Input Tokens': meta.standard_input_tokens||Math.max(0, (r.prompt_tokens||0) - cache.read),
+      'Embedding Tokens': r.total_tokens || r.prompt_tokens || 0,
       'Input Characters': payloadChars(meta),
       'Input Words': payloadWords(meta),
       'Input Size Bytes': payloadBytes(meta),
@@ -817,11 +809,7 @@ function downloadExcel() {
     'Call Type': callTypeLabel(g.call_type),
     'Raw Call Type': g.call_type,
     'Requests': g.requests,
-    'Prompt Tokens': g.prompt,
-    'Completion Tokens': g.completion,
-    'Total Tokens': g.total || (g.prompt + g.completion),
-    'Cache Read Tokens': g.cacheRead,
-    'Cache Write Tokens': g.cacheWrite,
+    'Embedding Tokens': g.total || g.prompt,
     'Tool Calls': g.tools,
     'Rows With Estimated Tokens': g.estimated
   }));
@@ -835,9 +823,7 @@ function downloadExcel() {
       'Call Type': callTypeLabel(r.api_call_type),
       'Provider': r.provider||'',
       'Model': r.model||'',
-      'Prompt Tokens': r.prompt_tokens||0,
-      'Completion Tokens': r.completion_tokens||0,
-      'Total Tokens': r.total_tokens||0,
+      'Embedding Tokens': r.total_tokens || r.prompt_tokens || 0,
       'Token Source': meta.token_source||'',
       'Context': metadataSummary(meta),
       'Session ID': r.session_id||'',
