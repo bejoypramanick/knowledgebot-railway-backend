@@ -218,6 +218,8 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 .status-ok{background:var(--green)}.status-warn{background:var(--orange)}.status-muted{background:var(--muted)}
 .metadata-snippet{font-family:'SF Mono','Fira Code',monospace;font-size:10px;color:var(--muted);white-space:pre-wrap;word-break:break-all}
+.source-cell{max-width:220px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.35}
+.source-link{color:inherit;text-decoration:none;overflow-wrap:anywhere;word-break:break-word}
 .hidden-panel{display:none}
 .chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:32px}
 .chart-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px}
@@ -639,7 +641,7 @@ function render() {
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
-      <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" class="mono">${meta.source_url || meta.url || '-'}</td>
+      <td class="mono source-cell">${meta.source_url || meta.url || '-'}</td>
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
@@ -647,7 +649,7 @@ function render() {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
-            ${meta.source_url ? `<div style="font-size:11px;color:var(--accent);font-weight:600">Source: <a href="${meta.source_url}" target="_blank" style="color:inherit;text-decoration:none">${meta.source_url}</a></div>` : ''}
+            ${meta.source_url ? `<div style="font-size:11px;color:var(--accent);font-weight:600;max-width:100%;overflow-wrap:anywhere;word-break:break-word">Source: <a href="${meta.source_url}" target="_blank" class="source-link">${meta.source_url}</a></div>` : ''}
           </div>
           <div style="font-size:10px;color:var(--muted);background:rgba(0,0,0,.04);padding:4px 8px;border-radius:4px">
             Model: ${r.model} | Provider: ${r.provider}
