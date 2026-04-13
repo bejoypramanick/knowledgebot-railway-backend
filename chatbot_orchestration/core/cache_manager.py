@@ -29,6 +29,7 @@ import redis.asyncio as redis
 from pydantic_ai.tools import ToolDefinition
 from shared.otel_logger import get_otel_logger
 from shared.redis_factory import resolve_redis_url
+from shared.usage_tracking import track_model_usage
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
@@ -377,6 +378,34 @@ class GeminiCacheManager:
                         f"tool_schema_tokens_sdk={tool_schema_tokens if tool_schema_tokens is not None else 'unavailable'} "
                         f"cached_total_tokens={cached_content.usage_metadata.total_token_count}"
                     )
+                try:
+                    cached_tokens = (
+                        getattr(getattr(cached_content, "usage_metadata", None), "total_token_count", 0)
+                        or (system_prompt_tokens or 0)
+                        + (tool_schema_tokens or 0)
+                    )
+                    await track_model_usage(
+                        provider="gemini",
+                        model=model_name,
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        total_tokens=cached_tokens,
+                        api_call_type="cache_create",
+                        request_metadata={
+                            "cache_name": self._cache_name,
+                            "cache_ttl_seconds": self._cache_ttl,
+                            "cache_write_tokens": cached_tokens,
+                            "system_prompt_tokens_sdk": system_prompt_tokens or 0,
+                            "tool_schema_tokens_sdk": tool_schema_tokens or 0,
+                            "tool_count": len(gemini_tools) if gemini_tools else 0,
+                            "has_tools": self._has_tools,
+                            "token_source": "gemini_cache_usage_metadata"
+                            if getattr(cached_content, "usage_metadata", None)
+                            else "sdk_count_tokens",
+                        },
+                    )
+                except Exception as usage_error:
+                    logger.warning(f"Failed to track Gemini cache creation usage: {usage_error}")
                 
                 return self._cache_name
 

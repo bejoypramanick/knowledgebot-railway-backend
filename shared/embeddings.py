@@ -2,6 +2,7 @@ import os
 import asyncio
 from typing import List, Optional
 from shared.otel_logger import get_otel_logger
+from shared.usage_tracking import estimate_text_tokens, track_model_usage
 # Configuration from environment variables with defaults
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -95,6 +96,41 @@ async def _litellm_embed(texts: List[str], provider: str, model: str) -> List[Li
         return embedding(model=litellm_model, input=texts, dimensions=dimensionality)
 
     resp = await _asyncio.to_thread(_call)
+    try:
+        usage = resp.get("usage") if isinstance(resp, dict) else getattr(resp, "usage", None)
+        prompt_tokens = 0
+        total_tokens = 0
+        if usage:
+            prompt_tokens = (
+                (usage.get("prompt_tokens") if isinstance(usage, dict) else getattr(usage, "prompt_tokens", 0))
+                or (usage.get("input_tokens") if isinstance(usage, dict) else getattr(usage, "input_tokens", 0))
+                or 0
+            )
+            total_tokens = (
+                (usage.get("total_tokens") if isinstance(usage, dict) else getattr(usage, "total_tokens", 0))
+                or prompt_tokens
+            )
+        if not prompt_tokens:
+            prompt_tokens = estimate_text_tokens(texts)
+            total_tokens = prompt_tokens
+        await track_model_usage(
+            provider="gemini" if provider == "google" else provider,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=0,
+            total_tokens=total_tokens,
+            api_call_type="embedding",
+            request_metadata={
+                "embedding_provider": provider,
+                "embedding_model": model,
+                "litellm_model": litellm_model,
+                "batch_size": len(texts),
+                "dimensions": dimensionality,
+                "token_source": "provider_usage" if usage else "estimated_text_tokens",
+            },
+        )
+    except Exception as usage_error:
+        logger.warning(f"⚠️ Failed to track LiteLLM embedding usage: {usage_error}")
     data = resp.get("data") if isinstance(resp, dict) else getattr(resp, "data", None)
     if not data:
         return []
@@ -144,6 +180,21 @@ async def generate_embedding(query: str) -> List[float]:
                         contents=query,
                         config=_google_embed_config(),
                     )
+                    await track_model_usage(
+                        provider="gemini",
+                        model=candidate_model,
+                        prompt_tokens=estimate_text_tokens(query),
+                        completion_tokens=0,
+                        api_call_type="embedding",
+                        request_metadata={
+                            "embedding_provider": provider,
+                            "embedding_model": candidate_model,
+                            "batch_size": 1,
+                            "dimensions": dimensionality,
+                            "token_source": "estimated_text_tokens",
+                            "sdk": "google.genai.embed_content",
+                        },
+                    )
                     return response.embeddings[0].values if response.embeddings else []
                 except Exception as e:
                     last_error = e
@@ -160,6 +211,24 @@ async def generate_embedding(query: str) -> List[float]:
                 return []
             client = AsyncOpenAI(api_key=api_key)
             response = await client.embeddings.create(input=[query], model=model)
+            usage = getattr(response, "usage", None)
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) if usage else estimate_text_tokens(query)
+            total_tokens = getattr(usage, "total_tokens", prompt_tokens) if usage else prompt_tokens
+            await track_model_usage(
+                provider="openai",
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=0,
+                total_tokens=total_tokens,
+                api_call_type="embedding",
+                request_metadata={
+                    "embedding_provider": provider,
+                    "embedding_model": model,
+                    "batch_size": 1,
+                    "dimensions": dimensionality,
+                    "token_source": "provider_usage" if usage else "estimated_text_tokens",
+                },
+            )
             return response.data[0].embedding
             
         else:
@@ -206,6 +275,21 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
                             contents=batch,
                             config=_google_embed_config(),
                         )
+                        await track_model_usage(
+                            provider="gemini",
+                            model=candidate_model,
+                            prompt_tokens=estimate_text_tokens(batch),
+                            completion_tokens=0,
+                            api_call_type="embedding",
+                            request_metadata={
+                                "embedding_provider": provider,
+                                "embedding_model": candidate_model,
+                                "batch_size": len(batch),
+                                "dimensions": dimensionality,
+                                "token_source": "estimated_text_tokens",
+                                "sdk": "google.genai.embed_content",
+                            },
+                        )
                         batch_embeddings = [e.values for e in response.embeddings] if response.embeddings else []
                         all_embeddings.extend(batch_embeddings)
                     return all_embeddings
@@ -221,6 +305,24 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
             api_key = os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY
             client = AsyncOpenAI(api_key=api_key)
             response = await client.embeddings.create(input=texts, model=model)
+            usage = getattr(response, "usage", None)
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) if usage else estimate_text_tokens(texts)
+            total_tokens = getattr(usage, "total_tokens", prompt_tokens) if usage else prompt_tokens
+            await track_model_usage(
+                provider="openai",
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=0,
+                total_tokens=total_tokens,
+                api_call_type="embedding",
+                request_metadata={
+                    "embedding_provider": provider,
+                    "embedding_model": model,
+                    "batch_size": len(texts),
+                    "dimensions": dimensionality,
+                    "token_source": "provider_usage" if usage else "estimated_text_tokens",
+                },
+            )
             return [d.embedding for d in response.data]
             
         else:

@@ -2139,6 +2139,19 @@ class StreamingService:
             logger.info(f"   Total tokens: {total_tokens}")
 
             # Use track_gemini_usage_detailed to record cache tokens in request_metadata
+            cache_name = agent_manager.get_cached_cache_name(session_id)
+            metadata = {
+                "token_source": token_source,
+                "tool_call_count": int(tool_call_count or 0),
+                "response_char_count": len(response_text or ""),
+                "user_message_char_count": len(user_message or ""),
+                "system_prompt_char_count": len(system_prompt_text or ""),
+                "history_char_count": len(history_text or ""),
+                "tool_def_text": tool_def_text,
+                "cache_name": cache_name,
+                "extended_thinking_enabled": ENABLE_EXTENDED_THINKING,
+                "pricing_note": "Gemini 2.5 Flash Lite: input $0.10/1M, output $0.40/1M, cache read $0.01/1M, cache write $0.10/1M",
+            }
             success = await track_gemini_usage_detailed(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -2147,6 +2160,7 @@ class StreamingService:
                 session_id=session_id,
                 api_call_type="agent_stream",
                 model=model_name,
+                request_metadata=metadata,
             )
 
             if success:

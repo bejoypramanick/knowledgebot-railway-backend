@@ -159,6 +159,7 @@ async def track_gemini_usage_detailed(
     message_id: Optional[str] = None,
     api_call_type: str = "rag",
     model: str = "gemini-2.5-flash-lite",
+    request_metadata: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Track detailed Gemini token usage using TokenService
 
@@ -204,6 +205,13 @@ async def track_gemini_usage_detailed(
         token_service = get_token_service()  # Use pooled service instance
 
         # Use TokenService for both provider updates and detailed logging
+        metadata = {
+            "cache_read_tokens": cache_read_tokens,
+            "cache_write_tokens": cache_write_tokens,
+        }
+        if request_metadata:
+            metadata.update(request_metadata)
+
         await token_service.track_token_usage(
             session_id=session_id,
             message_id=message_id,
@@ -213,10 +221,7 @@ async def track_gemini_usage_detailed(
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             api_call_type=api_call_type,
-            request_metadata={
-                "cache_read_tokens": cache_read_tokens,
-                "cache_write_tokens": cache_write_tokens,
-            },
+            request_metadata=metadata,
         )
 
         await log_async(

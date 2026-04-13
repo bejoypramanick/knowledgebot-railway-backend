@@ -144,9 +144,23 @@ class TokenDAO:
                     + (cache_write * 0.10)
                 ) / 1_000_000.0
 
-                # Store in cents. We use high precision (float) in Python, but DB int4 will truncate.
-                # In the future, we might want to store in millicents or use NUMERIC.
+                # Keep a coarse cents value for the legacy column, and store exact USD
+                # in request_metadata for transparent sub-cent reporting.
                 cost_cents = round(cost_usd * 100.0)
+                if request_metadata is None:
+                    request_metadata = {}
+                request_metadata.update(
+                    {
+                        "cost_usd": cost_usd,
+                        "standard_input_tokens": standard_input,
+                        "pricing_usd_per_1m": {
+                            "standard_input": 0.10,
+                            "cache_read": 0.01,
+                            "cache_write": 0.10,
+                            "completion": 0.40,
+                        },
+                    }
+                )
 
                 query = """
                     INSERT INTO token_usage_log (

@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from core.ai import get_genai_client
 from shared.otel_logger import get_otel_logger
+from shared.usage_tracking import estimate_text_tokens, track_model_usage
 
 logger = get_otel_logger("equation_extractor", "extractor")
 
@@ -113,6 +114,40 @@ correct them based on mathematical context."""
                 )
 
             response = await loop.run_in_executor(executor, call_gemini_vision)
+            try:
+                usage = getattr(response, "usage_metadata", None) if response else None
+                prompt_tokens = (
+                    getattr(usage, "prompt_token_count", 0)
+                    or getattr(usage, "promptTokenCount", 0)
+                    or estimate_text_tokens(prompt)
+                )
+                completion_tokens = (
+                    getattr(usage, "candidates_token_count", 0)
+                    or getattr(usage, "candidatesTokenCount", 0)
+                    or estimate_text_tokens(getattr(response, "text", "") if response else "")
+                )
+                total_tokens = (
+                    getattr(usage, "total_token_count", 0)
+                    or getattr(usage, "totalTokenCount", 0)
+                    or (prompt_tokens + completion_tokens)
+                )
+                await track_model_usage(
+                    provider="gemini",
+                    model="gemini-1.5-flash",
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    api_call_type="equation_vision",
+                    request_metadata={
+                        "image_index": idx,
+                        "image_count": len(pictures),
+                        "image_size_bytes": len(image_bytes or b""),
+                        "mime_type": "image/png",
+                        "token_source": "gemini_usage_metadata" if usage else "estimated_text_tokens",
+                    },
+                )
+            except Exception as usage_error:
+                logger.warning(f"⚠️ [EQUATIONS_VISION] Failed to track usage for image {idx+1}: {usage_error}")
 
             if response and response.text:
                 logger.info(f"✅ [EQUATIONS_VISION] Extracted equations from image {idx+1}")
