@@ -92,27 +92,10 @@ async def _fetch_all_data():
             ORDER BY created_at DESC
         """), {"since": since})).fetchall()]
 
-        tables_metadata = [_row_to_dict(r) for r in (await db.execute(text("""
-            SELECT tm.id, tm.file_upload_id, tm.scraped_website_id,
-                   tm.table_index, tm.table_column_count_input, tm.table_row_count_input,
-                   tm.table_character_count_input, tm.table_word_count_input,
-                   tm.table_word_count_output, tm.table_character_count_output,
-                   tm.table_input_token_count, tm.table_output_token_count,
-                   tm.created_at,
-                   COALESCE(fu.original_filename, sw.original_url) as source_name,
-                   CASE WHEN tm.file_upload_id IS NOT NULL THEN 'file' ELSE 'web' END as source_type
-            FROM tables_metadata tm
-            LEFT JOIN file_uploads fu ON tm.file_upload_id = fu.id
-            LEFT JOIN scraped_websites sw ON tm.scraped_website_id = sw.id
-            WHERE tm.created_at >= :since
-            ORDER BY tm.created_at DESC
-        """), {"since": since})).fetchall()]
-
     return {
         "sessions": sessions, "files": files,
         "websites": websites, "chat_messages": chat_messages,
-        "run_steps": run_steps, "token_usage_log": token_usage_log,
-        "tables_metadata": tables_metadata
+        "run_steps": run_steps, "token_usage_log": token_usage_log
     }
 
 
@@ -276,7 +259,6 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
       <dt>Output</dt><dd>$0.40 / 1M tokens</dd>
       <dt>Cached Input (text/image/video)</dt><dd>$0.01 / 1M tokens (90% discount)</dd>
       <dt>Cache Storage</dt><dd>$1.00 / hour / 1M tokens</dd>
-      <dt>Table Formatting (Flash)</dt><dd>Input: $0.10 / 1M, Output: $0.40 / 1M (same model)</dd>
     </dl>
   </div>
   <div class="legend-section">
@@ -396,7 +378,6 @@ function callTypeLabel(callType) {
     embedding: 'Embeddings',
     equation_vision: 'Equation vision OCR',
     cache_create: 'Gemini cache creation',
-    table_formatting: 'Table formatting'
   };
   return labels[callType] || callType || 'Unknown';
 }
@@ -469,7 +450,6 @@ function render() {
   const files = filterByDate(RAW.files, days);
   const websites = filterByDate(RAW.websites, days);
   const tokenLog = filterByDate(RAW.token_usage_log||[], days);
-  const tablesMeta = filterByDate(RAW.tables_metadata||[], days);
 
   document.getElementById('subtitle').textContent =
     `Last ${days} days \\u00b7 Generated ${new Date().toISOString().replace('T',' ').substring(0,16)} UTC`;
@@ -485,10 +465,6 @@ function render() {
   const fileTokens = files.reduce((a,r) => a+(r.filestore_token_count||0), 0);
   const totalWebsites = websites.length;
   const webTokens = websites.reduce((a,r) => a+(r.filestore_token_count||0), 0);
-
-  // Table formatting totals
-  const totalTableInputTokens = tablesMeta.reduce((a,r) => a+(r.table_input_token_count||0), 0);
-  const totalTableOutputTokens = tablesMeta.reduce((a,r) => a+(r.table_output_token_count||0), 0);
 
   // Token log cache totals
   let totalCacheReadTokens = 0, totalCacheWriteTokens = 0;
@@ -508,14 +484,13 @@ function render() {
   const chatCost = chatInputCost + chatOutputCost;
   const cacheReadCost = calcCacheReadCost(totalCacheReadTokens);
   const cacheWriteCost = calcCacheWriteCost(totalCacheWriteTokens);
-  const tableFormatCost = calcTableCost(totalTableInputTokens, totalTableOutputTokens);
   const otherApiCost = tokenLog
     .filter(r => !['agent_stream','rag'].includes(r.api_call_type||''))
     .reduce((a,r) => a + tokenLogCost(r), 0);
   const otherApiTokens = tokenLog
     .filter(r => !['agent_stream','rag'].includes(r.api_call_type||''))
     .reduce((a,r) => a + (r.total_tokens||0), 0);
-  const totalEstCost = chatCost + cacheReadCost + cacheWriteCost + tableFormatCost + otherApiCost;
+  const totalEstCost = chatCost + cacheReadCost + cacheWriteCost + otherApiCost;
 
   // === COST SUMMARY ===
   document.getElementById('cost-summary').innerHTML = `
@@ -547,11 +522,6 @@ function render() {
         <div class="cost-detail">${fmt(totalCacheWriteTokens)} tokens @ $0.10/1M</div>
       </div>
       <div class="cost-item">
-        <div class="cost-label">Table Formatting</div>
-        <div class="cost-value" style="font-size:20px">${fmtCost(tableFormatCost)}</div>
-        <div class="cost-detail">${fmt(totalTableInputTokens)} in + ${fmt(totalTableOutputTokens)} out tokens</div>
-      </div>
-      <div class="cost-item">
         <div class="cost-label">Other API Usage</div>
         <div class="cost-value" style="font-size:20px">${fmtCost(otherApiCost)}</div>
         <div class="cost-detail">${fmt(otherApiTokens)} tokens from embeddings, vision, and other logged calls</div>
@@ -570,7 +540,6 @@ function render() {
     <div class="kpi"><div class="label">Output Tokens (Completion)</div><div class="value cyan">${fmt(totalCompletionTokens)}</div><div class="sub">${fmtCost(chatOutputCost)} @ $0.40/1M</div></div>
     <div class="kpi"><div class="label">Cache Read Tokens</div><div class="value accent2">${fmt(totalCacheReadTokens)}</div><div class="sub">${fmtCost(cacheReadCost)} @ $0.01/1M (90% off)</div></div>
     <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">${fmtCost(cacheWriteCost)} @ $0.10/1M</div></div>
-    <div class="kpi"><div class="label">Table Formatting</div><div class="value orange">${fmt(totalTableInputTokens + totalTableOutputTokens)}</div><div class="sub">${fmtCost(tableFormatCost)} (${tablesMeta.length} tables)</div></div>
     <div class="kpi"><div class="label">Other API Tokens</div><div class="value red">${fmt(otherApiTokens)}</div><div class="sub">${fmtCost(otherApiCost)} embeddings/vision/logged calls</div></div>
     <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmt(fileTokens)} tokens indexed</div></div>
   `;
@@ -586,8 +555,7 @@ function render() {
     {name:'Tool calls and returns', ok: (RAW.run_steps||[]).length > 0 || toolRows > 0, detail:'Agent run steps plus per-call tool counts'},
     {name:'Embeddings', ok: capturedTypes.has('embedding'), detail:'Google/LiteLLM/OpenAI embedding calls logged'},
     {name:'Equation vision OCR', ok: capturedTypes.has('equation_vision'), detail:'Gemini image extraction calls logged per image'},
-    {name:'Gemini cache creation', ok: capturedTypes.has('cache_create'), detail:'Cache write tokens and TTL metadata logged'},
-    {name:'Table formatting', ok: tablesMeta.length > 0, detail:'Per-table input/output tokens from tables_metadata'}
+    {name:'Gemini cache creation', ok: capturedTypes.has('cache_create'), detail:'Cache write tokens and TTL metadata logged'}
   ];
 
   document.getElementById('usage-insights').innerHTML = `
@@ -645,7 +613,6 @@ function render() {
     {label:'Chat output', value:chatOutputCost},
     {label:'Cache read', value:cacheReadCost},
     {label:'Cache write', value:cacheWriteCost},
-    {label:'Table formatting', value:tableFormatCost},
     {label:'Other API usage', value:otherApiCost}
   ].filter(r => r.value > 0);
   const tokenRows = [
@@ -653,7 +620,6 @@ function render() {
     {label:'Output', value:totalCompletionTokens},
     {label:'Cache read', value:totalCacheReadTokens},
     {label:'Cache write', value:totalCacheWriteTokens},
-    {label:'Table formatting', value:totalTableInputTokens + totalTableOutputTokens},
     {label:'Other API', value:otherApiTokens},
     {label:'Indexed files', value:fileTokens},
     {label:'Indexed websites', value:webTokens}
@@ -904,7 +870,6 @@ function downloadExcel() {
   const sessions = filterByDate(RAW.sessions, days);
   const chatMsgs = filterByDate(RAW.chat_messages||[], days);
   const tokenLog = filterByDate(RAW.token_usage_log||[], days);
-  const tablesMeta = filterByDate(RAW.tables_metadata||[], days);
 
   const wb = XLSX.utils.book_new();
 
@@ -1026,8 +991,6 @@ function downloadExcel() {
   // Sheet 7: Cost Summary
   const totalPromptTokens = sessions.reduce((a,r) => a+(r.total_prompt_token_count||0), 0);
   const totalCompletionTokens = sessions.reduce((a,r) => a+(r.total_completion_token_count||0), 0);
-  const totalTableIn = tablesMeta.reduce((a,r) => a+(r.table_input_token_count||0), 0);
-  const totalTableOut = tablesMeta.reduce((a,r) => a+(r.table_output_token_count||0), 0);
   let totalCacheRead = 0, totalCacheWrite = 0;
   tokenLog.forEach(r => { const c = getCacheTokens(r.request_metadata); totalCacheRead += c.read; totalCacheWrite += c.write; });
   const totalStandardIn = Math.max(0, totalPromptTokens - totalCacheRead);
@@ -1039,10 +1002,8 @@ function downloadExcel() {
     {'Category': 'Chat Output (Completion)', 'Tokens': totalCompletionTokens, 'Rate ($/1M)': 0.40, 'Est. Cost ($)': calcOutputCost(totalCompletionTokens).toFixed(6)},
     {'Category': 'Cache Read (90% off)', 'Tokens': totalCacheRead, 'Rate ($/1M)': 0.01, 'Est. Cost ($)': calcCacheReadCost(totalCacheRead).toFixed(6)},
     {'Category': 'Cache Write', 'Tokens': totalCacheWrite, 'Rate ($/1M)': 0.10, 'Est. Cost ($)': calcCacheWriteCost(totalCacheWrite).toFixed(6)},
-    {'Category': 'Table Formatting (Input)', 'Tokens': totalTableIn, 'Rate ($/1M)': 0.10, 'Est. Cost ($)': calcInputCost(totalTableIn).toFixed(6)},
-    {'Category': 'Table Formatting (Output)', 'Tokens': totalTableOut, 'Rate ($/1M)': 0.40, 'Est. Cost ($)': calcOutputCost(totalTableOut).toFixed(6)},
     {'Category': 'Other Logged API Usage', 'Tokens': otherLoggedTokens, 'Rate ($/1M)': 'per-call metadata', 'Est. Cost ($)': otherLoggedCost.toFixed(6)},
-    {'Category': 'TOTAL ESTIMATED COST', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': (calcInputCost(totalStandardIn) + calcOutputCost(totalCompletionTokens) + calcCacheReadCost(totalCacheRead) + calcCacheWriteCost(totalCacheWrite) + calcTableCost(totalTableIn, totalTableOut) + otherLoggedCost).toFixed(6)},
+    {'Category': 'TOTAL ESTIMATED COST', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': (calcInputCost(totalStandardIn) + calcOutputCost(totalCompletionTokens) + calcCacheReadCost(totalCacheRead) + calcCacheWriteCost(totalCacheWrite) + otherLoggedCost).toFixed(6)},
     {'Category': '', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''},
     {'Category': 'NOTE: FileSearch upload/storage costs billed separately by Google (not tracked)', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''},
     {'Category': 'NOTE: Cache storage ($1.00/hr/1M tokens) not tracked in this report', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''},
