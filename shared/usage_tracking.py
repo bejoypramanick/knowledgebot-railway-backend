@@ -210,6 +210,8 @@ async def track_model_usage(
         "request_metadata": json.dumps(metadata),
     }
 
+    logger.info(f"📊 [TRANSFORM] request_metadata for log: {params['request_metadata']}")
+
     try:
         async with get_db_session() as db:
             await db.execute(text(query), params)

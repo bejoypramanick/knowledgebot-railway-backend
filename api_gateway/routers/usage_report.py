@@ -23,6 +23,8 @@ def _row_to_dict(row):
     for k, v in d.items():
         if isinstance(v, datetime):
             d[k] = v.isoformat()
+        elif isinstance(v, (dict, list)):
+            continue  # Preserve JSONB structures
         elif hasattr(v, '__str__') and not isinstance(v, (int, float, bool, str, type(None))):
             d[k] = str(v)
     return d
@@ -83,14 +85,32 @@ async def _fetch_all_data():
             ORDER BY session_id, user_message_id, step_number
         """), {"since": since})).fetchall()]
 
-        token_usage_log = [_row_to_dict(r) for r in (await db.execute(text("""
+        token_usage_log = []
+        rows = (await db.execute(text("""
             SELECT id, session_id, message_id, provider, model,
                    prompt_tokens, completion_tokens, total_tokens,
                    api_call_type, request_metadata, created_at
             FROM token_usage_log
             WHERE created_at >= :since
             ORDER BY created_at DESC
-        """), {"since": since})).fetchall()]
+        """), {"since": since})).fetchall()
+        
+        for r in rows:
+            d = _row_to_dict(r)
+            meta = d.get('request_metadata')
+            if meta and isinstance(meta, str):
+                try:
+                    # Fallback if DB driver returned a string for JSONB
+                    d['request_metadata'] = json.loads(meta)
+                    logger.debug(f"Parsed metadata string for row {d['id']}")
+                except:
+                    pass
+            token_usage_log.append(d)
+
+    logger.info(f"Report data fetched: {len(token_usage_log)} usage rows")
+    if token_usage_log:
+        first_meta = token_usage_log[0].get('request_metadata')
+        logger.info(f"Sample metadata type: {type(first_meta)} value: {str(first_meta)[:100]}")
 
     return {
         "sessions": sessions, "files": files,

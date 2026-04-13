@@ -24,15 +24,20 @@ def calculate_metrics(content: str) -> Dict[str, int]:
         # Character count: number of characters in content
         char_count = len(content)
 
+        # Word count: simple whitespace split
+        word_count = len(content.split())
+
         # File size: number of bytes when encoded as UTF-8
         file_size_bytes = len(content.encode('utf-8'))
 
         logger.info(f"📊 [METRICS] Content metrics calculated:")
         logger.info(f"   - Characters: {char_count:,}")
+        logger.info(f"   - Words: {word_count:,}")
         logger.info(f"   - File size: {file_size_bytes:,} bytes ({file_size_bytes / 1024:.2f} KB)")
 
         return {
             "char_count": char_count,
+            "word_count": word_count,
             "file_size_bytes": file_size_bytes
         }
     except Exception as e:
