@@ -86,7 +86,7 @@ async def _fetch_all_data():
         token_usage_log = [_row_to_dict(r) for r in (await db.execute(text("""
             SELECT id, session_id, message_id, provider, model,
                    prompt_tokens, completion_tokens, total_tokens,
-                   cost_cents, api_call_type, request_metadata, created_at
+                   api_call_type, request_metadata, created_at
             FROM token_usage_log
             WHERE created_at >= :since
             ORDER BY created_at DESC
@@ -145,7 +145,6 @@ td{padding:10px 12px;border-bottom:1px solid var(--border)}
 tr:hover td{background:rgba(79,70,229,.04)}
 .mono{font-family:'SF Mono','Fira Code',monospace;font-size:12px}
 .token-cell{font-weight:600;color:var(--accent)}
-.cost-cell{font-weight:600;color:var(--green)}
 .badge{padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600}
 .badge-active,.badge-completed{background:rgba(34,197,94,.15);color:var(--green)}
 .badge-closed,.badge-archived{background:rgba(156,163,175,.15);color:var(--muted)}
@@ -182,13 +181,13 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 .legend dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}
 .legend dt{font-weight:600;color:var(--accent);white-space:nowrap}
 .legend dd{color:var(--text);margin:0}
-.cost-summary{background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:1px solid #86efac;border-radius:12px;padding:20px;margin-bottom:32px}
-.cost-summary h2{font-size:20px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #86efac;color:#166534}
-.cost-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
-.cost-item{background:#fff;border:1px solid #bbf7d0;border-radius:8px;padding:16px}
-.cost-item .cost-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-.cost-item .cost-value{font-size:24px;font-weight:700;color:#166534}
-.cost-item .cost-detail{font-size:11px;color:var(--muted);margin-top:4px}
+.token-summary{background:linear-gradient(135deg,#f0f9ff,#eef2ff);border:1px solid #bfdbfe;border-radius:12px;padding:20px;margin-bottom:32px}
+.token-summary h2{font-size:20px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #bfdbfe;color:#1d4ed8}
+.token-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.token-item{background:#fff;border:1px solid #dbeafe;border-radius:8px;padding:16px}
+.token-item .token-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.token-item .token-value{font-size:24px;font-weight:700;color:#1d4ed8}
+.token-item .token-detail{font-size:11px;color:var(--muted);margin-top:4px}
 .insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:32px}
 .insight{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px}
 .insight h3{font-size:15px;margin-bottom:10px}
@@ -217,10 +216,10 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
   .toolbar button{flex:1 1 calc(50% - 8px);padding:10px 8px}
   .toolbar span{display:none}
   .summary-actions button{flex:1 1 100%;padding:12px}
-  .kpi-grid,.cost-grid,.insight-grid,.chart-grid{grid-template-columns:1fr;gap:12px;margin-bottom:20px}
-  .kpi,.cost-summary,.insight,.chart-card,.legend{padding:14px;border-radius:8px}
+  .kpi-grid,.token-grid,.insight-grid,.chart-grid{grid-template-columns:1fr;gap:12px;margin-bottom:20px}
+  .kpi,.token-summary,.insight,.chart-card,.legend{padding:14px;border-radius:8px}
   .kpi .value{font-size:24px}
-  .cost-item .cost-value{font-size:22px}
+  .token-item .token-value{font-size:22px}
   .section h2{font-size:17px}
   .legend-grid{grid-template-columns:1fr}
   .legend dl{grid-template-columns:1fr}
@@ -250,31 +249,21 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 </div>
 
 <div class="legend" id="legend-panel">
-<h3>Pricing & Notes <span style="font-size:12px;color:var(--muted);font-weight:400;cursor:pointer" onclick="document.getElementById('legend-detail').style.display=document.getElementById('legend-detail').style.display==='none'?'block':'none'">[show/hide]</span></h3>
+<h3>Report Notes <span style="font-size:12px;color:var(--muted);font-weight:400;cursor:pointer" onclick="document.getElementById('legend-detail').style.display=document.getElementById('legend-detail').style.display==='none'?'block':'none'">[show/hide]</span></h3>
 <div id="legend-detail" class="legend-grid" style="display:none">
-  <div class="legend-section">
-    <h4>Gemini 2.5 Flash Lite Pricing (Paid Tier, per 1M tokens)</h4>
-    <dl>
-      <dt>Input (text/image/video)</dt><dd>$0.10 / 1M tokens</dd>
-      <dt>Output</dt><dd>$0.40 / 1M tokens</dd>
-      <dt>Cached Input (text/image/video)</dt><dd>$0.01 / 1M tokens (90% discount)</dd>
-      <dt>Cache Storage</dt><dd>$1.00 / hour / 1M tokens</dd>
-    </dl>
-  </div>
   <div class="legend-section">
     <h4>What is Included</h4>
     <dl>
       <dt>Chat</dt><dd>Prompt, completion, cache read/write, tool calls, and per-session totals</dd>
       <dt>Knowledge ingestion</dt><dd>Indexed content token counts and table-formatting model calls</dd>
       <dt>Other API calls</dt><dd>Embeddings, Gemini Vision equation extraction, and cache creation</dd>
-      <dt>Not included</dt><dd>Provider storage charges such as cache storage hours and FileSearch storage are not directly tracked</dd>
     </dl>
   </div>
 </div>
 </div>
 
-<!-- Cost Summary -->
-<div class="cost-summary" id="cost-summary"></div>
+<!-- Token Summary -->
+<div class="token-summary" id="token-summary"></div>
 
 <div class="kpi-grid" id="kpis"></div>
 
@@ -292,12 +281,12 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <div id="details-panel" class="hidden-panel">
 <div class="section"><h2>Chat Sessions <span style="font-size:13px;color:var(--muted);font-weight:400">(click to expand messages)</span></h2><div class="table-wrap" style="max-height:700px"><table>
-  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Billable input tokens">Prompt Tokens</th><th title="Billable output tokens">Completion Tokens</th><th title="System prompt + history + tool overhead">Context Tokens</th><th title="Current user + bot message text tokens">Message Tokens</th><th title="Estimated cost using Gemini pricing">Est. Cost</th><th>Status</th></tr></thead>
+  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Input tokens">Prompt Tokens</th><th title="Output tokens">Completion Tokens</th><th title="System prompt + history + tool overhead">Context Tokens</th><th title="Current user + bot message text tokens">Message Tokens</th><th>Status</th></tr></thead>
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
 <div class="section"><h2>API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(actual Gemini usage per request)</span></h2><div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Tools</th><th>Source</th><th>Est. Cost</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Tools</th><th>Source</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -308,32 +297,6 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 // === DATA ===
 const RAW = """ + data_json + """;
 let currentDays = 30;
-
-// === GEMINI 2.5 FLASH LITE PRICING (Paid Tier, per 1M tokens, USD) ===
-const PRICING = {
-  input_per_1m: 0.10,        // $0.10 per 1M input tokens (text/image/video)
-  output_per_1m: 0.40,       // $0.40 per 1M output tokens
-  cache_read_per_1m: 0.01,   // $0.01 per 1M cached input tokens (90% discount)
-  cache_write_per_1m: 0.10,  // Same as input rate (cache write = standard input cost)
-  cache_storage_per_hr: 1.00 // $1.00 per hour per 1M tokens stored
-};
-
-// Cost calculation helpers
-function calcInputCost(tokens) { return (tokens / 1_000_000) * PRICING.input_per_1m; }
-function calcOutputCost(tokens) { return (tokens / 1_000_000) * PRICING.output_per_1m; }
-function calcCacheReadCost(tokens) { return (tokens / 1_000_000) * PRICING.cache_read_per_1m; }
-function calcCacheWriteCost(tokens) { return (tokens / 1_000_000) * PRICING.cache_write_per_1m; }
-function calcSessionCost(promptTokens, completionTokens) {
-  return calcInputCost(promptTokens) + calcOutputCost(completionTokens);
-}
-function calcTableCost(inputTokens, outputTokens) {
-  return calcInputCost(inputTokens) + calcOutputCost(outputTokens);
-}
-function fmtCost(usd) {
-  if(usd >= 0.01) return '$' + usd.toFixed(4);
-  if(usd > 0) return '$' + usd.toFixed(6);
-  return '$0.00';
-}
 
 // === HELPERS ===
 const fmt = n => (n||0).toLocaleString();
@@ -364,13 +327,6 @@ function parseMeta(meta) {
   if(typeof meta === 'string') { try { return JSON.parse(meta); } catch(e) { return {}; } }
   return meta || {};
 }
-function tokenLogCost(r) {
-  const meta = parseMeta(r.request_metadata);
-  if(typeof meta.cost_usd === 'number') return meta.cost_usd;
-  const cache = getCacheTokens(r.request_metadata);
-  const standardIn = Math.max(0, (r.prompt_tokens||0) - cache.read);
-  return calcInputCost(standardIn) + calcOutputCost(r.completion_tokens||0) + calcCacheReadCost(cache.read) + calcCacheWriteCost(cache.write);
-}
 function callTypeLabel(callType) {
   const labels = {
     agent_stream: 'Chat responses',
@@ -385,7 +341,7 @@ function groupByCallType(rows) {
   const grouped = {};
   rows.forEach(r => {
     const key = r.api_call_type || 'unknown';
-    if(!grouped[key]) grouped[key] = {call_type:key, requests:0, prompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0, cost:0, tools:0, estimated:0};
+    if(!grouped[key]) grouped[key] = {call_type:key, requests:0, prompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0, tools:0, estimated:0};
     const meta = parseMeta(r.request_metadata);
     const cache = getCacheTokens(r.request_metadata);
     grouped[key].requests += 1;
@@ -394,11 +350,10 @@ function groupByCallType(rows) {
     grouped[key].total += r.total_tokens || 0;
     grouped[key].cacheRead += cache.read;
     grouped[key].cacheWrite += cache.write;
-    grouped[key].cost += tokenLogCost(r);
     grouped[key].tools += meta.tool_call_count || 0;
     if((meta.token_source || '').toLowerCase().includes('estimated')) grouped[key].estimated += 1;
   });
-  return Object.values(grouped).sort((a,b) => b.cost - a.cost);
+  return Object.values(grouped).sort((a,b) => (b.total || (b.prompt + b.completion)) - (a.total || (a.prompt + a.completion)));
 }
 function metadataSummary(meta) {
   const parts = [];
@@ -474,73 +429,58 @@ function render() {
     totalCacheWriteTokens += c.write;
   });
 
-  // === COST CALCULATIONS ===
   // Note: totalPromptTokens in DB includes totalCacheReadTokens.
-  // We must subtract cached tokens to get the standard (non-cached) input tokens.
+  // Subtract cached tokens to show standard input separately.
   const standardInputTokens = Math.max(0, totalPromptTokens - totalCacheReadTokens);
-  
-  const chatInputCost = calcInputCost(standardInputTokens);
-  const chatOutputCost = calcOutputCost(totalCompletionTokens);
-  const chatCost = chatInputCost + chatOutputCost;
-  const cacheReadCost = calcCacheReadCost(totalCacheReadTokens);
-  const cacheWriteCost = calcCacheWriteCost(totalCacheWriteTokens);
-  const otherApiCost = tokenLog
-    .filter(r => !['agent_stream','rag'].includes(r.api_call_type||''))
-    .reduce((a,r) => a + tokenLogCost(r), 0);
   const otherApiTokens = tokenLog
     .filter(r => !['agent_stream','rag'].includes(r.api_call_type||''))
     .reduce((a,r) => a + (r.total_tokens||0), 0);
-  const totalEstCost = chatCost + cacheReadCost + cacheWriteCost + otherApiCost;
 
-  // === COST SUMMARY ===
-  document.getElementById('cost-summary').innerHTML = `
-    <h2>Estimated Cost Summary (Gemini 2.5 Flash Lite Paid Tier)</h2>
-    <div class="cost-grid">
-      <div class="cost-item">
-        <div class="cost-label">Total Estimated Cost</div>
-        <div class="cost-value">${fmtCost(totalEstCost)}</div>
-        <div class="cost-detail">All Gemini API usage combined</div>
+  // === TOKEN SUMMARY ===
+  document.getElementById('token-summary').innerHTML = `
+    <h2>Token Usage Summary</h2>
+    <div class="token-grid">
+      <div class="token-item">
+        <div class="token-label">Total Reported Tokens</div>
+        <div class="token-value">${fmt(totalPromptTokens + totalCompletionTokens + otherApiTokens)}</div>
+        <div class="token-detail">Chat, cache, embeddings, vision, and other logged calls</div>
       </div>
-      <div class="cost-item">
-        <div class="cost-label">Chat Input (Standard)</div>
-        <div class="cost-value" style="font-size:20px">${fmtCost(chatInputCost)}</div>
-        <div class="cost-detail">${fmt(standardInputTokens)} non-cached tokens @ $0.10/1M</div>
+      <div class="token-item">
+        <div class="token-label">Standard Input</div>
+        <div class="token-value" style="font-size:20px">${fmt(standardInputTokens)}</div>
+        <div class="token-detail">Prompt tokens excluding cache read tokens</div>
       </div>
-      <div class="cost-item">
-        <div class="cost-label">Chat Output (Completion)</div>
-        <div class="cost-value" style="font-size:20px">${fmtCost(chatOutputCost)}</div>
-        <div class="cost-detail">${fmt(totalCompletionTokens)} tokens @ $0.40/1M</div>
+      <div class="token-item">
+        <div class="token-label">Output</div>
+        <div class="token-value" style="font-size:20px">${fmt(totalCompletionTokens)}</div>
+        <div class="token-detail">Completion tokens from chat sessions</div>
       </div>
-      <div class="cost-item">
-        <div class="cost-label">Cache Read (90% discount)</div>
-        <div class="cost-value" style="font-size:20px">${fmtCost(cacheReadCost)}</div>
-        <div class="cost-detail">${fmt(totalCacheReadTokens)} tokens @ $0.01/1M</div>
+      <div class="token-item">
+        <div class="token-label">Cache Read</div>
+        <div class="token-value" style="font-size:20px">${fmt(totalCacheReadTokens)}</div>
+        <div class="token-detail">Cached input tokens reported by logged API calls</div>
       </div>
-      <div class="cost-item">
-        <div class="cost-label">Cache Write</div>
-        <div class="cost-value" style="font-size:20px">${fmtCost(cacheWriteCost)}</div>
-        <div class="cost-detail">${fmt(totalCacheWriteTokens)} tokens @ $0.10/1M</div>
+      <div class="token-item">
+        <div class="token-label">Cache Write</div>
+        <div class="token-value" style="font-size:20px">${fmt(totalCacheWriteTokens)}</div>
+        <div class="token-detail">Cache creation tokens from logged API calls</div>
       </div>
-      <div class="cost-item">
-        <div class="cost-label">Other API Usage</div>
-        <div class="cost-value" style="font-size:20px">${fmtCost(otherApiCost)}</div>
-        <div class="cost-detail">${fmt(otherApiTokens)} tokens from embeddings, vision, and other logged calls</div>
+      <div class="token-item">
+        <div class="token-label">Other API Usage</div>
+        <div class="token-value" style="font-size:20px">${fmt(otherApiTokens)}</div>
+        <div class="token-detail">${fmt(otherApiTokens)} tokens from embeddings, vision, and other logged calls</div>
       </div>
-    </div>
-    <div style="margin-top:12px;font-size:11px;color:#6b7280">
-      Pricing: Input $0.10/1M | Output $0.40/1M | Cached Input $0.01/1M | Cache Storage $1.00/hr/1M tokens (not tracked here).
-      FileSearch upload/storage costs are billed separately by Google and not tracked in this report.
     </div>
   `;
 
   // === KPIs ===
   document.getElementById('kpis').innerHTML = `
     <div class="kpi"><div class="label">Total Sessions</div><div class="value accent">${fmt(totalSessions)}</div><div class="sub">${fmt(totalMsgs)} messages total</div></div>
-    <div class="kpi"><div class="label">Standard Input Tokens</div><div class="value green">${fmt(standardInputTokens)}</div><div class="sub">${fmtCost(chatInputCost)} @ $0.10/1M</div></div>
-    <div class="kpi"><div class="label">Output Tokens (Completion)</div><div class="value cyan">${fmt(totalCompletionTokens)}</div><div class="sub">${fmtCost(chatOutputCost)} @ $0.40/1M</div></div>
-    <div class="kpi"><div class="label">Cache Read Tokens</div><div class="value accent2">${fmt(totalCacheReadTokens)}</div><div class="sub">${fmtCost(cacheReadCost)} @ $0.01/1M (90% off)</div></div>
-    <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">${fmtCost(cacheWriteCost)} @ $0.10/1M</div></div>
-    <div class="kpi"><div class="label">Other API Tokens</div><div class="value red">${fmt(otherApiTokens)}</div><div class="sub">${fmtCost(otherApiCost)} embeddings/vision/logged calls</div></div>
+    <div class="kpi"><div class="label">Standard Input Tokens</div><div class="value green">${fmt(standardInputTokens)}</div><div class="sub">Prompt tokens excluding cache reads</div></div>
+    <div class="kpi"><div class="label">Output Tokens (Completion)</div><div class="value cyan">${fmt(totalCompletionTokens)}</div><div class="sub">Chat completion tokens</div></div>
+    <div class="kpi"><div class="label">Cache Read Tokens</div><div class="value accent2">${fmt(totalCacheReadTokens)}</div><div class="sub">Reported cached input tokens</div></div>
+    <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">Reported cache creation tokens</div></div>
+    <div class="kpi"><div class="label">Other API Tokens</div><div class="value red">${fmt(otherApiTokens)}</div><div class="sub">Embeddings, vision, and logged calls</div></div>
     <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmt(fileTokens)} tokens indexed</div></div>
   `;
 
@@ -549,7 +489,7 @@ function render() {
   const capturedTypes = new Set(tokenLog.map(r => r.api_call_type || 'unknown'));
   const estimatedRows = tokenLog.filter(r => ((parseMeta(r.request_metadata).token_source||'').toLowerCase().includes('estimated'))).length;
   const toolRows = tokenLog.filter(r => (parseMeta(r.request_metadata).tool_call_count||0) > 0).length;
-  const topCalls = [...tokenLog].sort((a,b) => tokenLogCost(b) - tokenLogCost(a)).slice(0,8);
+  const topCalls = [...tokenLog].sort((a,b) => (b.total_tokens||0) - (a.total_tokens||0)).slice(0,8);
   const coverageRows = [
     {name:'Chat generation', ok: capturedTypes.has('agent_stream'), detail:'Actual Gemini usage from Pydantic AI run.usage()'},
     {name:'Tool calls and returns', ok: (RAW.run_steps||[]).length > 0 || toolRows > 0, detail:'Agent run steps plus per-call tool counts'},
@@ -562,7 +502,7 @@ function render() {
     <div class="insight">
       <h3>Usage By Call Type</h3>
       <table class="mini-table">
-        <thead><tr><th>Call Type</th><th>Reqs</th><th>Tokens</th><th>Cache</th><th>Tools</th><th>Cost</th></tr></thead>
+        <thead><tr><th>Call Type</th><th>Reqs</th><th>Tokens</th><th>Cache</th><th>Tools</th><th>Estimated Rows</th></tr></thead>
         <tbody>
           ${groupedCalls.map(g => `<tr>
             <td>${callTypeLabel(g.call_type)}</td>
@@ -570,7 +510,7 @@ function render() {
             <td class="token-cell">${fmt(g.total || (g.prompt + g.completion))}</td>
             <td>${fmt(g.cacheRead + g.cacheWrite)}</td>
             <td>${fmt(g.tools)}</td>
-            <td class="cost-cell">${fmtCost(g.cost)}</td>
+            <td>${fmt(g.estimated)}</td>
           </tr>`).join('') || '<tr><td colspan="6" style="color:var(--muted)">No API token log rows in this window</td></tr>'}
         </tbody>
       </table>
@@ -588,9 +528,9 @@ function render() {
       <p style="margin-top:10px">${fmt(estimatedRows)} of ${fmt(tokenLog.length)} API rows use estimated token counts because provider usage metadata was unavailable.</p>
     </div>
     <div class="insight">
-      <h3>Highest Cost Calls</h3>
+      <h3>Largest Token Calls</h3>
       <table class="mini-table">
-        <thead><tr><th>When</th><th>Type</th><th>Tokens</th><th>Cost</th><th>Context</th></tr></thead>
+        <thead><tr><th>When</th><th>Type</th><th>Tokens</th><th>Source</th><th>Context</th></tr></thead>
         <tbody>
           ${topCalls.map(r => {
             const meta = parseMeta(r.request_metadata);
@@ -598,7 +538,7 @@ function render() {
               <td>${fmtDateTime(r.created_at)}</td>
               <td>${callTypeLabel(r.api_call_type)}</td>
               <td class="token-cell">${fmt(r.total_tokens || ((r.prompt_tokens||0)+(r.completion_tokens||0)))}</td>
-              <td class="cost-cell">${fmtCost(tokenLogCost(r))}</td>
+              <td>${trunc(meta.token_source||'actual/logged',24)}</td>
               <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
             </tr>`;
           }).join('') || '<tr><td colspan="5" style="color:var(--muted)">No API calls in this window</td></tr>'}
@@ -608,13 +548,6 @@ function render() {
   `;
 
   // === CHARTS (HIDDEN BY DEFAULT) ===
-  const costRows = [
-    {label:'Chat input', value:chatInputCost},
-    {label:'Chat output', value:chatOutputCost},
-    {label:'Cache read', value:cacheReadCost},
-    {label:'Cache write', value:cacheWriteCost},
-    {label:'Other API usage', value:otherApiCost}
-  ].filter(r => r.value > 0);
   const tokenRows = [
     {label:'Standard input', value:standardInputTokens},
     {label:'Output', value:totalCompletionTokens},
@@ -628,16 +561,7 @@ function render() {
     .map(g => ({label:callTypeLabel(g.call_type), value:g.total || (g.prompt + g.completion)}))
     .filter(r => r.value > 0)
     .slice(0,10);
-  const callTypeCostRows = groupedCalls
-    .map(g => ({label:callTypeLabel(g.call_type), value:g.cost}))
-    .filter(r => r.value > 0)
-    .slice(0,10);
-
   document.getElementById('charts-grid').innerHTML = `
-    <div class="chart-card">
-      <h3>Cost Breakdown</h3>
-      ${renderBars(costRows, 'value', 'label', fmtCost, 'green') || '<p style="color:var(--muted);font-size:13px">No cost data in this window</p>'}
-    </div>
     <div class="chart-card">
       <h3>Token Breakdown</h3>
       ${renderBars(tokenRows, 'value', 'label', fmt, 'cyan') || '<p style="color:var(--muted);font-size:13px">No token data in this window</p>'}
@@ -645,10 +569,6 @@ function render() {
     <div class="chart-card">
       <h3>Tokens By Call Type</h3>
       ${renderBars(callTypeTokenRows, 'value', 'label', fmt, 'orange') || '<p style="color:var(--muted);font-size:13px">No API rows in this window</p>'}
-    </div>
-    <div class="chart-card">
-      <h3>Cost By Call Type</h3>
-      ${renderBars(callTypeCostRows, 'value', 'label', fmtCost, 'red') || '<p style="color:var(--muted);font-size:13px">No API rows in this window</p>'}
     </div>
   `;
 
@@ -668,7 +588,6 @@ function render() {
   const sessionsEl = document.getElementById('sessions-table');
   sessionsEl.innerHTML = '';
   sessions.slice(0,100).forEach(r => {
-    const cost = calcSessionCost(r.total_prompt_token_count||0, r.total_completion_token_count||0);
     const sessionRow = document.createElement('tr');
     sessionRow.className = 'session-row';
     sessionRow.dataset.sessionId = r.id;
@@ -679,7 +598,6 @@ function render() {
       <td class="token-cell">${fmt(r.total_completion_token_count)}</td>
       <td class="token-cell">${fmt((r.total_system_prompt_token_count||0)+(r.total_history_token_count||0)+(r.total_tool_def_token_count||0))}</td>
       <td class="token-cell">${fmt((r.total_user_msg_token_count||0)+(r.total_bot_response_token_count||0))}</td>
-      <td class="cost-cell">${fmtCost(cost)}</td>
       <td>${badge(r.archive_status)}</td>`;
     sessionRow.onclick = function() { toggleSession(this, r.id); };
     sessionsEl.appendChild(sessionRow);
@@ -699,7 +617,6 @@ function render() {
       <td class="token-cell">${fmt(cache.read + cache.write)}</td>
       <td>${fmt(meta.tool_call_count||0)}</td>
       <td>${trunc(meta.token_source||'actual/logged',28)}</td>
-      <td class="cost-cell">${fmtCost(tokenLogCost(r))}</td>
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>`;
   }).join('');
@@ -768,7 +685,7 @@ function toggleSession(rowEl, sessionId) {
   if(msgs.length === 0) {
     const emptyRow = document.createElement('tr');
     emptyRow.className = 'msg-row';
-    emptyRow.innerHTML = `<td colspan="9" style="color:var(--muted);font-style:italic;padding-left:32px">No messages found for this session</td>`;
+    emptyRow.innerHTML = `<td colspan="8" style="color:var(--muted);font-style:italic;padding-left:32px">No messages found for this session</td>`;
     rowEl.after(emptyRow);
     return;
   }
@@ -781,21 +698,15 @@ function toggleSession(rowEl, sessionId) {
     const msgRow = document.createElement('tr');
     msgRow.className = 'msg-row';
 
-    // Per-message cost
-    let msgCost = 0;
-    if(m.role==='user') msgCost = calcInputCost(m.prompt_token_count||0);
-    else if(m.role==='assistant') msgCost = calcOutputCost(m.completion_token_count||0);
-
-    msgRow.innerHTML = `<td colspan="9" style="padding-left:24px">
+    msgRow.innerHTML = `<td colspan="8" style="padding-left:24px">
       <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:8px">
         <span class="badge badge-${m.role}" style="flex-shrink:0">${roleName(m.role)}</span>
         <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="flex:1">${escHtml(m.content)}</div>
-        <span class="cost-cell" style="flex-shrink:0;font-size:12px;white-space:nowrap">${fmtCost(msgCost)}</span>
         <span style="flex-shrink:0;font-size:11px;color:var(--muted);white-space:nowrap">${fmtDateTime(m.created_at)}</span>
       </div>
       <table class="bd-table">
         <thead><tr>
-          <th>Component</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th style="text-align:right">Est. Cost</th><th>Content (click to expand)</th>
+          <th>Component</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>Content (click to expand)</th>
         </tr></thead>
         <tbody>
         ${m.role==='user' ? `
@@ -804,7 +715,6 @@ function toggleSession(rowEl, sessionId) {
             <td class="bd-num">${fmt(m.system_prompt_token_count)}</td>
             <td class="bd-num">${fmt(m.system_prompt_word_count)}</td>
             <td class="bd-num">${fmt(m.system_prompt_char_count)}</td>
-            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.system_prompt_token_count||0))}</td>
             <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.system_prompt_text)||'-'}</div></td>
           </tr>
           <tr>
@@ -812,14 +722,12 @@ function toggleSession(rowEl, sessionId) {
             <td class="bd-num">${fmt(m.history_token_count)}</td>
             <td class="bd-num">${fmt(m.history_word_count)}</td>
             <td class="bd-num">${fmt(m.history_char_count)}</td>
-            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.history_token_count||0))}</td>
             <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.history_text)||'<i style="color:var(--muted)">No history (first message)</i>'}</div></td>
           </tr>
           <tr>
             <td class="bd-label">Tools + Multi-turn</td>
             <td class="bd-num">${fmt(m.tool_def_token_count)}</td>
             <td class="bd-num" colspan="2" style="text-align:left;font-weight:400;font-size:10px;color:var(--muted)">Derived: Total Prompt - others</td>
-            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.tool_def_token_count||0))}</td>
             <td class="bd-text" style="font-size:10px;color:var(--muted)">Includes tool schema, tool call/return context, repeated prompt across turns</td>
           </tr>
           <tr>
@@ -827,14 +735,12 @@ function toggleSession(rowEl, sessionId) {
             <td class="bd-num">${fmt(m.user_msg_token_count)}</td>
             <td class="bd-num">${fmt(m.user_msg_word_count)}</td>
             <td class="bd-num">${fmt(m.user_msg_char_count)}</td>
-            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.user_msg_token_count||0))}</td>
             <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div></td>
           </tr>
           <tr style="background:rgba(79,70,229,.06);font-weight:600">
             <td class="bd-label">Total (Prompt)</td>
             <td class="bd-num">${fmt(m.prompt_token_count)}</td>
             <td colspan="2" style="font-size:11px;color:var(--muted)">Billable input from Gemini API</td>
-            <td class="bd-num cost-cell">${fmtCost(calcInputCost(m.prompt_token_count||0))}</td>
             <td></td>
           </tr>
         ` : `
@@ -843,14 +749,12 @@ function toggleSession(rowEl, sessionId) {
             <td class="bd-num">${fmt(m.bot_response_token_count)}</td>
             <td class="bd-num">${fmt(m.bot_response_word_count)}</td>
             <td class="bd-num">${fmt(m.bot_response_char_count)}</td>
-            <td class="bd-num cost-cell">${fmtCost(calcOutputCost(m.bot_response_token_count||0))}</td>
             <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div></td>
           </tr>
           <tr style="background:rgba(79,70,229,.06);font-weight:600">
             <td class="bd-label">Total (Completion)</td>
             <td class="bd-num">${fmt(m.completion_token_count)}</td>
-            <td colspan="2" style="font-size:11px;color:var(--muted)">Billable output — includes tool call generation + final response</td>
-            <td class="bd-num cost-cell">${fmtCost(calcOutputCost(m.completion_token_count||0))}</td>
+            <td colspan="2" style="font-size:11px;color:var(--muted)">Output tokens include tool call generation + final response</td>
             <td></td>
           </tr>
         `}
@@ -875,7 +779,6 @@ function downloadExcel() {
 
   // Sheet 1: Chat Sessions
   const sessData = sessions.map(r => {
-    const cost = calcSessionCost(r.total_prompt_token_count||0, r.total_completion_token_count||0);
     return {
       'Session ID': r.id,
       'Started At': r.started_at,
@@ -884,7 +787,6 @@ function downloadExcel() {
       'Completion Tokens (output)': r.total_completion_token_count||0,
       'Context Tokens': (r.total_system_prompt_token_count||0)+(r.total_history_token_count||0)+(r.total_tool_def_token_count||0),
       'Message Text Tokens': (r.total_user_msg_token_count||0)+(r.total_bot_response_token_count||0),
-      'Est. Total Cost ($)': cost.toFixed(6),
       'Status': r.archive_status||''
     };
   });
@@ -892,8 +794,6 @@ function downloadExcel() {
 
   // Sheet 2: Chat Messages
   const msgData = chatMsgs.map(r => {
-    const inCost = r.role==='user' ? calcInputCost(r.prompt_token_count||0) : 0;
-    const outCost = r.role==='assistant' ? calcOutputCost(r.completion_token_count||0) : 0;
     return {
       'Message ID': r.id,
       'Session ID': r.session_id,
@@ -905,7 +805,6 @@ function downloadExcel() {
       'Tool Def Tokens': r.tool_def_token_count||0,
       'User Msg Tokens': r.user_msg_token_count||0,
       'Bot Response Tokens': r.bot_response_token_count||0,
-      'Est. Cost ($)': (inCost + outCost).toFixed(6),
       'Created': r.created_at||'',
       'Message Preview': trunc(r.content||'', 240)
     };
@@ -946,7 +845,6 @@ function downloadExcel() {
       'Standard Input Tokens': meta.standard_input_tokens||Math.max(0, (r.prompt_tokens||0) - cache.read),
       'Tool Calls': meta.tool_call_count||0,
       'Token Source': meta.token_source||'',
-      'Est. Cost ($)': tokenLogCost(r).toFixed(6),
       'Context': metadataSummary(meta)
     };
   });
@@ -963,13 +861,12 @@ function downloadExcel() {
     'Cache Read Tokens': g.cacheRead,
     'Cache Write Tokens': g.cacheWrite,
     'Tool Calls': g.tools,
-    'Rows With Estimated Tokens': g.estimated,
-    'Est. Cost ($)': g.cost.toFixed(6)
+    'Rows With Estimated Tokens': g.estimated
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(groupedUsageData), 'Usage By Call Type');
 
-  // Sheet 6: Highest Cost Calls
-  const topCallsData = [...tokenLog].sort((a,b) => tokenLogCost(b) - tokenLogCost(a)).slice(0,100).map(r => {
+  // Sheet 6: Largest Token Calls
+  const topCallsData = [...tokenLog].sort((a,b) => (b.total_tokens||0) - (a.total_tokens||0)).slice(0,100).map(r => {
     const meta = parseMeta(r.request_metadata);
     return {
       'Created': r.created_at||'',
@@ -979,37 +876,13 @@ function downloadExcel() {
       'Prompt Tokens': r.prompt_tokens||0,
       'Completion Tokens': r.completion_tokens||0,
       'Total Tokens': r.total_tokens||0,
-      'Est. Cost ($)': tokenLogCost(r).toFixed(6),
       'Token Source': meta.token_source||'',
       'Context': metadataSummary(meta),
       'Session ID': r.session_id||'',
       'Message ID': r.message_id||''
     };
   });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topCallsData), 'Highest Cost Calls');
-
-  // Sheet 7: Cost Summary
-  const totalPromptTokens = sessions.reduce((a,r) => a+(r.total_prompt_token_count||0), 0);
-  const totalCompletionTokens = sessions.reduce((a,r) => a+(r.total_completion_token_count||0), 0);
-  let totalCacheRead = 0, totalCacheWrite = 0;
-  tokenLog.forEach(r => { const c = getCacheTokens(r.request_metadata); totalCacheRead += c.read; totalCacheWrite += c.write; });
-  const totalStandardIn = Math.max(0, totalPromptTokens - totalCacheRead);
-  const otherLoggedRows = tokenLog.filter(r => !['agent_stream','rag'].includes(r.api_call_type||''));
-  const otherLoggedTokens = otherLoggedRows.reduce((a,r) => a + (r.total_tokens||0), 0);
-  const otherLoggedCost = otherLoggedRows.reduce((a,r) => a + tokenLogCost(r), 0);
-  const costSummary = [
-    {'Category': 'Chat Input (Standard)', 'Tokens': totalStandardIn, 'Rate ($/1M)': 0.10, 'Est. Cost ($)': calcInputCost(totalStandardIn).toFixed(6)},
-    {'Category': 'Chat Output (Completion)', 'Tokens': totalCompletionTokens, 'Rate ($/1M)': 0.40, 'Est. Cost ($)': calcOutputCost(totalCompletionTokens).toFixed(6)},
-    {'Category': 'Cache Read (90% off)', 'Tokens': totalCacheRead, 'Rate ($/1M)': 0.01, 'Est. Cost ($)': calcCacheReadCost(totalCacheRead).toFixed(6)},
-    {'Category': 'Cache Write', 'Tokens': totalCacheWrite, 'Rate ($/1M)': 0.10, 'Est. Cost ($)': calcCacheWriteCost(totalCacheWrite).toFixed(6)},
-    {'Category': 'Other Logged API Usage', 'Tokens': otherLoggedTokens, 'Rate ($/1M)': 'per-call metadata', 'Est. Cost ($)': otherLoggedCost.toFixed(6)},
-    {'Category': 'TOTAL ESTIMATED COST', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': (calcInputCost(totalStandardIn) + calcOutputCost(totalCompletionTokens) + calcCacheReadCost(totalCacheRead) + calcCacheWriteCost(totalCacheWrite) + otherLoggedCost).toFixed(6)},
-    {'Category': '', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''},
-    {'Category': 'NOTE: FileSearch upload/storage costs billed separately by Google (not tracked)', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''},
-    {'Category': 'NOTE: Cache storage ($1.00/hr/1M tokens) not tracked in this report', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''},
-    {'Category': 'Pricing: Gemini 2.5 Flash Lite Paid Tier (as of 2025)', 'Tokens': '', 'Rate ($/1M)': '', 'Est. Cost ($)': ''}
-  ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(costSummary), 'Cost Summary');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topCallsData), 'Largest Token Calls');
 
   XLSX.writeFile(wb, `usage-report-${days}d-${new Date().toISOString().substring(0,10)}.xlsx`);
 }
