@@ -347,6 +347,8 @@ function parseMeta(meta) {
   if(typeof meta === 'string') { try { return JSON.parse(meta); } catch(e) { return {}; } }
   return meta || {};
 }
+const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
+
 function callTypeLabel(callType) {
   const labels = {
     agent_stream: 'Chat responses',
@@ -621,7 +623,7 @@ function render() {
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
-      <td colspan="11">
+      <td colspan="12">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
@@ -641,7 +643,6 @@ function render() {
 function renderRunSteps(userMsgId, sessionId) {
   const steps = (RAW.run_steps||[]).filter(s => s.user_message_id === userMsgId);
   if(steps.length === 0) return '';
-  const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
   const partLabel = p => ({
     'system_prompt':'System Prompt','user_prompt':'User Prompt','text':'Text Response',
     'tool_call':'Tool Call','tool_return':'Tool Return','thinking':'Thinking'
@@ -706,7 +707,6 @@ function toggleSession(rowEl, sessionId) {
   }
 
   const roleName = r => r==='assistant'?'Bot':r==='user'?'User':r==='human_agent'?'Human Agent':(r||'Unknown');
-  const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
 
   let insertAfter = rowEl;
   msgs.forEach((m, idx) => {
