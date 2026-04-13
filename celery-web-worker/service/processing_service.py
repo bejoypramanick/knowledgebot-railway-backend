@@ -292,6 +292,7 @@ class ProcessingService:
                     # Pass source information for better usage observability
                     usage_metadata = {
                         "source_url": page_data.page_url,
+                        "webpage_name": page_data.title,
                         "website_id": job_context.website_id,
                         "ingestion_workflow": "web_scrape_pipeline"
                     }

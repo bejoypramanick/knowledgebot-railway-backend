@@ -305,7 +305,14 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
-<div class="section"><h2>API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per request)</span></h2><div class="table-wrap"><table>
+<div class="section" id="token-log-section">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:8px">
+    <h2 style="margin:0">API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per request)</span></h2>
+    <div style="display:flex;gap:8px">
+      <button onclick="toggleAllRows('token-log-table', this)" id="btn-toggle-all" style="padding:4px 10px;font-size:11px;border-radius:6px;cursor:pointer;background:var(--card);border:1px solid var(--border);font-weight:600;color:var(--accent)">Expand All</button>
+    </div>
+  </div>
+  <div class="table-wrap"><table>
   <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Chars</th><th>Words</th><th>Size</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
@@ -384,6 +391,7 @@ function metadataSummary(meta) {
   if(meta.tool_call_count) parts.push(`tools=${meta.tool_call_count}`);
   if(meta.standard_input_tokens) parts.push(`standard_in=${fmt(meta.standard_input_tokens)}`);
   if(meta.token_source) parts.push(`token_src=${meta.token_source}`);
+  if(meta.webpage_name) parts.push(`page="${meta.webpage_name}"`);
   if(meta.source_url) parts.push(`url=${meta.source_url}`);
   if(meta.website_id) parts.push(`site=${meta.website_id.substring(0,8)}`);
   return parts.join(' · ') || JSON.stringify(meta);
@@ -435,6 +443,17 @@ function togglePanel(panelId, buttonId) {
     const label = panelId === 'charts-panel' ? 'charts' : 'details';
     button.textContent = `${isHidden ? 'Hide' : 'Show'} ${label}`;
   }
+}
+function toggleAllRows(tableId, btn) {
+  const table = document.getElementById(tableId);
+  const rows = Array.from(table.querySelectorAll('.msg-row'));
+  const sessionRows = Array.from(table.querySelectorAll('.session-row'));
+  const isExpand = btn.textContent.includes('Expand');
+  
+  rows.forEach(r => { r.style.display = isExpand ? 'table-row' : 'none'; });
+  sessionRows.forEach(sr => { if(isExpand) sr.classList.add('open'); else sr.classList.remove('open'); });
+  
+  btn.textContent = isExpand ? 'Collapse All' : 'Expand All';
 }
 function renderBars(rows, valueKey, labelKey, formatter, colorClass='') {
   const maxValue = Math.max(1, ...rows.map(r => r[valueKey] || 0));
