@@ -344,7 +344,7 @@ class ProcessingService:
                             logger.warning(f"   ⚠️ [S3_CLEANUP] Error deleting processed markdown: {cleanup_err}")
 
                 # Record to database
-                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config, processed_content_s3_key, None)
+                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config, processed_content_s3_key)
 
                 # Metrics
                 metrics = calculate_metrics(markdown_content)
@@ -991,8 +991,7 @@ class ProcessingService:
             upload_result: UploadResult,
             job_context: JobContext,
             crawl_config: CrawlConfig,
-            processed_content_s3_key: Optional[str] = None,
-            tables_metadata_list: list = None
+            processed_content_s3_key: Optional[str] = None
         ) -> Optional[str]:
             """Record single page in database"""
             storage_backend_state = 'completed' if getattr(upload_result, "confirmed", False) else 'pending'
@@ -1013,14 +1012,6 @@ class ProcessingService:
                     processed_content_s3_key=processed_content_s3_key,
                     storage_backend_state=storage_backend_state
                 )
-
-                # Save tables metadata (non-blocking)
-                if tables_metadata_list:
-                    try:
-                        from shared.tables_metadata_dao import save_tables_metadata
-                        await save_tables_metadata(tables_metadata_list, scraped_website_id=job_context.website_id)
-                    except Exception as tm_err:
-                        logger.warning(f"⚠️ [TABLES_META] Non-blocking error saving table metadata: {tm_err}")
 
                 # Cache citation URL mappings in Redis for fast lookup during chat
                 try:
@@ -1053,14 +1044,6 @@ class ProcessingService:
                     storage_backend_state=storage_backend_state
                 )
 
-                # Save tables metadata (non-blocking)
-                if tables_metadata_list:
-                    try:
-                        from shared.tables_metadata_dao import save_tables_metadata
-                        await save_tables_metadata(tables_metadata_list, scraped_website_id=job_context.website_id)
-                    except Exception as tm_err:
-                        logger.warning(f"⚠️ [TABLES_META] Non-blocking error saving table metadata: {tm_err}")
-
                 # Cache citation URL mappings in Redis for fast lookup during chat
                 try:
                     from shared.redis_citation_cache import cache_single_url
@@ -1089,14 +1072,6 @@ class ProcessingService:
                 processed_content_s3_key=processed_content_s3_key,
                 storage_backend_state=storage_backend_state
             )
-
-            # Save tables metadata for child page (non-blocking)
-            if tables_metadata_list and child_page_id:
-                try:
-                    from shared.tables_metadata_dao import save_tables_metadata
-                    await save_tables_metadata(tables_metadata_list, scraped_website_id=child_page_id)
-                except Exception as tm_err:
-                    logger.warning(f"⚠️ [TABLES_META] Non-blocking error saving table metadata for child page: {tm_err}")
 
             # Cache citation URL mappings in Redis for fast lookup during chat
             try:
