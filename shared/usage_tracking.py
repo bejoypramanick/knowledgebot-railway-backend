@@ -8,6 +8,7 @@ same token_usage_log table with nullable session/message IDs.
 """
 
 import json
+import os
 from typing import Any, Dict, Optional
 
 from sqlalchemy import text
@@ -58,6 +59,41 @@ def text_payload_stats(value: Any) -> Dict[str, Any]:
     if item_count:
         stats["input_item_count"] = item_count
     return stats
+
+
+def text_payload_details(value: Any, *, max_chars: Optional[int] = None) -> Dict[str, Any]:
+    """Return the actual text payload, capped to keep usage rows bounded."""
+    if max_chars is None:
+        max_chars = int(os.getenv("USAGE_TRACKING_MAX_TEXT_CHARS", "20000"))
+
+    if value is None:
+        parts = []
+    elif isinstance(value, list):
+        parts = ["" if item is None else str(item) for item in value]
+    else:
+        parts = [str(value)]
+
+    remaining = max(0, max_chars)
+    captured = []
+    truncated = False
+    for part in parts:
+        if remaining <= 0:
+            truncated = truncated or bool(part)
+            captured.append("")
+            continue
+        if len(part) > remaining:
+            captured.append(part[:remaining])
+            truncated = True
+            remaining = 0
+        else:
+            captured.append(part)
+            remaining -= len(part)
+
+    return {
+        "input_text_chunks": captured,
+        "input_text_truncated": truncated,
+        "input_text_capture_limit_chars": max_chars,
+    }
 
 
 def binary_payload_stats(value: bytes, *, prefix: str = "input") -> Dict[str, Any]:

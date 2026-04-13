@@ -379,6 +379,22 @@ function fmtBytes(bytes) {
   if(bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${fmt(bytes)} B`;
 }
+function payloadTextChunks(meta) {
+  const chunks = meta.input_text_chunks;
+  if(Array.isArray(chunks)) return chunks;
+  if(meta.input_text) return [meta.input_text];
+  return [];
+}
+function renderPayloadText(meta) {
+  const chunks = payloadTextChunks(meta);
+  if(!chunks.length) return '<span style="color:var(--muted)">No text payload captured for this row</span>';
+  const truncNote = meta.input_text_truncated ? `<div style="color:var(--orange);font-size:12px;margin-bottom:8px">Text was truncated at ${fmt(meta.input_text_capture_limit_chars||0)} characters for storage safety.</div>` : '';
+  return `${truncNote}${chunks.map((chunk, idx) => `
+    <div style="margin:8px 0">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Chunk ${idx + 1} · ${fmt((chunk||'').length)} chars · ${fmtBytes(new Blob([chunk||'']).size)}</div>
+      <pre style="white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:260px;overflow:auto;font-family:'SF Mono','Fira Code',monospace;font-size:11px;line-height:1.5">${escHtml(chunk)}</pre>
+    </div>`).join('')}`;
+}
 function togglePanel(panelId, buttonId) {
   const panel = document.getElementById(panelId);
   const button = document.getElementById(buttonId);
@@ -598,7 +614,8 @@ function render() {
   document.getElementById('token-log-table').innerHTML = tokenLog.slice(0,300).map(r => {
     const meta = parseMeta(r.request_metadata);
     const cache = getCacheTokens(r.request_metadata);
-    return `<tr>
+    const chunks = payloadTextChunks(meta);
+    return `<tr class="session-row" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'table-row':'none';this.classList.toggle('open')">
       <td>${fmtDateTime(r.created_at)}</td>
       <td>${callTypeLabel(r.api_call_type)}</td>
       <td>${r.model||'-'}</td>
@@ -608,6 +625,12 @@ function render() {
       <td class="token-cell">${fmt(cache.read + cache.write)}</td>
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
+    </tr>
+    <tr class="msg-row" style="display:none">
+      <td colspan="9">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
+        ${renderPayloadText(meta)}
+      </td>
     </tr>`;
   }).join('');
 }
@@ -836,6 +859,8 @@ function downloadExcel() {
       'Input Characters': payloadChars(meta),
       'Input Size Bytes': payloadBytes(meta),
       'Input Size': fmtBytes(payloadBytes(meta)),
+      'Input Text Chunks': payloadTextChunks(meta).join('\\n\\n--- chunk ---\\n\\n'),
+      'Input Text Truncated': meta.input_text_truncated ? 'yes' : 'no',
       'Tool Calls': meta.tool_call_count||0,
       'Token Source': meta.token_source||'',
       'Context': metadataSummary(meta)
