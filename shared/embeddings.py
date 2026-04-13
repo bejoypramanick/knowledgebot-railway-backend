@@ -2,7 +2,7 @@ import os
 import asyncio
 from typing import List, Optional
 from shared.otel_logger import get_otel_logger
-from shared.usage_tracking import estimate_text_tokens, track_model_usage
+from shared.usage_tracking import estimate_text_tokens, text_payload_stats, track_model_usage
 # Configuration from environment variables with defaults
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -127,6 +127,7 @@ async def _litellm_embed(texts: List[str], provider: str, model: str) -> List[Li
                 "batch_size": len(texts),
                 "dimensions": dimensionality,
                 "token_source": "provider_usage" if usage else "estimated_text_tokens",
+                **text_payload_stats(texts),
             },
         )
     except Exception as usage_error:
@@ -193,6 +194,7 @@ async def generate_embedding(query: str) -> List[float]:
                             "dimensions": dimensionality,
                             "token_source": "estimated_text_tokens",
                             "sdk": "google.genai.embed_content",
+                            **text_payload_stats(query),
                         },
                     )
                     return response.embeddings[0].values if response.embeddings else []
@@ -227,6 +229,7 @@ async def generate_embedding(query: str) -> List[float]:
                     "batch_size": 1,
                     "dimensions": dimensionality,
                     "token_source": "provider_usage" if usage else "estimated_text_tokens",
+                    **text_payload_stats(query),
                 },
             )
             return response.data[0].embedding
@@ -288,6 +291,7 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
                                 "dimensions": dimensionality,
                                 "token_source": "estimated_text_tokens",
                                 "sdk": "google.genai.embed_content",
+                                **text_payload_stats(batch),
                             },
                         )
                         batch_embeddings = [e.values for e in response.embeddings] if response.embeddings else []
@@ -321,6 +325,7 @@ async def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
                     "batch_size": len(texts),
                     "dimensions": dimensionality,
                     "token_source": "provider_usage" if usage else "estimated_text_tokens",
+                    **text_payload_stats(texts),
                 },
             )
             return [d.embedding for d in response.data]

@@ -35,6 +35,41 @@ def estimate_text_tokens(value: Any) -> int:
         return max(1, len(text_value) // 4)
 
 
+def text_payload_stats(value: Any) -> Dict[str, Any]:
+    """Return character and UTF-8 byte size for text payloads."""
+    if value is None:
+        text_value = ""
+        item_count = 0
+    elif isinstance(value, list):
+        text_parts = ["" if item is None else str(item) for item in value]
+        text_value = "\n".join(text_parts)
+        item_count = len(value)
+    else:
+        text_value = str(value)
+        item_count = 1
+
+    size_bytes = len(text_value.encode("utf-8"))
+    stats: Dict[str, Any] = {
+        "input_character_count": len(text_value),
+        "input_size_bytes": size_bytes,
+        "input_size_kb": round(size_bytes / 1024, 3),
+        "input_size_mb": round(size_bytes / (1024 * 1024), 6),
+    }
+    if item_count:
+        stats["input_item_count"] = item_count
+    return stats
+
+
+def binary_payload_stats(value: bytes, *, prefix: str = "input") -> Dict[str, Any]:
+    """Return byte size for binary payloads such as images."""
+    size_bytes = len(value or b"")
+    return {
+        f"{prefix}_size_bytes": size_bytes,
+        f"{prefix}_size_kb": round(size_bytes / 1024, 3),
+        f"{prefix}_size_mb": round(size_bytes / (1024 * 1024), 6),
+    }
+
+
 def gemini_pricing_for_call(
     *, model: str, api_call_type: str
 ) -> Dict[str, float]:

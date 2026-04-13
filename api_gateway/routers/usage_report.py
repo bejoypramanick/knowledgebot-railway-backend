@@ -286,7 +286,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 </table></div></div>
 
 <div class="section"><h2>API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per request)</span></h2><div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Chars</th><th>Size</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -365,6 +365,19 @@ function metadataSummary(meta) {
   if(meta.standard_input_tokens) parts.push(`standard_in=${fmt(meta.standard_input_tokens)}`);
   if(meta.token_source) parts.push(`source=${meta.token_source}`);
   return parts.join(' · ') || JSON.stringify(meta).substring(0,140);
+}
+function payloadChars(meta) {
+  return meta.input_character_count || meta.system_prompt_character_count || 0;
+}
+function payloadBytes(meta) {
+  return meta.input_size_bytes || meta.image_size_bytes || meta.system_prompt_size_bytes || 0;
+}
+function fmtBytes(bytes) {
+  bytes = Number(bytes || 0);
+  if(!bytes) return '-';
+  if(bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  if(bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${fmt(bytes)} B`;
 }
 function togglePanel(panelId, buttonId) {
   const panel = document.getElementById(panelId);
@@ -583,6 +596,7 @@ function render() {
 
   // === TOKEN USAGE LOG TABLE ===
   document.getElementById('token-log-table').innerHTML = tokenLog.slice(0,300).map(r => {
+    const meta = parseMeta(r.request_metadata);
     const cache = getCacheTokens(r.request_metadata);
     return `<tr>
       <td>${fmtDateTime(r.created_at)}</td>
@@ -592,6 +606,8 @@ function render() {
       <td class="token-cell">${fmt(r.prompt_tokens)}</td>
       <td class="token-cell">${fmt(r.completion_tokens)}</td>
       <td class="token-cell">${fmt(cache.read + cache.write)}</td>
+      <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
+      <td>${fmtBytes(payloadBytes(meta))}</td>
     </tr>`;
   }).join('');
 }
@@ -817,6 +833,9 @@ function downloadExcel() {
       'Total Tokens': r.total_tokens||0,
       'Cache Tokens': cache.read + cache.write,
       'Standard Input Tokens': meta.standard_input_tokens||Math.max(0, (r.prompt_tokens||0) - cache.read),
+      'Input Characters': payloadChars(meta),
+      'Input Size Bytes': payloadBytes(meta),
+      'Input Size': fmtBytes(payloadBytes(meta)),
       'Tool Calls': meta.tool_call_count||0,
       'Token Source': meta.token_source||'',
       'Context': metadataSummary(meta)

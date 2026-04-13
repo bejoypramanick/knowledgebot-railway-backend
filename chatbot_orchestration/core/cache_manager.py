@@ -384,6 +384,9 @@ class GeminiCacheManager:
                         or (system_prompt_tokens or 0)
                         + (tool_schema_tokens or 0)
                     )
+                    from shared.usage_tracking import text_payload_stats
+
+                    cache_payload_stats = text_payload_stats([system_prompt, serialized_tool_schema])
                     await track_model_usage(
                         provider="gemini",
                         model=model_name,
@@ -397,11 +400,16 @@ class GeminiCacheManager:
                             "cache_write_tokens": cached_tokens,
                             "system_prompt_tokens_sdk": system_prompt_tokens or 0,
                             "tool_schema_tokens_sdk": tool_schema_tokens or 0,
+                            "system_prompt_character_count": len(system_prompt),
+                            "system_prompt_size_bytes": len(system_prompt.encode("utf-8")),
+                            "tool_schema_character_count": tool_schema_chars,
+                            "tool_schema_size_bytes": len(serialized_tool_schema.encode("utf-8")),
                             "tool_count": len(gemini_tools) if gemini_tools else 0,
                             "has_tools": self._has_tools,
                             "token_source": "gemini_cache_usage_metadata"
                             if getattr(cached_content, "usage_metadata", None)
                             else "sdk_count_tokens",
+                            **cache_payload_stats,
                         },
                     )
                 except Exception as usage_error:

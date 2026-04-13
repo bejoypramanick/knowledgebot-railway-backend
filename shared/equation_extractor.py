@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from core.ai import get_genai_client
 from shared.otel_logger import get_otel_logger
-from shared.usage_tracking import estimate_text_tokens, track_model_usage
+from shared.usage_tracking import binary_payload_stats, estimate_text_tokens, text_payload_stats, track_model_usage
 
 logger = get_otel_logger("equation_extractor", "extractor")
 
@@ -144,6 +144,8 @@ correct them based on mathematical context."""
                         "image_size_bytes": len(image_bytes or b""),
                         "mime_type": "image/png",
                         "token_source": "gemini_usage_metadata" if usage else "estimated_text_tokens",
+                        **text_payload_stats(prompt),
+                        **binary_payload_stats(image_bytes or b"", prefix="image"),
                     },
                 )
             except Exception as usage_error:
