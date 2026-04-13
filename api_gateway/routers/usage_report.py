@@ -446,8 +446,10 @@ function render() {
   const totalChars = sessions.reduce((a,r) => a+(r.total_character_count||0), 0);
   const totalFiles = files.length;
   const fileTokens = files.reduce((a,r) => a+(r.filestore_token_count||0), 0);
+  const fileSizeBytes = files.reduce((a,r) => a+(r.file_size||0), 0);
   const totalWebsites = websites.length;
   const webTokens = websites.reduce((a,r) => a+(r.filestore_token_count||0), 0);
+  const websiteSizeBytes = websites.reduce((a,r) => a+(r.file_size||0), 0);
 
   // Token log cache totals
   let totalCacheReadTokens = 0, totalCacheWriteTokens = 0;
@@ -507,7 +509,8 @@ function render() {
     <div class="kpi"><div class="label">Cache Read Tokens</div><div class="value accent2">${fmt(totalCacheReadTokens)}</div><div class="sub">Reported cached input tokens</div></div>
     <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">Reported cache creation tokens</div></div>
     <div class="kpi"><div class="label">Knowledge Ingestion Tokens</div><div class="value red">${fmt(ingestionTokens)}</div><div class="sub">Embeddings</div></div>
-    <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmt(fileTokens)} tokens indexed</div></div>
+    <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmtBytes(fileSizeBytes)} total · ${fmt(fileTokens)} tokens indexed</div></div>
+    <div class="kpi"><div class="label">Websites Scraped</div><div class="value cyan">${fmt(totalWebsites)}</div><div class="sub">${fmtBytes(websiteSizeBytes)} total · ${fmt(webTokens)} tokens indexed</div></div>
   `;
 
   // === INSIGHTS ===
