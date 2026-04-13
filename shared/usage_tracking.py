@@ -73,15 +73,28 @@ def text_payload_details(value: Any, *, max_chars: Optional[int] = None) -> Dict
     else:
         text_parts = [str(value)]
 
-    # Join multiple chunks into one searchable block for the usage row
-    full_text = "\n---\n".join(text_parts)
-    captured_text = full_text[:limit]
-    is_truncated = len(full_text) > limit
+    captured_chunks = []
+    remaining = max(0, limit)
+    is_truncated = False
+    for part in text_parts:
+        if remaining <= 0:
+            if part:
+                is_truncated = True
+            captured_chunks.append("")
+            continue
+
+        if len(part) > remaining:
+            captured_chunks.append(part[:remaining])
+            is_truncated = True
+            remaining = 0
+        else:
+            captured_chunks.append(part)
+            remaining -= len(part)
 
     return {
-        "input_text_chunks": [captured_text] if captured_text else [],
+        "input_text_chunks": captured_chunks,
         "input_text_truncated": is_truncated,
-        "input_text_capture": "first_batch_joined",
+        "input_text_capture": "per_input_chunk",
         "input_text_capture_limit_chars": limit,
     }
 
