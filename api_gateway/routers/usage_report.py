@@ -313,7 +313,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     </div>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Chars</th><th>Words</th><th>Size</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total</th><th>Prompt</th><th>Output</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -392,7 +392,8 @@ function metadataSummary(meta) {
   if(meta.standard_input_tokens) parts.push(`standard_in=${fmt(meta.standard_input_tokens)}`);
   if(meta.token_source) parts.push(`token_src=${meta.token_source}`);
   if(meta.webpage_name) parts.push(`page="${meta.webpage_name}"`);
-  if(meta.source_url) parts.push(`url=${meta.source_url}`);
+  const url = meta.source_url || meta.url;
+  if(url) parts.push(`url=${url}`);
   if(meta.website_id) parts.push(`site=${meta.website_id.substring(0,8)}`);
   
   if (parts.length === 0 && Object.keys(meta).length > 0) {
@@ -640,14 +641,14 @@ function render() {
       <td class="token-cell">${fmt(r.total_tokens || ((r.prompt_tokens||0)+(r.completion_tokens||0)))}</td>
       <td class="token-cell">${fmt(r.prompt_tokens)}</td>
       <td class="token-cell">${fmt(r.completion_tokens)}</td>
-      <td class="token-cell">${fmt(cache.read + cache.write)}</td>
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
+      <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" class="mono">${meta.source_url || meta.url || '-'}</td>
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
-      <td colspan="11">
+      <td colspan="12">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
