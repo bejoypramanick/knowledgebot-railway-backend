@@ -52,6 +52,7 @@ def text_payload_stats(value: Any) -> Dict[str, Any]:
     size_bytes = len(text_value.encode("utf-8"))
     stats: Dict[str, Any] = {
         "input_character_count": len(text_value),
+        "input_word_count": len(text_value.split()),
         "input_size_bytes": size_bytes,
         "input_size_kb": round(size_bytes / 1024, 3),
         "input_size_mb": round(size_bytes / (1024 * 1024), 6),

@@ -286,7 +286,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 </table></div></div>
 
 <div class="section"><h2>API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per request)</span></h2><div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Chars</th><th>Size</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Chars</th><th>Words</th><th>Size</th><th>Text</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -368,6 +368,9 @@ function metadataSummary(meta) {
 }
 function payloadChars(meta) {
   return meta.input_character_count || meta.system_prompt_character_count || 0;
+}
+function payloadWords(meta) {
+  return meta.input_word_count || 0;
 }
 function payloadBytes(meta) {
   return meta.input_size_bytes || meta.image_size_bytes || meta.system_prompt_size_bytes || 0;
@@ -630,10 +633,12 @@ function render() {
       <td class="token-cell">${fmt(r.completion_tokens)}</td>
       <td class="token-cell">${fmt(cache.read + cache.write)}</td>
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
+      <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
+      <td style="padding:4px"><div style="max-height:100px;max-width:400px;overflow:auto;white-space:pre-wrap;font-family:monospace;font-size:10px;background:#fff;border:1px solid var(--border);padding:6px;border-radius:4px;line-height:1.2;color:var(--text)">${chunks.length ? escHtml(chunks[0]) : '-'}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
-      <td colspan="9">
+      <td colspan="11">
         <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
         ${renderPayloadText(meta)}
       </td>
@@ -863,6 +868,7 @@ function downloadExcel() {
       'Cache Tokens': cache.read + cache.write,
       'Standard Input Tokens': meta.standard_input_tokens||Math.max(0, (r.prompt_tokens||0) - cache.read),
       'Input Characters': payloadChars(meta),
+      'Input Words': payloadWords(meta),
       'Input Size Bytes': payloadBytes(meta),
       'Input Size': fmtBytes(payloadBytes(meta)),
       'Input Text Chunks': payloadTextChunks(meta).join('\\n\\n--- chunk ---\\n\\n'),

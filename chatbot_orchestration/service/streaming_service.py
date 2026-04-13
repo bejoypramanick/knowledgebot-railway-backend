@@ -31,6 +31,7 @@ from ..core.config import settings
 from .session_manager import session_state_manager
 from .agent_manager import agent_manager
 from shared.profiling import trace_phase, PipelineTimer
+from shared.usage_tracking import text_payload_stats, text_payload_details
 
 logger = get_otel_logger("streaming_service", "chatbot-orchestration")
 
@@ -2152,6 +2153,15 @@ class StreamingService:
                 "extended_thinking_enabled": ENABLE_EXTENDED_THINKING,
                 "pricing_note": "Gemini 2.5 Flash Lite: input $0.10/1M, output $0.40/1M, cache read $0.01/1M, cache write $0.10/1M",
             }
+
+            # Capture actual text and stats for the report
+            if user_message:
+                metadata.update(text_payload_stats(user_message))
+                metadata.update(text_payload_details(user_message))
+            if response_text:
+                resp_stats = text_payload_stats(response_text)
+                metadata["response_word_count"] = resp_stats.get("input_word_count")
+                metadata["response_size_bytes"] = resp_stats.get("input_size_bytes")
             success = await track_gemini_usage_detailed(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
