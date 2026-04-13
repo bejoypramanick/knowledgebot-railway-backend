@@ -306,7 +306,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 </table></div></div>
 
 <div class="section"><h2>API Token Usage Log <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per request)</span></h2><div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Chars</th><th>Words</th><th>Size</th><th>Text</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Total Tok</th><th>Prompt</th><th>Output</th><th>Cache</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -543,45 +543,7 @@ function render() {
   `;
 
   // === INSIGHTS ===
-  const groupedCalls = groupByCallType(tokenLog);
-  const topCalls = [...tokenLog].sort((a,b) => (b.total_tokens||0) - (a.total_tokens||0)).slice(0,8);
-
-  document.getElementById('usage-insights').innerHTML = `
-    <div class="insight">
-      <h3>Usage By Call Type</h3>
-      <table class="mini-table">
-        <thead><tr><th>Call Type</th><th>Reqs</th><th>Tokens</th><th>Cache</th><th>Tools</th><th>Estimated Rows</th></tr></thead>
-        <tbody>
-          ${groupedCalls.map(g => `<tr>
-            <td>${callTypeLabel(g.call_type)}</td>
-            <td>${fmt(g.requests)}</td>
-            <td class="token-cell">${fmt(g.total || (g.prompt + g.completion))}</td>
-            <td>${fmt(g.cacheRead + g.cacheWrite)}</td>
-            <td>${fmt(g.tools)}</td>
-            <td>${fmt(g.estimated)}</td>
-          </tr>`).join('') || '<tr><td colspan="6" style="color:var(--muted)">No API token log rows in this window</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-    <div class="insight">
-      <h3>Largest Token Calls</h3>
-      <table class="mini-table">
-        <thead><tr><th>When</th><th>Type</th><th>Tokens</th><th>Source</th><th>Context</th></tr></thead>
-        <tbody>
-          ${topCalls.map(r => {
-            const meta = parseMeta(r.request_metadata);
-            return `<tr>
-              <td>${fmtDateTime(r.created_at)}</td>
-              <td>${callTypeLabel(r.api_call_type)}</td>
-              <td class="token-cell">${fmt(r.total_tokens || ((r.prompt_tokens||0)+(r.completion_tokens||0)))}</td>
-              <td>${trunc(meta.token_source||'actual/logged',24)}</td>
-              <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
-            </tr>`;
-          }).join('') || '<tr><td colspan="5" style="color:var(--muted)">No API calls in this window</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `;
+  document.getElementById('usage-insights').innerHTML = '';
 
   // === CHARTS (HIDDEN BY DEFAULT) ===
   const tokenRows = [
@@ -655,7 +617,8 @@ function render() {
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
-      <td style="padding:4px"><div style="max-height:100px;max-width:400px;overflow:auto;white-space:pre-wrap;font-family:monospace;font-size:10px;background:#fff;border:1px solid var(--border);padding:6px;border-radius:4px;line-height:1.2;color:var(--text)">${chunks.length ? escHtml(chunks[0]) : '-'}</div></td>
+      <td style="max-width:200px" class="mono"><div class="bd-text-preview" title="${meta.source_url||''}" onclick="event.stopPropagation();if(this.title)window.open(this.title,'_blank')">${meta.source_url ? meta.source_url.split('/').pop() || meta.source_url : '-'}</div></td>
+      <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
       <td colspan="11">
