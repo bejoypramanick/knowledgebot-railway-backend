@@ -495,6 +495,7 @@ class ScrapingDAO:
                     crawl_session_id = :crawl_session_id,
                     pages_scraped = :pages_scraped,
                     metadata = metadata || CAST(:metadata AS jsonb),
+                    processed_content_s3_key = :processed_content_s3_key,
                     processing_status = 'completed',
                     updated_at = NOW()
                 WHERE id = :website_id AND processing_status != 'deleted'
