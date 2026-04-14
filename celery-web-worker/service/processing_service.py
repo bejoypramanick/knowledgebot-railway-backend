@@ -734,13 +734,17 @@ class ProcessingService:
         Process HTML with Kreuzberg, then chunk the returned markdown with Chonkie.
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
-        cleaned_html = clean_html_with_trafilatura(html_content, url=page_url)
-        logger.info(
-            f"🧭 [HTML_CLEAN] Trafilatura cleaned HTML before Kreuzberg extraction"
-            f" | page_url={page_url}"
-            f" | raw_html_chars={len(html_content)}"
-            f" | cleaned_html_chars={len(cleaned_html)}"
-        )
+        if remove_ads:
+            cleaned_html = clean_html_with_trafilatura(html_content, url=page_url)
+            logger.info(
+                f"🧭 [HTML_CLEAN] Trafilatura cleaned HTML (ads, menus, comments, footers removed)"
+                f" | page_url={page_url}"
+                f" | raw_html_chars={len(html_content)}"
+                f" | cleaned_html_chars={len(cleaned_html)}"
+            )
+        else:
+            cleaned_html = html_content
+            logger.info(f"⏭️ [HTML_CLEAN] Skipping Trafilatura cleaning (remove_ads=False) | page_url={page_url}")
         html_filename = f"page_{url_hash}.html"
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
             file_data=cleaned_html.encode('utf-8'),

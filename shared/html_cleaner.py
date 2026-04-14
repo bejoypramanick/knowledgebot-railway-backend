@@ -58,19 +58,18 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
 
         # Deterministic configuration (no "try a bunch of kwargs" fallback logic).
         # Goal:
-        # - Keep tables
-        # - Keep images
-        # - Strip hyperlinks (we crawl depth separately via Crawl4AI)
-        # - Remove boilerplate like menus/sidebars/ads by extracting main content
-        #
-        # If these kwargs aren't supported by the deployed Trafilatura version, we
-        # *fail loudly* so the deployment can be fixed (no silent degradation).
+        # - Keep everything "as is" within the main content block
+        # - Specifically remove: ads, menus, comments, footers (boilerplate)
+        # - Preserve: tables, links, images, formatting
+        # - Favor recall over precision to avoid aggressive pruning
         cleaned = trafilatura.extract(
             html_content,
-            favor_precision=True,
-            include_comments=False,
+            favor_precision=False,  # Keep more content (recall > precision)
+            include_comments=False, # Explicitly requested to remove comments
             include_tables=True,
-            include_links=False,
+            include_links=True,     # Keep links within content
+            include_formatting=True, # Keep subheadings, bold, etc.
+            include_images=True,     # Keep images
             no_fallback=False,
             output_format="html",
             url=url,
