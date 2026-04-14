@@ -9,25 +9,6 @@ from shared.otel_logger import get_otel_logger
 logger = get_otel_logger("html_cleaner", "shared")
 
 
-def _restore_table_captions(cleaned_html: str, raw_captions: list[str]) -> str:
-    """Reinsert raw <caption> tags into cleaned tables when Trafilatura drops them."""
-    if not cleaned_html or not raw_captions or "<table" not in cleaned_html.lower():
-        return cleaned_html
-
-    captions_iter = iter(raw_captions)
-
-    def _replace_table(match: re.Match) -> str:
-        table_open = match.group(0)
-        if "<caption" in table_open.lower():
-            return table_open
-        caption_tag = next(captions_iter, "")
-        if not caption_tag:
-            return table_open
-        return f"{table_open}{caption_tag}"
-
-    return re.sub(r"<table\b[^>]*>", _replace_table, cleaned_html, flags=re.IGNORECASE)
-
-
 def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) -> str:
     """
     Extract the main content from HTML while removing boilerplate (headers, footers, ads).
@@ -46,15 +27,6 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
 
     try:
         import trafilatura
-
-        raw_caption_present = "<caption" in html_content.lower()
-        raw_caption_texts = re.findall(r"<caption[^>]*>(.*?)</caption>", html_content, flags=re.IGNORECASE | re.DOTALL)
-        raw_caption_preview = " | ".join(
-            re.sub(r"\s+", " ", caption).strip()[:120]
-            for caption in raw_caption_texts[:3]
-            if caption and re.sub(r"\s+", " ", caption).strip()
-        )
-        raw_caption_tags = re.findall(r"(<caption[^>]*>.*?</caption>)", html_content, flags=re.IGNORECASE | re.DOTALL)
 
         # Deterministic configuration (no "try a bunch of kwargs" fallback logic).
         # Goal:
@@ -81,24 +53,8 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
             logger.warning("⚠️ [HTML_CLEAN] Trafilatura returned empty extraction; using original HTML")
             return html_content
 
-        restored_cleaned = _restore_table_captions(cleaned, raw_caption_tags)
-
-        cleaned_caption_present = "<caption" in restored_cleaned.lower()
-        cleaned_contains_raw_caption_text = bool(
-            raw_caption_preview and raw_caption_preview[:80].lower() in restored_cleaned.lower()
-        )
-        restored_caption_blocks = restored_cleaned.lower().count("<caption")
-
-        logger.info(f"✨ [HTML_CLEAN] Trafilatura extracted ({len(html_content)} -> {len(restored_cleaned)} chars)")
-        logger.info(
-            f"🧭 [HTML_CAPTION_DIAG] url={url or 'none'} "
-            f"raw_caption_present={'yes' if raw_caption_present else 'no'} "
-            f"cleaned_caption_present={'yes' if cleaned_caption_present else 'no'} "
-            f"cleaned_contains_caption_text={'yes' if cleaned_contains_raw_caption_text else 'no'} "
-            f"raw_caption_preview='{raw_caption_preview or 'none'}' "
-            f"restored_caption_blocks={restored_caption_blocks}"
-        )
-        return restored_cleaned
+        logger.info(f"✨ [HTML_CLEAN] Trafilatura extracted ({len(html_content)} -> {len(cleaned)} chars) | url={url or 'none'}")
+        return cleaned
     except Exception as e:
         logger.error(f"❌ [HTML_CLEAN] Error during Trafilatura extraction: {e}")
         return html_content
