@@ -21,6 +21,8 @@ ALLOWED_FILE_EXTENSIONS = [
     'py', 'js', 'ts', 'html', 'htm', 'json', 'md', 'yaml', 'yml', 'xml',
     # Archives
     'zip', 'tar', 'gz',
+    # Images
+    'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'svg',
 ]
 
 ALLOWED_MIME_TYPES = [
@@ -61,4 +63,13 @@ ALLOWED_MIME_TYPES = [
     'application/x-tar',
     'application/gzip',
     'application/x-gzip',
+    # Images
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+    'image/bmp',
+    'image/x-ms-bmp',
+    'image/tiff',
+    'image/svg+xml',
 ]
