@@ -148,7 +148,8 @@ async def should_use_kreuzberg_for_file(filename: str, mime_type: str, file_size
     # Kreuzberg handles many formats. As a safe bet, we route typical documents.
     supported_extensions = {
         '.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', 
-        '.html', '.htm', '.rtf', '.epub', '.csv'
+        '.html', '.htm', '.rtf', '.epub', '.csv',
+        '.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.svg'
     }
     
     ext = os.path.splitext(filename.lower())[1]
@@ -159,7 +160,8 @@ async def should_use_kreuzberg_for_file(filename: str, mime_type: str, file_size
         'application/pdf',
         'application/vnd.openxmlformats-officedocument',
         'application/msword',
-        'text/html'
+        'text/html',
+        'image/'
     ]
     
     if any(mime_type.startswith(m) for m in supported_mimes):

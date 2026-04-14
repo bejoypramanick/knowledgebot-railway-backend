@@ -61,6 +61,15 @@ def detect_mime_type(filename: str, provided_mime_type: Optional[str] = None, fi
         'htm': 'text/html',
         'json': 'application/json',
         'md': 'text/markdown',
+        'png': 'image/png',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'webp': 'image/webp',
+        'gif': 'image/gif',
+        'bmp': 'image/bmp',
+        'tif': 'image/tiff',
+        'tiff': 'image/tiff',
+        'svg': 'image/svg+xml',
     }
     
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''

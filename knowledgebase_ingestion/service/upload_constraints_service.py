@@ -193,6 +193,62 @@ class UploadConstraintsService:
             category="archive",
             description="Tar GZip Archive"
         ),
+
+        # Images
+        "png": FileTypeConstraint(
+            extension="png",
+            mime_types=["image/png"],
+            category="image",
+            description="PNG Image"
+        ),
+        "jpg": FileTypeConstraint(
+            extension="jpg",
+            mime_types=["image/jpeg"],
+            category="image",
+            description="JPEG Image"
+        ),
+        "jpeg": FileTypeConstraint(
+            extension="jpeg",
+            mime_types=["image/jpeg"],
+            category="image",
+            description="JPEG Image"
+        ),
+        "webp": FileTypeConstraint(
+            extension="webp",
+            mime_types=["image/webp"],
+            category="image",
+            description="WebP Image"
+        ),
+        "gif": FileTypeConstraint(
+            extension="gif",
+            mime_types=["image/gif"],
+            category="image",
+            description="GIF Image"
+        ),
+        "bmp": FileTypeConstraint(
+            extension="bmp",
+            mime_types=["image/bmp", "image/x-ms-bmp"],
+            category="image",
+            description="Bitmap Image"
+        ),
+        "tif": FileTypeConstraint(
+            extension="tif",
+            mime_types=["image/tiff"],
+            category="image",
+            description="TIFF Image"
+        ),
+        "tiff": FileTypeConstraint(
+            extension="tiff",
+            mime_types=["image/tiff"],
+            category="image",
+            description="TIFF Image"
+        ),
+        "svg": FileTypeConstraint(
+            extension="svg",
+            mime_types=["image/svg+xml"],
+            category="image",
+            description="SVG Image"
+        ),
     }
 
     def __init__(self):

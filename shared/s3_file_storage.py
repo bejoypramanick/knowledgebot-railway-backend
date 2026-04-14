@@ -328,7 +328,16 @@ class S3FileStorage:
             'py': 'text/x-python',
             'js': 'application/javascript',
             'json': 'application/json',
-            'zip': 'application/zip'
+            'zip': 'application/zip',
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'webp': 'image/webp',
+            'gif': 'image/gif',
+            'bmp': 'image/bmp',
+            'tif': 'image/tiff',
+            'tiff': 'image/tiff',
+            'svg': 'image/svg+xml',
         }
 
         return content_types.get(extension, 'application/octet-stream')
