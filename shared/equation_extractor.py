@@ -143,7 +143,7 @@ correct them based on mathematical context."""
                         "image_count": len(pictures),
                         "image_size_bytes": len(image_bytes or b""),
                         "mime_type": "image/png",
-                        "token_source": "gemini_usage_metadata" if usage else "estimated_text_tokens",
+                        "token_source": "gemini_usage_metadata" if usage else "unavailable_gemini_usage_metadata",
                         **text_payload_stats(prompt),
                         **binary_payload_stats(image_bytes or b"", prefix="image"),
                     },

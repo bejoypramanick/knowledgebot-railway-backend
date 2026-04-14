@@ -259,7 +259,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <div id="details-panel">
 <div class="section"><h2>Chat Sessions <span style="font-size:13px;color:var(--muted);font-weight:400">(click to expand messages)</span></h2><div class="table-wrap" style="max-height:700px"><table>
-  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Input tokens">Prompt Tokens</th><th title="Output tokens">Completion Tokens</th><th title="System prompt + history + tool overhead">Context Tokens</th><th title="Current user + bot message text tokens">Message Tokens</th><th>Status</th></tr></thead>
+  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Provider-reported input tokens">Prompt Tokens</th><th title="Provider-reported output tokens">Completion Tokens</th><th title="Gemini count_tokens totals for captured context text only">Captured Context Tokens</th><th title="Gemini count_tokens totals for visible message text">Message Tokens</th><th>Status</th></tr></thead>
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
@@ -389,6 +389,72 @@ function payloadTextChunks(meta) {
   if(meta.input_text) return [meta.input_text];
   return [];
 }
+function nonIngestionUsageForSession(sessionId) {
+  return (RAW.token_usage_log || [])
+    .filter(r => r.session_id === sessionId && !isIngestionUsage(r))
+    .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+}
+function usageTokenSource(meta) {
+  return meta.token_source || meta.usage_capture || '-';
+}
+function renderSessionProviderUsage(sessionId) {
+  const rows = nonIngestionUsageForSession(sessionId);
+  if(!rows.length) {
+    return `<div style="margin:8px 0 12px;padding:10px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--muted);font-size:12px">
+      No provider usage rows were recorded for this session.
+    </div>`;
+  }
+  const totals = rows.reduce((acc, r) => {
+    const meta = parseMeta(r.request_metadata);
+    const cache = getCacheTokens(meta);
+    acc.prompt += r.prompt_tokens || 0;
+    acc.completion += r.completion_tokens || 0;
+    acc.total += r.total_tokens || 0;
+    acc.cacheRead += cache.read;
+    acc.cacheWrite += cache.write;
+    return acc;
+  }, {prompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0});
+  return `<div style="margin:8px 0 12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#fff">
+    <div style="padding:8px 10px;background:rgba(22,163,74,.08);border-bottom:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:700;color:var(--green)">Provider Usage Ledger</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">
+        These are the tokens returned by the provider usage object and written to token_usage_log. Diagnostic rows below are explanatory and may not add up exactly to provider billing.
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
+        <span><b>Prompt:</b> ${fmt(totals.prompt)}</span>
+        <span><b>Completion:</b> ${fmt(totals.completion)}</span>
+        <span><b>Total:</b> ${fmt(totals.total)}</span>
+        <span><b>Cache read:</b> ${fmt(totals.cacheRead)}</span>
+        <span><b>Cache write:</b> ${fmt(totals.cacheWrite)}</span>
+      </div>
+    </div>
+    <table class="bd-table" style="margin:0">
+      <thead><tr>
+        <th>Date</th><th>Call</th><th>Provider</th><th>Model</th>
+        <th style="text-align:right">Prompt</th><th style="text-align:right">Completion</th><th style="text-align:right">Total</th>
+        <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th><th>Source</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r => {
+          const meta = parseMeta(r.request_metadata);
+          const cache = getCacheTokens(meta);
+          return `<tr>
+            <td>${fmtDateTime(r.created_at)}</td>
+            <td>${callTypeLabel(r.api_call_type)}</td>
+            <td>${r.provider || '-'}</td>
+            <td>${r.model || '-'}</td>
+            <td class="bd-num">${fmt(r.prompt_tokens)}</td>
+            <td class="bd-num">${fmt(r.completion_tokens)}</td>
+            <td class="bd-num">${fmt(r.total_tokens)}</td>
+            <td class="bd-num">${fmt(cache.read)}</td>
+            <td class="bd-num">${fmt(cache.write)}</td>
+            <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(usageTokenSource(meta))}</div></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
 function renderPayloadText(meta) {
   const chunks = payloadTextChunks(meta);
   if(!chunks.length) {
@@ -459,9 +525,6 @@ function render() {
     totalCacheWriteTokens += c.write;
   });
 
-  // Note: totalPromptTokens in DB includes totalCacheReadTokens.
-  // Subtract cached tokens to show standard input separately.
-  const standardInputTokens = Math.max(0, totalPromptTokens - totalCacheReadTokens);
   const ingestionTokens = ingestionTokenLog.reduce((a,r) => a + (r.total_tokens||0), 0);
 
   // === TOKEN SUMMARY ===
@@ -474,9 +537,9 @@ function render() {
         <div class="token-detail">Chat sessions plus knowledge ingestion calls</div>
       </div>
       <div class="token-item">
-        <div class="token-label">Standard Input</div>
-        <div class="token-value" style="font-size:20px">${fmt(standardInputTokens)}</div>
-        <div class="token-detail">Prompt tokens excluding cache read tokens</div>
+        <div class="token-label">Provider Prompt Input</div>
+        <div class="token-value" style="font-size:20px">${fmt(totalPromptTokens)}</div>
+        <div class="token-detail">Prompt tokens returned by provider usage</div>
       </div>
       <div class="token-item">
         <div class="token-label">Output</div>
@@ -504,7 +567,7 @@ function render() {
   // === KPIs ===
   document.getElementById('kpis').innerHTML = `
     <div class="kpi"><div class="label">Total Sessions</div><div class="value accent">${fmt(totalSessions)}</div><div class="sub">${fmt(totalMsgs)} messages total</div></div>
-    <div class="kpi"><div class="label">Standard Input Tokens</div><div class="value green">${fmt(standardInputTokens)}</div><div class="sub">Prompt tokens excluding cache reads</div></div>
+    <div class="kpi"><div class="label">Provider Prompt Tokens</div><div class="value green">${fmt(totalPromptTokens)}</div><div class="sub">Input tokens returned by provider usage</div></div>
     <div class="kpi"><div class="label">Output Tokens (Completion)</div><div class="value cyan">${fmt(totalCompletionTokens)}</div><div class="sub">Chat completion tokens</div></div>
     <div class="kpi"><div class="label">Cache Read Tokens</div><div class="value accent2">${fmt(totalCacheReadTokens)}</div><div class="sub">Reported cached input tokens</div></div>
     <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">Reported cache creation tokens</div></div>
@@ -594,7 +657,8 @@ function renderRunSteps(userMsgId, sessionId) {
   const totalTokens = steps.reduce((a,s) => a + (s.token_count||0), 0);
   let html = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
     <div style="background:rgba(79,70,229,.08);padding:6px 10px;font-size:11px;font-weight:600;color:var(--accent);cursor:pointer" onclick="const t=this.nextElementSibling;t.style.display=t.style.display==='none'?'':'none'">
-      Agent Run Steps (${steps.length} steps, ${fmt(totalTokens)} total tokens) [show/hide]
+      Agent Run Steps (${steps.length} steps, ${fmt(totalTokens)} diagnostic tokens) [show/hide]
+      <div style="font-weight:400;color:var(--muted);margin-top:2px">Step tokens are counted from visible request/response parts. They are diagnostics, not the provider-billed total.</div>
     </div>
     <div style="display:none">
     <table class="bd-table" style="margin:0">
@@ -649,6 +713,12 @@ function toggleSession(rowEl, sessionId) {
   const roleName = r => r==='assistant'?'Bot':r==='user'?'User':r==='human_agent'?'Human Agent':(r||'Unknown');
 
   let insertAfter = rowEl;
+  const providerRow = document.createElement('tr');
+  providerRow.className = 'msg-row';
+  providerRow.innerHTML = `<td colspan="8" style="padding-left:24px">${renderSessionProviderUsage(sessionId)}</td>`;
+  insertAfter.after(providerRow);
+  insertAfter = providerRow;
+
   msgs.forEach((m, idx) => {
     const msgRow = document.createElement('tr');
     msgRow.className = 'msg-row';
@@ -661,7 +731,7 @@ function toggleSession(rowEl, sessionId) {
       </div>
       <table class="bd-table">
         <thead><tr>
-          <th>Component</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>Content (click to expand)</th>
+          <th>Component</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>What this means</th>
         </tr></thead>
         <tbody>
         ${m.role==='user' ? `
@@ -670,47 +740,50 @@ function toggleSession(rowEl, sessionId) {
             <td class="bd-num">${fmt(m.system_prompt_token_count)}</td>
             <td class="bd-num">${fmt(m.system_prompt_word_count)}</td>
             <td class="bd-num">${fmt(m.system_prompt_char_count)}</td>
-            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.system_prompt_text)||'-'}</div></td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.system_prompt_text)||'-'}</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Gemini count_tokens diagnostic for the stored system prompt text.</div></td>
           </tr>
           <tr>
             <td class="bd-label">Conv. History</td>
             <td class="bd-num">${fmt(m.history_token_count)}</td>
             <td class="bd-num">${fmt(m.history_word_count)}</td>
             <td class="bd-num">${fmt(m.history_char_count)}</td>
-            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.history_text)||'<i style="color:var(--muted)">No history (first message)</i>'}</div></td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.history_text)||'<i style="color:var(--muted)">No history (first message)</i>'}</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Gemini count_tokens diagnostic for serialized conversation history.</div></td>
           </tr>
           <tr>
-            <td class="bd-label">Tools + Multi-turn</td>
+            <td class="bd-label">Tool Definitions</td>
             <td class="bd-num">${fmt(m.tool_def_token_count)}</td>
-            <td class="bd-num" colspan="2" style="text-align:left;font-weight:400;font-size:10px;color:var(--muted)">Derived: Total Prompt - others</td>
-            <td class="bd-text" style="font-size:10px;color:var(--muted)">Includes tool schema, tool call/return context, repeated prompt across turns</td>
+            <td class="bd-num">${fmt(m.tool_def_word_count)}</td>
+            <td class="bd-num">${fmt(m.tool_def_char_count)}</td>
+            <td class="bd-text" style="font-size:10px;color:var(--muted)">
+              Gemini count_tokens diagnostic for the stored tool definition/schema text. Hidden provider request material is not inferred.
+            </td>
           </tr>
           <tr>
             <td class="bd-label">User Message</td>
             <td class="bd-num">${fmt(m.user_msg_token_count)}</td>
             <td class="bd-num">${fmt(m.user_msg_word_count)}</td>
             <td class="bd-num">${fmt(m.user_msg_char_count)}</td>
-            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div></td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Gemini count_tokens diagnostic for only the user's visible message.</div></td>
           </tr>
           <tr style="background:rgba(79,70,229,.06);font-weight:600">
-            <td class="bd-label">Total (Prompt)</td>
+            <td class="bd-label">Provider Prompt Total</td>
             <td class="bd-num">${fmt(m.prompt_token_count)}</td>
-            <td colspan="2" style="font-size:11px;color:var(--muted)">Billable input from Gemini API</td>
-            <td></td>
+            <td colspan="2" style="font-size:11px;color:var(--muted)">Gemini/Pydantic usage</td>
+            <td style="font-size:10px;color:var(--muted)">Provider-reported prompt total for this turn. This is the billing number; rows above are diagnostics used to explain it.</td>
           </tr>
         ` : `
           <tr>
-            <td class="bd-label">Bot Response</td>
+            <td class="bd-label">Bot Message Diagnostic</td>
             <td class="bd-num">${fmt(m.bot_response_token_count)}</td>
             <td class="bd-num">${fmt(m.bot_response_word_count)}</td>
             <td class="bd-num">${fmt(m.bot_response_char_count)}</td>
-            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div></td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Gemini count_tokens diagnostic for the stored bot message text.</div></td>
           </tr>
           <tr style="background:rgba(79,70,229,.06);font-weight:600">
-            <td class="bd-label">Total (Completion)</td>
+            <td class="bd-label">Provider Completion Total</td>
             <td class="bd-num">${fmt(m.completion_token_count)}</td>
-            <td colspan="2" style="font-size:11px;color:var(--muted)">Output tokens include tool call generation + final response</td>
-            <td></td>
+            <td colspan="2" style="font-size:11px;color:var(--muted)">Gemini/Pydantic usage</td>
+            <td style="font-size:10px;color:var(--muted)">Provider-reported output tokens for this turn. It may include tool-call generation and final text, so it can differ from the visible bot message diagnostic.</td>
           </tr>
         `}
         </tbody>

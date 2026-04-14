@@ -1998,9 +1998,8 @@ class StreamingService:
                         part_content = getattr(part, "content", "")
                         if part_content and not isinstance(part, SystemPromptPart):
                             history_text += str(part_content) + "\n"
-                # Tool definitions text — we can't extract the actual schema Pydantic AI sends to Gemini,
-                # so token count is derived as: input_tokens - sys_prompt - history - user_msg
-                tool_def_text = "(Actual Gemini tool schema — tokens derived from input_tokens remainder)"
+                # Only count text we actually captured.
+                tool_def_text = ""
 
                 await self._track_token_usage(
                     session_id,
@@ -2121,16 +2120,10 @@ class StreamingService:
             )  # Total billable prompt including cached
             completion_tokens = output_tokens
             token_source = (
-                "ACTUAL (from Gemini API)" if total_tokens > 0 else "ZERO (no run data)"
+                "ACTUAL (from Gemini API)"
+                if total_tokens > 0
+                else "UNAVAILABLE (Gemini usage missing)"
             )
-
-            if total_tokens == 0:
-                # Fallback estimate
-                response_chars = len(response_text)
-                completion_tokens = max(1, response_chars // 4)
-                prompt_tokens = 500
-                total_tokens = prompt_tokens + completion_tokens
-                token_source = "ESTIMATED (from response length)"
 
             logger.info(f"📊 Token tracking source: {token_source}")
             logger.info(f"   Prompt tokens: {prompt_tokens}")
@@ -2222,7 +2215,7 @@ class StreamingService:
         - completion_token_count: completion tokens from run.usage() (on bot msg only)
         - system_prompt_*: chars/words/tokens for system prompt component
         - history_*: chars/words/tokens for conversation history component
-        - tool_def_*: chars/words/tokens for tool definitions component
+        - tool_def_*: chars/words/tokens for tool definitions component via Gemini count_tokens
         - user_msg_*: chars/words/tokens for user message text
         - bot_response_*: chars/words/tokens for bot response text
 
@@ -2275,26 +2268,13 @@ class StreamingService:
             sp_tokens = count_text(system_prompt_text)
             hist_tokens = count_text(history_text)
 
-            # Derive tool/overhead tokens from the remainder.
-            # When cache is ACTIVE:
-            #   cache_read_tokens = sys prompt + tool schema (cached, billed at 90% discount)
-            #   input_tokens = history + user msg + multi-turn overhead (non-cached)
-            #   Total billable prompt = input_tokens + cache_read_tokens
-            # When cache is INACTIVE:
-            #   input_tokens = sys prompt + tool schema + history + user msg + multi-turn overhead
-            #   cache_read_tokens = 0
-            total_prompt = input_tokens + cache_read_tokens
-            known_tokens = sp_tokens + hist_tokens + user_message_tokens
-            td_tokens = max(0, total_prompt - known_tokens)
+            td_tokens = count_text(tool_def_text)
 
             logger.info(
                 f"📊 [MSG_TOKENS] Message token counts: user={user_message_tokens}, bot={bot_message_tokens}"
             )
             logger.info(
-                f"📊 [COMPONENT_TOKENS] system_prompt={sp_tokens}, history={hist_tokens}, tools_overhead={td_tokens}"
-            )
-            logger.info(
-                f"📊 [DERIVATION] total_prompt={total_prompt} (input={input_tokens} + cache_read={cache_read_tokens}) - known={known_tokens} = tools_overhead={td_tokens}"
+                f"📊 [COMPONENT_TOKENS] system_prompt={sp_tokens}, history={hist_tokens}, tool_definitions={td_tokens}"
             )
         except Exception as tc_err:
             logger.warning(f"⚠️ [MSG_TOKENS] Failed to count message tokens: {tc_err}")
