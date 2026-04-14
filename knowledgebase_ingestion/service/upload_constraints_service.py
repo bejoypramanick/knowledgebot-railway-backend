@@ -23,6 +23,18 @@ class FileTypeConstraint:
 class UploadConstraintsService:
     """Service for managing file upload constraints."""
 
+    ALWAYS_ALLOWED_IMAGE_EXTENSIONS = [
+        "png",
+        "jpg",
+        "jpeg",
+        "webp",
+        "gif",
+        "bmp",
+        "tif",
+        "tiff",
+        "svg",
+    ]
+
     # Supported file types with their MIME types and metadata
     SUPPORTED_FILE_TYPES = {
         # Documents
@@ -266,7 +278,10 @@ class UploadConstraintsService:
         # Allowed extensions from env (comma-separated)
         allowed_exts_env = os.getenv("ALLOWED_FILE_EXTENSIONS", "")
         if allowed_exts_env:
-            self.allowed_extensions = [ext.strip().lower() for ext in allowed_exts_env.split(",")]
+            configured_extensions = [ext.strip().lower() for ext in allowed_exts_env.split(",") if ext.strip()]
+            self.allowed_extensions = list(dict.fromkeys(
+                configured_extensions + self.ALWAYS_ALLOWED_IMAGE_EXTENSIONS
+            ))
             logger.info(f"🔧 [CONFIG] Loaded allowed extensions from env: {self.allowed_extensions}")
         else:
             # Default to all supported extensions
