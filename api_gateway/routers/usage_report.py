@@ -272,7 +272,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     </div>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Billing</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -632,7 +632,6 @@ function render() {
       <td>${callTypeLabel(r.api_call_type)}</td>
       <td>${r.model||'-'}</td>
       <td class="token-cell">${fmt(r.total_tokens || r.prompt_tokens || 0)}</td>
-      <td>${billingBadge('billable','billable')}</td>
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
@@ -640,7 +639,7 @@ function render() {
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
-      <td colspan="10">
+      <td colspan="9">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
