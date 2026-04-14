@@ -2,24 +2,6 @@ import os
 import re
 from typing import Optional, Tuple
 
-from knowledgebase_ingestion.service.upload_constraints_service import get_upload_constraints_service
-
-
-def validate_file_extension(filename: str) -> Tuple[bool, str]:
-    """Validate file extension is allowed."""
-    is_valid, error = get_upload_constraints_service().validate_file_extension(filename)
-    return is_valid, error or ""
-
-def validate_file_size(size_bytes: int) -> Tuple[bool, str]:
-    """Validate file size is within limits."""
-    is_valid, error = get_upload_constraints_service().validate_file_size(size_bytes)
-    return is_valid, error or ""
-
-def validate_mime_type(mime_type: str, filename: str) -> Tuple[bool, str]:
-    """Validate MIME type is allowed."""
-    is_valid, error = get_upload_constraints_service().validate_file_mime_type(mime_type, filename)
-    return is_valid, error or ""
-
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename to prevent path traversal and special characters."""
     filename = os.path.basename(filename)

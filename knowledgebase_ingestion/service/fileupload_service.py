@@ -13,10 +13,8 @@ from fastapi import UploadFile, HTTPException
 from shared.otel_logger import get_otel_logger
 from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.core.config import settings
-from knowledgebase_ingestion.utils.validation import (
-    validate_file_extension, validate_file_size, validate_mime_type,
-    sanitize_filename
-)
+from knowledgebase_ingestion.schemas.upload_validation import UploadValidationInput
+from knowledgebase_ingestion.utils.validation import sanitize_filename
 from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery, web_celery
@@ -193,50 +191,28 @@ async def validate_file_upload(file: UploadFile, file_size: int, replace_existin
         sanitized_filename = sanitize_filename(original_filename)
         logger.info(f"📝 [SANITIZE] Sanitized filename: {sanitized_filename}")
 
-        # Validate file extension
-        logger.info(f"🔍 [EXT_CHECK] Validating file extension...")
-        ext_valid, ext_error = validate_file_extension(sanitized_filename)
-        logger.info(f"   Extension valid: {ext_valid}")
-
-        if not ext_valid:
-            logger.error(f"❌ [EXT_INVALID] Extension validation failed: {ext_error}")
+        logger.info(
+            f"🔍 [PYDANTIC_UPLOAD_VALIDATION] Validating upload constraints"
+            f" | filename={sanitized_filename}"
+            f" | mime_type={file.content_type or ''}"
+            f" | size_bytes={file_size}"
+        )
+        try:
+            UploadValidationInput(
+                filename=sanitized_filename,
+                mime_type=file.content_type or "",
+                size_bytes=file_size,
+            )
+        except ValueError as validation_error:
+            error_message = str(validation_error)
+            logger.error(f"❌ [PYDANTIC_UPLOAD_INVALID] Upload validation failed: {error_message}")
             return {
                 "valid": False,
-                "error": ext_error,
+                "error": error_message,
                 "filename": sanitized_filename
             }
 
-        logger.info(f"✅ [EXT_VALID] File extension is valid")
-
-        # Validate MIME type
-        logger.info(f"🔍 [MIME_CHECK] Validating MIME type: {file.content_type}")
-        mime_valid, mime_error = validate_mime_type(file.content_type or "", sanitized_filename)
-        logger.info(f"   MIME type valid: {mime_valid}")
-
-        if not mime_valid:
-            logger.error(f"❌ [MIME_INVALID] MIME type validation failed: {mime_error}")
-            return {
-                "valid": False,
-                "error": mime_error,
-                "filename": sanitized_filename
-            }
-
-        logger.info(f"✅ [MIME_VALID] MIME type is valid")
-
-        # Validate file size
-        logger.info(f"🔍 [SIZE_CHECK] Validating file size: {file_size} bytes")
-        size_valid, size_error = validate_file_size(file_size)
-        logger.info(f"   File size valid: {size_valid}")
-
-        if not size_valid:
-            logger.error(f"❌ [SIZE_INVALID] File size validation failed: {size_error}")
-            return {
-                "valid": False,
-                "error": size_error,
-                "filename": sanitized_filename
-            }
-
-        logger.info(f"✅ [SIZE_VALID] File size is valid")
+        logger.info(f"✅ [PYDANTIC_UPLOAD_VALID] Upload constraints are valid")
 
         # Check for duplicate filename (only active files)
         logger.info(f"🔍 [DUPLICATE_CHECK] Checking for existing files with name: {original_filename}")

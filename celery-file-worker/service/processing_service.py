@@ -22,13 +22,8 @@ from shared.chunking_service import chunking_service
 from shared.sqlalchemy_db import get_db_session
 from shared.file_metrics import calculate_metrics
 
-from utils.validation import (
-    validate_file_extension,
-    validate_file_size,
-    validate_mime_type,
-    sanitize_filename,
-    detect_mime_type_from_extension
-)
+from knowledgebase_ingestion.schemas.upload_validation import UploadValidationInput
+from utils.validation import sanitize_filename, detect_mime_type_from_extension
 from utils.files import calculate_sha256
 from service.file_service import FileService
 from shared.s3_file_storage import s3_file_storage
@@ -162,33 +157,18 @@ async def process_file_content(
             f"(db_mime_type={db_mime_type or 'none'}) for {original_filename}"
         )
 
-        # Validate file extension
-        ext_valid, ext_error = validate_file_extension(original_filename)
-        if not ext_valid:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            return {
-                "error": f"Extension validation failed: {ext_error}"
-            }
-
-        # Validate MIME type
-        mime_valid, mime_error = validate_mime_type(detected_mime_type, original_filename)
-        if not mime_valid:
+        try:
+            UploadValidationInput(
+                filename=original_filename,
+                mime_type=detected_mime_type,
+                size_bytes=file_size,
+            )
+        except ValueError as validation_error:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             return {
                 "success": False,
-                "error": f"Invalid MIME type: {mime_error}"
-            }
-
-        # Validate file size
-        size_valid, size_error = validate_file_size(file_size)
-        if not size_valid:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            return {
-                "success": False,
-                "error": f"Size validation failed: {size_error}"
+                "error": f"Upload validation failed: {validation_error}"
             }
 
         # Calculate hash (only if we have a local file)
