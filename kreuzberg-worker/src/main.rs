@@ -557,7 +557,7 @@ fn build_extraction_config() -> ExtractionConfig {
 
     let ocr = if ocr_enabled {
         Some(OcrConfig {
-            backend: env::var("KREUZBERG_OCR_BACKEND").unwrap_or_else(|_| "tesseract".to_string()),
+            backend: normalized_ocr_backend(),
             language: env::var("KREUZBERG_OCR_LANGUAGE").unwrap_or_else(|_| "eng".to_string()),
             tesseract_config: Some(TesseractConfig {
                 psm: parse_env_i32("KREUZBERG_TESSERACT_PSM", 3),
@@ -674,6 +674,14 @@ fn build_extraction_config() -> ExtractionConfig {
         pdf_options,
         use_cache: parse_env_bool("KREUZBERG_USE_CACHE", true),
         ..Default::default()
+    }
+}
+
+fn normalized_ocr_backend() -> String {
+    let backend = env::var("KREUZBERG_OCR_BACKEND").unwrap_or_else(|_| "tesseract".to_string());
+    match backend.trim().to_ascii_lowercase().as_str() {
+        "paddle" | "paddleocr" | "paddle_ocr" => "paddle-ocr".to_string(),
+        value => value.to_string(),
     }
 }
 
