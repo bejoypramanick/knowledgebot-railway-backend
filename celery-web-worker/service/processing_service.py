@@ -730,7 +730,9 @@ class ProcessingService:
 
     async def _preparePageAsMarkdown(self, html_content: str, page_url: str, website_id: Optional[str] = None, remove_ads: bool = True) -> Tuple[str, Optional[str], list]:
         """
-        Process HTML with Kreuzberg, then chunk the returned markdown with Chonkie.
+        Process HTML with Kreuzberg (Rust worker), which returns both markdown and pre-calculated chunks.
+        TODO: The prompt is currently being passed to process_with_kreuzberg for context; we should verify
+        if this is still the optimal way to use the Rust worker features.
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
         cleaned_html = html_content
