@@ -138,8 +138,10 @@ async def track_model_usage(
     """Persist one provider call in token_usage_log."""
     prompt_tokens = int(prompt_tokens or 0)
     completion_tokens = int(completion_tokens or 0)
+    total_token_source = "provider_total_tokens"
     if total_tokens is None:
         total_tokens = prompt_tokens + completion_tokens
+        total_token_source = "sum_of_provider_reported_prompt_and_completion"
     total_tokens = int(total_tokens or 0)
 
     metadata = dict(request_metadata or {})
@@ -165,8 +167,30 @@ async def track_model_usage(
     metadata.update(
         {
             "cost_usd": cost_usd,
-            "standard_input_tokens": standard_input,
+            "billing_breakdown": {
+                "prompt_tokens": {
+                    "tokens": prompt_tokens,
+                    "billing_class": "billable",
+                    "source": "provider_usage",
+                },
+                "completion_tokens": {
+                    "tokens": completion_tokens,
+                    "billing_class": "billable",
+                    "source": "provider_usage",
+                },
+                "cache_read_tokens": {
+                    "tokens": cache_read,
+                    "billing_class": "cached",
+                    "source": "provider_usage_metadata",
+                },
+                "cache_write_tokens": {
+                    "tokens": cache_write,
+                    "billing_class": "cached",
+                    "source": "provider_usage_metadata",
+                },
+            },
             "pricing_usd_per_1m": pricing,
+            "total_token_source": total_token_source,
             "usage_capture": "shared.usage_tracking",
         }
     )

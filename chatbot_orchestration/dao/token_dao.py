@@ -152,7 +152,29 @@ class TokenDAO:
                 request_metadata.update(
                     {
                         "cost_usd": cost_usd,
-                        "standard_input_tokens": standard_input,
+                        "billing_breakdown": {
+                            "prompt_tokens": {
+                                "tokens": int(prompt_tokens or 0),
+                                "billing_class": "billable",
+                                "source": "provider_usage",
+                            },
+                            "completion_tokens": {
+                                "tokens": int(completion_tokens or 0),
+                                "billing_class": "billable",
+                                "source": "provider_usage",
+                            },
+                            "cache_read_tokens": {
+                                "tokens": int(cache_read or 0),
+                                "billing_class": "cached",
+                                "source": "provider_usage_metadata",
+                            },
+                            "cache_write_tokens": {
+                                "tokens": int(cache_write or 0),
+                                "billing_class": "cached",
+                                "source": "provider_usage_metadata",
+                            },
+                        },
+                        "total_token_source": "provider_total_tokens",
                         "pricing_usd_per_1m": {
                             "standard_input": 0.10,
                             "cache_read": 0.01,

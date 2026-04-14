@@ -2439,9 +2439,11 @@ class StreamingService:
 
         Iterates run.all_messages() and records each part (system prompt, user prompt,
         text response, tool call, tool return, thinking) as a separate row with
-        char/word/token counts.
+        char/word/token counts. Token counts are diagnostics over captured content;
+        provider-reported billing totals are stored separately in token_usage_log.
         """
         import asyncio
+        import json
 
         await asyncio.sleep(8)  # Wait for write-through + message update to finish
 
@@ -2486,6 +2488,16 @@ class StreamingService:
                     content = ""
                     tool_name = None
 
+                    def serialize_payload(value) -> str:
+                        if value is None:
+                            return ""
+                        if isinstance(value, str):
+                            return value
+                        try:
+                            return json.dumps(value, default=str, ensure_ascii=False, sort_keys=True)
+                        except Exception:
+                            return str(value)
+
                     if part_type_name == "SystemPromptPart":
                         part_label = "system_prompt"
                         content = getattr(part, "content", "") or ""
@@ -2502,16 +2514,14 @@ class StreamingService:
                         part_label = "tool_call"
                         tool_name = getattr(part, "tool_name", "unknown")
                         args = getattr(part, "args", None)
-                        content = (
-                            f"Tool: {tool_name}\nArgs: {str(args)[:500]}"
-                            if args
-                            else f"Tool: {tool_name}"
-                        )
+                        args_text = serialize_payload(args)
+                        content = f"Tool: {tool_name}\nArgs: {args_text}" if args_text else f"Tool: {tool_name}"
                     elif part_type_name in ("ToolReturnPart", "BuiltinToolReturnPart"):
                         part_label = "tool_return"
                         tool_name = getattr(part, "tool_name", "unknown")
                         ret_content = getattr(part, "content", "")
-                        content = str(ret_content)[:5000] if ret_content else ""
+                        return_text = serialize_payload(ret_content)
+                        content = f"Tool: {tool_name}\nReturn: {return_text}" if return_text else f"Tool: {tool_name}"
                     else:
                         part_label = part_type_name.lower()
                         content = str(getattr(part, "content", "") or "")
@@ -2528,7 +2538,8 @@ class StreamingService:
                             "word_count": len(content_str.split())
                             if content_str.strip()
                             else 0,
-                            "full_content": content_str,  # for token counting
+                            "full_content": content_str,
+                            "token_source": "gemini_count_tokens_captured_content",
                         }
                     )
 
@@ -2547,13 +2558,16 @@ class StreamingService:
                     content = s.get("full_content") or ""
                     if not str(content).strip() or not client:
                         s["token_count"] = 0
+                        s["token_source"] = "unavailable_gemini_count_tokens"
                     else:
                         response = client.models.count_tokens(model=token_model, contents=str(content))
                         s["token_count"] = int(getattr(response, "total_tokens", 0) or 0)
+                        s["token_source"] = "gemini_count_tokens_captured_content"
             except Exception:
                 # Keep token_count unset/zero on failure.
                 for s in steps:
                     s["token_count"] = s.get("token_count", 0)
+                    s["token_source"] = "unavailable_gemini_count_tokens"
 
             # Insert all steps
             async with get_db_session() as db:
@@ -2562,10 +2576,11 @@ class StreamingService:
                         text("""
                             INSERT INTO agent_run_steps
                                 (session_id, user_message_id, step_number, step_type, part_type,
-                                 tool_name, content_preview, char_count, word_count, token_count)
+                                 tool_name, content_preview, content_full, char_count, word_count,
+                                 token_count, token_source)
                             VALUES
                                 (CAST(:sid AS UUID), CAST(:mid AS UUID), :step, :stype, :ptype,
-                                 :tool, :preview, :chars, :words, :tokens)
+                                 :tool, :preview, :content_full, :chars, :words, :tokens, :token_source)
                         """),
                         {
                             "sid": session_id,
@@ -2575,9 +2590,11 @@ class StreamingService:
                             "ptype": s["part_type"],
                             "tool": s.get("tool_name"),
                             "preview": s["content_preview"],
+                            "content_full": s["full_content"],
                             "chars": s["char_count"],
                             "words": s["word_count"],
                             "tokens": s.get("token_count", 0),
+                            "token_source": s.get("token_source", "gemini_count_tokens_captured_content"),
                         },
                     )
                 await db.commit()

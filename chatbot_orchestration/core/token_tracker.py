@@ -187,11 +187,12 @@ async def track_gemini_usage_detailed(
         await log_async("Invalid token counts: must be non-negative numbers", "error")
         raise ValueError("Invalid token counts: must be non-negative numbers")
 
-    # Calculate total if not provided
+    total_token_source = "provider_total_tokens"
     if total_tokens <= 0:
         total_tokens = (
             prompt_tokens + completion_tokens + cache_read_tokens + cache_write_tokens
         )
+        total_token_source = "sum_of_provider_reported_categories"
 
     if total_tokens <= 0:
         await log_async("No tokens to track - skipping", "warning")
@@ -208,6 +209,7 @@ async def track_gemini_usage_detailed(
         metadata = {
             "cache_read_tokens": cache_read_tokens,
             "cache_write_tokens": cache_write_tokens,
+            "total_token_source": total_token_source,
         }
         if request_metadata:
             metadata.update(request_metadata)
@@ -291,8 +293,13 @@ async def track_gemini_usage_from_response(
             getattr(usage_obj, "totalTokenCount", 0)
             or getattr(usage_obj, "total_token_count", 0)
             or getattr(usage_obj, "total_tokens", 0)
-            or (prompt_tokens + completion_tokens)
+            or 0
         ) or 0
+        total_token_source = (
+            "provider_total_tokens"
+            if total_tokens
+            else "unavailable_provider_total_tokens"
+        )
 
         cache_read_tokens = getattr(usage_obj, "cache_read_tokens", 0) or 0
         cache_write_tokens = getattr(usage_obj, "cache_write_tokens", 0) or 0
@@ -308,6 +315,7 @@ async def track_gemini_usage_from_response(
                 message_id=message_id,
                 api_call_type=api_call_type,
                 model=model,
+                request_metadata={"total_token_source": total_token_source},
             )
         else:
             await log_async("No tokens found in Gemini usage object", "warning")

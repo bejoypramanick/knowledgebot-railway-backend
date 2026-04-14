@@ -129,7 +129,7 @@ correct them based on mathematical context."""
                 total_tokens = (
                     getattr(usage, "total_token_count", 0)
                     or getattr(usage, "totalTokenCount", 0)
-                    or (prompt_tokens + completion_tokens)
+                    or 0
                 )
                 await track_model_usage(
                     provider="gemini",
@@ -144,6 +144,7 @@ correct them based on mathematical context."""
                         "image_size_bytes": len(image_bytes or b""),
                         "mime_type": "image/png",
                         "token_source": "gemini_usage_metadata" if usage else "unavailable_gemini_usage_metadata",
+                        "total_token_source": "provider_total_tokens" if total_tokens else "unavailable_provider_total_tokens",
                         **text_payload_stats(prompt),
                         **binary_payload_stats(image_bytes or b"", prefix="image"),
                     },

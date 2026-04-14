@@ -79,7 +79,8 @@ async def _fetch_all_data():
 
         run_steps = [_row_to_dict(r) for r in (await db.execute(text("""
             SELECT id, session_id, user_message_id, step_number, step_type, part_type,
-                   tool_name, content_preview, char_count, word_count, token_count, created_at
+                   tool_name, content_preview, content_full, char_count, word_count,
+                   token_count, token_source, created_at
             FROM agent_run_steps
             WHERE created_at >= :since
             ORDER BY session_id, user_message_id, step_number
@@ -271,7 +272,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     </div>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Billing</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -329,7 +330,7 @@ function groupByCallType(rows) {
   const grouped = {};
   rows.forEach(r => {
     const key = r.api_call_type || 'unknown';
-    if(!grouped[key]) grouped[key] = {call_type:key, requests:0, prompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0, tools:0, estimated:0};
+    if(!grouped[key]) grouped[key] = {call_type:key, requests:0, prompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0, tools:0};
     const meta = parseMeta(r.request_metadata);
     const cache = getCacheTokens(r.request_metadata);
     grouped[key].requests += 1;
@@ -339,7 +340,6 @@ function groupByCallType(rows) {
     grouped[key].cacheRead += cache.read;
     grouped[key].cacheWrite += cache.write;
     grouped[key].tools += meta.tool_call_count || 0;
-    if((meta.token_source || '').toLowerCase().includes('estimated')) grouped[key].estimated += 1;
   });
   return Object.values(grouped).sort((a,b) => (b.total || (b.prompt + b.completion)) - (a.total || (a.prompt + a.completion)));
 }
@@ -350,7 +350,6 @@ function metadataSummary(meta) {
   if(meta.image_size_bytes) parts.push(`image=${fmt(meta.image_size_bytes)} bytes`);
   if(meta.cache_ttl_seconds) parts.push(`ttl=${meta.cache_ttl_seconds}s`);
   if(meta.tool_call_count) parts.push(`tools=${meta.tool_call_count}`);
-  if(meta.standard_input_tokens) parts.push(`standard_in=${fmt(meta.standard_input_tokens)}`);
   if(meta.token_source) parts.push(`token_src=${meta.token_source}`);
   if(meta.webpage_name) parts.push(`page="${meta.webpage_name}"`);
   const url = meta.source_url || meta.url;
@@ -397,6 +396,15 @@ function nonIngestionUsageForSession(sessionId) {
 function usageTokenSource(meta) {
   return meta.token_source || meta.usage_capture || '-';
 }
+function billingBadge(label, cls) {
+  const colors = {
+    billable: ['rgba(22,163,74,.10)', 'var(--green)'],
+    cached: ['rgba(37,99,235,.10)', 'var(--blue)'],
+    non_billable: ['rgba(107,114,128,.12)', 'var(--muted)']
+  };
+  const c = colors[cls] || colors.non_billable;
+  return `<span style="display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:${c[0]};color:${c[1]};white-space:nowrap">${label}</span>`;
+}
 function renderSessionProviderUsage(sessionId) {
   const rows = nonIngestionUsageForSession(sessionId);
   if(!rows.length) {
@@ -408,46 +416,51 @@ function renderSessionProviderUsage(sessionId) {
     const meta = parseMeta(r.request_metadata);
     const cache = getCacheTokens(meta);
     acc.prompt += r.prompt_tokens || 0;
+    acc.billablePrompt += Math.max(0, (r.prompt_tokens || 0) - cache.read);
     acc.completion += r.completion_tokens || 0;
     acc.total += r.total_tokens || 0;
     acc.cacheRead += cache.read;
     acc.cacheWrite += cache.write;
     return acc;
-  }, {prompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0});
+  }, {prompt:0, billablePrompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0});
   return `<div style="margin:8px 0 12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#fff">
     <div style="padding:8px 10px;background:rgba(22,163,74,.08);border-bottom:1px solid var(--border)">
       <div style="font-size:12px;font-weight:700;color:var(--green)">Provider Usage Ledger</div>
       <div style="font-size:11px;color:var(--muted);margin-top:3px">
-        These are the tokens returned by the provider usage object and written to token_usage_log. Diagnostic rows below are explanatory and may not add up exactly to provider billing.
+        These rows are rooted in provider usage. Billable prompt is provider prompt minus provider cache read; completion is billable; cache read/write are cached; captured step rows below are non-billable diagnostics.
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
-        <span><b>Prompt:</b> ${fmt(totals.prompt)}</span>
-        <span><b>Completion:</b> ${fmt(totals.completion)}</span>
+        <span><b>Provider prompt:</b> ${fmt(totals.prompt)}</span>
+        <span><b>Billable prompt:</b> ${fmt(totals.billablePrompt)} ${billingBadge('billable','billable')}</span>
+        <span><b>Completion:</b> ${fmt(totals.completion)} ${billingBadge('billable','billable')}</span>
         <span><b>Total:</b> ${fmt(totals.total)}</span>
-        <span><b>Cache read:</b> ${fmt(totals.cacheRead)}</span>
-        <span><b>Cache write:</b> ${fmt(totals.cacheWrite)}</span>
+        <span><b>Cache read:</b> ${fmt(totals.cacheRead)} ${billingBadge('cached','cached')}</span>
+        <span><b>Cache write:</b> ${fmt(totals.cacheWrite)} ${billingBadge('cached','cached')}</span>
       </div>
     </div>
     <table class="bd-table" style="margin:0">
       <thead><tr>
         <th>Date</th><th>Call</th><th>Provider</th><th>Model</th>
-        <th style="text-align:right">Prompt</th><th style="text-align:right">Completion</th><th style="text-align:right">Total</th>
-        <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th><th>Source</th>
+        <th style="text-align:right">Provider Prompt</th><th style="text-align:right">Billable Prompt</th><th style="text-align:right">Completion</th><th style="text-align:right">Total</th>
+        <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th><th>Billing</th><th>Source</th>
       </tr></thead>
       <tbody>
         ${rows.map(r => {
           const meta = parseMeta(r.request_metadata);
           const cache = getCacheTokens(meta);
+          const billablePrompt = Math.max(0, (r.prompt_tokens || 0) - cache.read);
           return `<tr>
             <td>${fmtDateTime(r.created_at)}</td>
             <td>${callTypeLabel(r.api_call_type)}</td>
             <td>${r.provider || '-'}</td>
             <td>${r.model || '-'}</td>
             <td class="bd-num">${fmt(r.prompt_tokens)}</td>
+            <td class="bd-num">${fmt(billablePrompt)}</td>
             <td class="bd-num">${fmt(r.completion_tokens)}</td>
             <td class="bd-num">${fmt(r.total_tokens)}</td>
             <td class="bd-num">${fmt(cache.read)}</td>
             <td class="bd-num">${fmt(cache.write)}</td>
+            <td>${billingBadge('prompt billable','billable')} ${billingBadge('completion billable','billable')} ${cache.read || cache.write ? billingBadge('cache cached','cached') : ''}</td>
             <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(usageTokenSource(meta))}</div></td>
           </tr>`;
         }).join('')}
@@ -619,6 +632,7 @@ function render() {
       <td>${callTypeLabel(r.api_call_type)}</td>
       <td>${r.model||'-'}</td>
       <td class="token-cell">${fmt(r.total_tokens || r.prompt_tokens || 0)}</td>
+      <td>${billingBadge('billable','billable')}</td>
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
@@ -626,7 +640,7 @@ function render() {
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
-      <td colspan="9">
+      <td colspan="10">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
@@ -657,14 +671,15 @@ function renderRunSteps(userMsgId, sessionId) {
   const totalTokens = steps.reduce((a,s) => a + (s.token_count||0), 0);
   let html = `<div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
     <div style="background:rgba(79,70,229,.08);padding:6px 10px;font-size:11px;font-weight:600;color:var(--accent);cursor:pointer" onclick="const t=this.nextElementSibling;t.style.display=t.style.display==='none'?'':'none'">
-      Agent Run Steps (${steps.length} steps, ${fmt(totalTokens)} diagnostic tokens) [show/hide]
-      <div style="font-weight:400;color:var(--muted);margin-top:2px">Step tokens are counted from visible request/response parts. They are diagnostics, not the provider-billed total.</div>
+      Agent Run Steps (${steps.length} steps, ${fmt(totalTokens)} diagnostic tokens) ${billingBadge('non-billable diagnostics','non_billable')} [show/hide]
+      <div style="font-weight:400;color:var(--muted);margin-top:2px">Step tokens are counted from captured request/response parts. They are non-billable diagnostics, not the provider-billed total.</div>
     </div>
     <div style="display:none">
     <table class="bd-table" style="margin:0">
-      <thead><tr><th>#</th><th>Direction</th><th>Part Type</th><th>Tool</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>Content (click to expand)</th></tr></thead>
+      <thead><tr><th>#</th><th>Direction</th><th>Part Type</th><th>Tool</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>Billing</th><th>Source</th><th>Full Captured Content (click to expand)</th></tr></thead>
       <tbody>`;
   steps.forEach(s => {
+    const stepContent = s.content_full || s.content_preview || '';
     html += `<tr>
       <td style="font-weight:600">${s.step_number}</td>
       <td><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:${s.step_type==='model_request'?'rgba(37,99,235,.1)':'rgba(22,163,74,.1)'};color:${s.step_type==='model_request'?'var(--blue)':'var(--green)'}">${s.step_type==='model_request'?'INPUT':'OUTPUT'}</span></td>
@@ -673,7 +688,9 @@ function renderRunSteps(userMsgId, sessionId) {
       <td class="bd-num">${fmt(s.token_count)}</td>
       <td class="bd-num">${fmt(s.word_count)}</td>
       <td class="bd-num">${fmt(s.char_count)}</td>
-      <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(s.content_preview)}</div></td>
+      <td>${billingBadge('non-billable','non_billable')}</td>
+      <td style="font-size:10px;color:var(--muted)">${escHtml(s.token_source||'captured_content')}</td>
+      <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(stepContent)}</div></td>
     </tr>`;
   });
   html += `</tbody></table></div></div>`;
@@ -886,8 +903,7 @@ function downloadExcel() {
     'Raw Call Type': g.call_type,
     'Requests': g.requests,
     'Embedding Tokens': g.total || g.prompt,
-    'Tool Calls': g.tools,
-    'Rows With Estimated Tokens': g.estimated
+    'Tool Calls': g.tools
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(groupedUsageData), 'Usage By Call Type');
 
