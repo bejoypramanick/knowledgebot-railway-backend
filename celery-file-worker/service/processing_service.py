@@ -22,7 +22,7 @@ from shared.chunking_service import chunking_service
 from shared.sqlalchemy_db import get_db_session
 from shared.file_metrics import calculate_metrics
 
-from knowledgebase_ingestion.schemas.upload_validation import UploadValidationInput
+from shared.upload_validation import UploadValidationInput
 from utils.validation import sanitize_filename, detect_mime_type_from_extension
 from utils.files import calculate_sha256
 from service.file_service import FileService

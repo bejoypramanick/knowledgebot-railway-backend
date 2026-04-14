@@ -13,7 +13,7 @@ from fastapi import UploadFile, HTTPException
 from shared.otel_logger import get_otel_logger
 from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.core.config import settings
-from knowledgebase_ingestion.schemas.upload_validation import UploadValidationInput
+from shared.upload_validation import UploadValidationInput
 from knowledgebase_ingestion.utils.validation import sanitize_filename
 from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
 from shared.redis_message_queue import RedisMessageQueue
