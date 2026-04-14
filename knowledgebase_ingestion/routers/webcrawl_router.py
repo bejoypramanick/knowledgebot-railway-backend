@@ -254,7 +254,6 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
 
         if result.get('success'):
             logger.info(f"✅ [WEBSITE_DELETE_SUCCESS] Website {website_id} deleted completely")
-            await _invalidate_kb_cache()
             return result
         else:
             error_msg = result.get('errors')[0].get('error') if result.get('errors') else 'Deletion failed'

@@ -91,11 +91,16 @@ class ComprehensiveDeletionService:
         try:
             # Route to appropriate deletion method
             if item_type == ItemType.FILE:
-                return await self._delete_file_comprehensive(item_id, hard_delete, deletion_report)
+                result = await self._delete_file_comprehensive(item_id, hard_delete, deletion_report)
             elif item_type in [ItemType.WEBSITE, ItemType.WEBPAGE, ItemType.SITEMAP]:
-                return await self._delete_website_comprehensive(item_id, hard_delete, deletion_report)
+                result = await self._delete_website_comprehensive(item_id, hard_delete, deletion_report)
             else:
                 raise ValueError(f"Unknown item type: {item_type}")
+
+            if result.get("success"):
+                await self._invalidate_kb_ui_cache(result)
+
+            return result
 
         except Exception as e:
             import traceback
@@ -109,6 +114,19 @@ class ComprehensiveDeletionService:
             })
             deletion_report["completed_at"] = datetime.utcnow().isoformat()
             return deletion_report
+
+    async def _invalidate_kb_ui_cache(self, deletion_report: Dict[str, Any]) -> None:
+        """Invalidate Redis UI cache after a successful individual KB delete."""
+        try:
+            from shared.redis_ui_cache import invalidate_kb_caches
+
+            deleted = await invalidate_kb_caches()
+            deletion_report["cleanup_summary"]["kb_ui_cache_keys_deleted"] = deleted
+            logger.info(f"🧹 [KB_UI_CACHE] Invalidated {deleted} KB UI cache keys")
+        except Exception as cache_err:
+            warning = f"KB UI cache invalidation failed: {cache_err}"
+            deletion_report.setdefault("warnings", []).append(warning)
+            logger.warning(f"⚠️ [KB_UI_CACHE] {warning}")
 
     # ============================================================================
     # FILE DELETION

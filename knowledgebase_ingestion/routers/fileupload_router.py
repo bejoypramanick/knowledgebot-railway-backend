@@ -373,7 +373,6 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
 
         if result.get('success'):
             logger.info(f"✅ [FILE_DELETE_SUCCESS] File {file_id} deleted completely")
-            await _invalidate_kb_cache()
             return result
         else:
             error_msg = result.get('errors')[0].get('error') if result.get('errors') else 'Deletion failed'
