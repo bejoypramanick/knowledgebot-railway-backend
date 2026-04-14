@@ -17,16 +17,16 @@ logger = get_otel_logger("vector_search_tool", "chatbot-orchestration")
 from shared.embeddings import generate_embedding
 
 
-def _estimate_text_tokens(text: str) -> int:
-    """Best-effort local token estimate for diagnostics."""
+def _count_gemini_tokens(text: str) -> int:
+    """Count diagnostic tokens with Gemini's count_tokens API."""
     if not text:
         return 0
-    try:
-        from litellm import token_counter
-
-        return int(token_counter(model="gemini/gemini-2.5-flash-lite", text=text) or 0)
-    except Exception:
-        return max(1, len(text) // 4)
+    client = get_genai_client()
+    if not client:
+        return 0
+    model = os.getenv("GEMINI_TOKEN_COUNT_MODEL", os.getenv("CHATBOT_MODEL", settings.chatbot_model))
+    response = client.models.count_tokens(model=model, contents=text)
+    return int(getattr(response, "total_tokens", 0) or 0)
 
 
 def _compress_context(context_text: str) -> str:
@@ -312,7 +312,7 @@ async def search_knowledge_base(
 
             grounding_context = "\n".join(grounding_chunks).strip()
             grounding_before_chars = len(grounding_context)
-            grounding_before_tokens = _estimate_text_tokens(grounding_context)
+            grounding_before_tokens = _count_gemini_tokens(grounding_context)
 
             llmlingua_applied = False
             llmlingua_reason = "disabled"
@@ -327,7 +327,7 @@ async def search_knowledge_base(
                 elif not grounding_context:
                     llmlingua_reason = "no_context"
             grounding_after_chars = len(compressed_context)
-            grounding_after_tokens = _estimate_text_tokens(compressed_context)
+            grounding_after_tokens = _count_gemini_tokens(compressed_context)
 
             final_context = compressed_context
 

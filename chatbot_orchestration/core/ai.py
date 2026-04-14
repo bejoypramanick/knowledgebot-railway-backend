@@ -1,8 +1,6 @@
 import os
 from google import genai
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIModel
-from pydantic_ai.models.anthropic import AnthropicModel
 
 from shared.otel_logger import get_otel_logger
 from chatbot_orchestration.core.config import settings
@@ -25,34 +23,16 @@ def get_genai_client():
     return _genai_client
 
 def get_model():
-    """Get the Pydantic AI model based on provider configuration."""
-    provider = os.getenv("CHATBOT_PROVIDER", settings.chatbot_provider).lower()
+    """Get the Gemini chat model."""
     model_name = os.getenv("CHATBOT_MODEL", settings.chatbot_model)
     
-    logger.info(f"🤖 Initializing model provider: {provider} ({model_name})")
+    logger.info(f"🤖 Initializing Gemini chat model: {model_name}")
     
     try:
-        if provider == "google":
-            api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-            if api_key and not os.getenv("GEMINI_API_KEY"):
-                os.environ["GEMINI_API_KEY"] = api_key
-            return GoogleModel(model_name)
-        elif provider == "openai":
-            api_key = os.getenv("OPENAI_API_KEY") or settings.openai_api_key
-            if api_key and not os.getenv("OPENAI_API_KEY"):
-                os.environ["OPENAI_API_KEY"] = api_key
-            return OpenAIModel(model_name)
-        elif provider == "anthropic":
-            api_key = os.getenv("ANTHROPIC_API_KEY") or settings.anthropic_api_key
-            if api_key and not os.getenv("ANTHROPIC_API_KEY"):
-                os.environ["ANTHROPIC_API_KEY"] = api_key
-            return AnthropicModel(model_name)
-        else:
-            logger.warning(f"⚠️ Unknown provider '{provider}', falling back to Google")
-            api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-            if api_key and not os.getenv("GEMINI_API_KEY"):
-                os.environ["GEMINI_API_KEY"] = api_key
-            return GoogleModel(model_name)
+        api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+        if api_key and not os.getenv("GEMINI_API_KEY"):
+            os.environ["GEMINI_API_KEY"] = api_key
+        return GoogleModel(model_name)
     except Exception as e:
-        logger.error(f"❌ Failed to initialize model {model_name} for {provider}: {e}")
+        logger.error(f"❌ Failed to initialize Gemini model {model_name}: {e}")
         return None

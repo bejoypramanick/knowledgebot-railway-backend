@@ -312,7 +312,7 @@ class ProcessingService:
                     if not success:
                         logger.warning(f"   ⚠️ Chunk batch insert failed, skipping this page")
                         return None
-                    logger.info(f"   ✅ Uploaded {len(chunks)} chunks with provider-agnostic embeddings to vector DB")
+                    logger.info(f"   ✅ Uploaded {len(chunks)} chunks with OpenAI embeddings to vector DB")
                 else:
                     logger.error(f"   ❌ No chunks produced by Kreuzberg for {page_data.page_url}")
                     raise Exception(f"No chunks produced by extractor for {page_data.page_url}")

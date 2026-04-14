@@ -62,9 +62,8 @@ REDIS_URL=redis://default:password@redis.railway.internal:6379
 ### API Keys
 ```
 GEMINI_API_KEY=your-gemini-api-key-here
-# Optional - only if using OpenAI/Anthropic
-OPENAI_API_KEY=optional
-ANTHROPIC_API_KEY=optional
+# Required for OpenAI embeddings
+OPENAI_API_KEY=your-openai-api-key-here
 ```
 
 ### Default Server Config
@@ -146,9 +145,10 @@ WEBSITE_CRAWLING_URL=http://web-crawling.railway.internal:8080
 
 # AI Models
 GEMINI_API_KEY=your-gemini-key
+OPENAI_API_KEY=your-openai-key
 CHATBOT_MODEL=gemini-2.5-flash-lite
-EMBEDDING_MODEL=gemini-embedding-001
-EMBEDDING_PROVIDER=google
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_PROVIDER=openai
 
 # RAG Configuration
 ENABLE_CITATIONS=true

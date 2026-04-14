@@ -31,12 +31,12 @@ tenacity>=8.2.2
 # Pydantic AI
 pydantic-ai>=1.68.0
 
-# LiteLLM (provider-agnostic chat, embeddings, token counting)
-litellm>=1.50.0
-
 # Google Gemini
 google-genai>=1.68.0
 google-auth>=2.38.0
+
+# OpenAI embeddings
+openai>=1.0.0
 
 # RAG reranking
 flashrank>=0.2.10

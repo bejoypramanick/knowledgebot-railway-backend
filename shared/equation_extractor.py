@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from core.ai import get_genai_client
 from shared.otel_logger import get_otel_logger
-from shared.usage_tracking import binary_payload_stats, estimate_text_tokens, text_payload_stats, track_model_usage
+from shared.usage_tracking import binary_payload_stats, text_payload_stats, track_model_usage
 
 logger = get_otel_logger("equation_extractor", "extractor")
 
@@ -119,12 +119,12 @@ correct them based on mathematical context."""
                 prompt_tokens = (
                     getattr(usage, "prompt_token_count", 0)
                     or getattr(usage, "promptTokenCount", 0)
-                    or estimate_text_tokens(prompt)
+                    or 0
                 )
                 completion_tokens = (
                     getattr(usage, "candidates_token_count", 0)
                     or getattr(usage, "candidatesTokenCount", 0)
-                    or estimate_text_tokens(getattr(response, "text", "") if response else "")
+                    or 0
                 )
                 total_tokens = (
                     getattr(usage, "total_token_count", 0)

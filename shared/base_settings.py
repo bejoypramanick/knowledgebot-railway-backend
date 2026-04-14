@@ -6,7 +6,7 @@ Each service extends BaseServiceSettings with only service-specific fields.
 
 Common fields:
   - Database: railway_postgres_url, database_url
-  - API Keys: gemini_api_key
+  - API Keys: gemini_api_key, openai_api_key
   - Server: api_gateway_port, api_gateway_host
   - Chatbot: chatbot_model, embedding_model
   - Logging: log_level
@@ -24,7 +24,6 @@ class BaseServiceSettings(BaseSettings):
     # API Keys (optional - services only require what they need)
     gemini_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
-    anthropic_api_key: Optional[str] = None
 
     # Server Configuration
     api_gateway_port: int = 8000
@@ -37,11 +36,9 @@ class BaseServiceSettings(BaseSettings):
 
     # Chatbot Configuration
     chatbot_model: str = "gemini-2.5-flash-lite"
-    chatbot_provider: str = "google"
-
     # Embedding Configuration
-    embedding_model: str = "gemini-embedding-001"
-    embedding_provider: str = "google"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_provider: str = "openai"
 
     # Logging Configuration
     log_level: str = "INFO"

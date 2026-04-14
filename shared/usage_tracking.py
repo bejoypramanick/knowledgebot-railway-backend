@@ -19,23 +19,6 @@ from shared.sqlalchemy_db import get_db_session
 logger = get_otel_logger("usage_tracking", "shared")
 
 
-def estimate_text_tokens(value: Any) -> int:
-    """Estimate tokens locally without adding a second provider API call."""
-    if value is None:
-        return 0
-    if isinstance(value, list):
-        return sum(estimate_text_tokens(item) for item in value)
-    text_value = str(value)
-    if not text_value.strip():
-        return 0
-    try:
-        from litellm import token_counter
-
-        return int(token_counter(text=text_value) or 0)
-    except Exception:
-        return max(1, len(text_value) // 4)
-
-
 def text_payload_stats(value: Any) -> Dict[str, Any]:
     """Return character and UTF-8 byte size for text payloads."""
     if value is None:

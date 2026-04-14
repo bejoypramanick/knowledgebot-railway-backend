@@ -372,7 +372,7 @@ async def process_file_content(
                         logger.warning(f"⚠️ Chunk batch insert failed for file {file_id}")
                         final_state = "failed"
                     else:
-                        logger.info(f"✅ Uploaded {len(chunks_to_insert)} chunks with provider-agnostic embeddings to vector DB")
+                        logger.info(f"✅ Uploaded {len(chunks_to_insert)} chunks with OpenAI embeddings to vector DB")
                 else:
                     raise Exception(f"No chunks produced for file {file_id}")
                 

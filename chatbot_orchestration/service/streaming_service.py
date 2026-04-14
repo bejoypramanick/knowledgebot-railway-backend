@@ -2260,13 +2260,15 @@ class StreamingService:
                 os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"),
             )
 
-            from litellm import token_counter
+            client = get_genai_client()
 
             def count_text(text_val: str) -> int:
                 if not text_val or not str(text_val).strip():
                     return 0
-                # LiteLLM token_counter is local estimation (no external API call).
-                return int(token_counter(model=token_model, text=str(text_val)) or 0)
+                if not client:
+                    return 0
+                response = client.models.count_tokens(model=token_model, contents=str(text_val))
+                return int(getattr(response, "total_tokens", 0) or 0)
 
             user_message_tokens = count_text(user_message)
             bot_message_tokens = count_text(response_text)
@@ -2553,22 +2555,21 @@ class StreamingService:
             if not steps:
                 return
 
-            # Count tokens for each step (local estimation via LiteLLM)
+            # Count tokens for each step with Gemini's count_tokens API.
             token_model = os.getenv(
                 "GEMINI_TOKEN_COUNT_MODEL",
                 os.getenv("CHATBOT_MODEL", "gemini-2.5-flash-lite"),
             )
             try:
-                from litellm import token_counter
+                client = get_genai_client()
 
                 for s in steps:
                     content = s.get("full_content") or ""
-                    if not str(content).strip():
+                    if not str(content).strip() or not client:
                         s["token_count"] = 0
                     else:
-                        s["token_count"] = int(
-                            token_counter(model=token_model, text=str(content)) or 0
-                        )
+                        response = client.models.count_tokens(model=token_model, contents=str(content))
+                        s["token_count"] = int(getattr(response, "total_tokens", 0) or 0)
             except Exception:
                 # Keep token_count unset/zero on failure.
                 for s in steps:
