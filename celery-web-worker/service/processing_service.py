@@ -868,7 +868,7 @@ class ProcessingService:
                 for index, img in enumerate(image_tags, start=1):
                     alt_text = img.get('alt', '').strip()
                     if processed >= WEB_IMAGE_OCR_MAX_IMAGES:
-                        self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image OCR limit reached")
+                        self._removeImageTagKeepAltText(soup, img, alt_text)
                         continue
 
                     src = img.get('src', '')
@@ -882,10 +882,10 @@ class ProcessingService:
 
                         image_bytes, mime_type = await self._loadImageBytesForOCR(client, src, page_url)
                         if not image_bytes:
-                            self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image could not be loaded")
+                            self._removeImageTagKeepAltText(soup, img, alt_text)
                             continue
                         if len(image_bytes) > WEB_IMAGE_OCR_MAX_BYTES:
-                            self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image too large for OCR")
+                            self._removeImageTagKeepAltText(soup, img, alt_text)
                             continue
 
                         ocr_text = await self._ocrWebImageWithKreuzberg(
@@ -906,11 +906,10 @@ class ProcessingService:
                             f" | image_url={image_url[:200]}"
                             f" | error={image_err}"
                         )
-                        self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image OCR failed")
+                        self._removeImageTagKeepAltText(soup, img, alt_text)
 
                 for bg_index, background in enumerate(background_images, start=1):
                     if processed >= WEB_IMAGE_OCR_MAX_IMAGES:
-                        self._insertBackgroundImageOCRText(soup, background["element"], "Skipped: image OCR limit reached")
                         continue
 
                     src = background["src"]
@@ -923,10 +922,8 @@ class ProcessingService:
 
                         image_bytes, mime_type = await self._loadImageBytesForOCR(client, src, page_url)
                         if not image_bytes:
-                            self._insertBackgroundImageOCRText(soup, background["element"], "Skipped: background image could not be loaded")
                             continue
                         if len(image_bytes) > WEB_IMAGE_OCR_MAX_BYTES:
-                            self._insertBackgroundImageOCRText(soup, background["element"], "Skipped: background image too large for OCR")
                             continue
 
                         ocr_text = await self._ocrWebImageWithKreuzberg(
@@ -947,7 +944,7 @@ class ProcessingService:
                             f" | image_url={image_url[:200]}"
                             f" | error={image_err}"
                         )
-                        self._insertBackgroundImageOCRText(soup, background["element"], "Skipped: background image OCR failed")
+                        continue
 
             logger.info(
                 f"🖼️ [WEB_IMAGE_OCR] Processed {processed} images for {page_url}"
@@ -1128,6 +1125,10 @@ class ProcessingService:
                 logger.warning(f"⚠️ [WEB_IMAGE_OCR] Failed to delete temp image: {cleanup_err}")
 
     def _replaceImageTagWithText(self, soup: Any, img: Any, alt_text: Optional[str], ocr_text: Optional[str]) -> None:
+        if not ocr_text or self._isNonContentOCRText(ocr_text):
+            self._removeImageTagKeepAltText(soup, img, alt_text)
+            return
+
         replacement = soup.new_tag("section")
         replacement["data-kb-image-ocr"] = "true"
 
@@ -1137,21 +1138,40 @@ class ProcessingService:
             replacement.append(alt_node)
 
         text_node = soup.new_tag("p")
-        text_node.string = f"Image OCR text: {ocr_text.strip()}" if ocr_text and ocr_text.strip() else "Image OCR text: No readable text extracted."
+        text_node.string = f"Image OCR text: {ocr_text.strip()}"
         replacement.append(text_node)
         img.replace_with(replacement)
 
     def _insertBackgroundImageOCRText(self, soup: Any, element: Any, ocr_text: Optional[str]) -> None:
+        if not ocr_text or self._isNonContentOCRText(ocr_text):
+            return
+
         section = soup.new_tag("section")
         section["data-kb-background-image-ocr"] = "true"
         text_node = soup.new_tag("p")
-        text_node.string = (
-            f"Background image OCR text: {ocr_text.strip()}"
-            if ocr_text and ocr_text.strip()
-            else "Background image OCR text: No readable text extracted."
-        )
+        text_node.string = f"Background image OCR text: {ocr_text.strip()}"
         section.append(text_node)
         element.insert(0, section)
+
+    def _removeImageTagKeepAltText(self, soup: Any, img: Any, alt_text: Optional[str]) -> None:
+        if alt_text:
+            replacement = soup.new_tag("span")
+            replacement.string = alt_text.strip()
+            img.replace_with(replacement)
+        else:
+            img.decompose()
+
+    def _isNonContentOCRText(self, ocr_text: str) -> bool:
+        normalized = (ocr_text or "").strip().lower()
+        return (
+            not normalized
+            or normalized.startswith("skipped:")
+            or normalized in {
+                "image ocr text: no readable text extracted.",
+                "background image ocr text: no readable text extracted.",
+                "no readable text extracted.",
+            }
+        )
 
     def _stripDataUrlImageSources(self, html_content: str) -> str:
         try:
