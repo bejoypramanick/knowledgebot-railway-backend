@@ -745,8 +745,8 @@ class ProcessingService:
         if this is still the optimal way to use the Rust worker features.
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
-        cleaned_html = clean_html_with_trafilatura(html_content, page_url)
-        cleaned_html = await self._replacePageImagesWithOCRText(cleaned_html, page_url, website_id)
+        html_with_image_text = await self._replacePageImagesWithOCRText(html_content, page_url, website_id)
+        cleaned_html = clean_html_with_trafilatura(html_with_image_text, page_url)
         html_filename = f"page_{url_hash}.html"
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
             file_data=cleaned_html.encode('utf-8'),
