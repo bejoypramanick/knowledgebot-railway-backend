@@ -869,7 +869,7 @@ class ProcessingService:
                 for index, img in enumerate(image_tags, start=1):
                     alt_text = img.get('alt', '').strip()
                     if processed >= WEB_IMAGE_OCR_MAX_IMAGES:
-                        self._removeImageTagKeepAltText(soup, img, alt_text)
+                        self._removeImageTagSilently(img)
                         continue
 
                     src = img.get('src', '')
@@ -883,10 +883,10 @@ class ProcessingService:
 
                         image_bytes, mime_type = await self._loadImageBytesForOCR(client, src, page_url)
                         if not image_bytes:
-                            self._removeImageTagKeepAltText(soup, img, alt_text)
+                            self._removeImageTagSilently(img)
                             continue
                         if len(image_bytes) > WEB_IMAGE_OCR_MAX_BYTES:
-                            self._removeImageTagKeepAltText(soup, img, alt_text)
+                            self._removeImageTagSilently(img)
                             continue
 
                         ocr_text = await self._ocrWebImageWithKreuzberg(
@@ -907,7 +907,7 @@ class ProcessingService:
                             f" | image_url={image_url[:200]}"
                             f" | error={image_err}"
                         )
-                        self._removeImageTagKeepAltText(soup, img, alt_text)
+                        self._removeImageTagSilently(img)
 
                 for bg_index, background in enumerate(background_images, start=1):
                     if processed >= WEB_IMAGE_OCR_MAX_IMAGES:
@@ -1127,7 +1127,7 @@ class ProcessingService:
 
     def _replaceImageTagWithText(self, soup: Any, img: Any, alt_text: Optional[str], ocr_text: Optional[str]) -> None:
         if not ocr_text or self._isNonContentOCRText(ocr_text):
-            self._removeImageTagKeepAltText(soup, img, alt_text)
+            self._removeImageTagSilently(img)
             return
 
         replacement = soup.new_tag("section")
@@ -1154,13 +1154,8 @@ class ProcessingService:
         section.append(text_node)
         element.insert(0, section)
 
-    def _removeImageTagKeepAltText(self, soup: Any, img: Any, alt_text: Optional[str]) -> None:
-        if alt_text:
-            replacement = soup.new_tag("span")
-            replacement.string = alt_text.strip()
-            img.replace_with(replacement)
-        else:
-            img.decompose()
+    def _removeImageTagSilently(self, img: Any) -> None:
+        img.decompose()
 
     def _isNonContentOCRText(self, ocr_text: str) -> bool:
         normalized = (ocr_text or "").strip().lower()
