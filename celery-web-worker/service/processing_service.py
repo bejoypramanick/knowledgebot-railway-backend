@@ -1205,6 +1205,18 @@ class ProcessingService:
             markdown_content,
             flags=re.IGNORECASE | re.DOTALL,
         )
+        markdown_content = self._stripMarkdownLinks(markdown_content)
+        return markdown_content
+
+    def _stripMarkdownLinks(self, markdown_content: str) -> str:
+        previous_content = None
+        while previous_content != markdown_content:
+            previous_content = markdown_content
+            markdown_content = re.sub(
+                r"(?<!!)\[([^\[\]]*)\]\((?:[^()]|\([^)]*\))*\)",
+                lambda match: match.group(1),
+                markdown_content,
+            )
         return markdown_content
 
     def _isTinyInlineAsset(self, src: str, alt_text: str) -> bool:
