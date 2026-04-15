@@ -16,6 +16,10 @@ logger = get_otel_logger("vector_search_tool", "chatbot-orchestration")
 
 from shared.embeddings import generate_embedding
 
+RAG_MAX_CANDIDATE_ROWS = int(os.getenv("RAG_MAX_CANDIDATE_ROWS", "80"))
+RAG_MAX_TOOL_CONTEXT_CHARS = int(os.getenv("RAG_MAX_TOOL_CONTEXT_CHARS", "120000"))
+RAG_MAX_CHUNK_CHARS = int(os.getenv("RAG_MAX_CHUNK_CHARS", "8000"))
+
 
 def _count_gemini_tokens(text: str) -> int:
     """Count diagnostic tokens with Gemini's count_tokens API."""
@@ -83,6 +87,12 @@ def _is_table_chunk(chunk: Dict[str, Any]) -> bool:
     except Exception:
         return False
     return False
+
+
+def _truncate_text(text_value: str, max_chars: int) -> str:
+    if not text_value or len(text_value) <= max_chars:
+        return text_value or ""
+    return text_value[:max_chars].rstrip() + "\n[Content truncated to fit retrieval context budget.]"
 
 
 def _rerank_results(query: str, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -239,6 +249,7 @@ async def search_knowledge_base(
                     ) as source_name
                 FROM candidate_rows
                 ORDER BY hybrid_score DESC
+                LIMIT :candidate_limit
             """
 
             result = await db.execute(
@@ -246,6 +257,7 @@ async def search_knowledge_base(
                 {
                     "vector": vector_str,
                     "fts_query": fts_query,
+                    "candidate_limit": RAG_MAX_CANDIDATE_ROWS,
                 },
             )
             rows = result.mappings().all()
@@ -277,10 +289,11 @@ async def search_knowledge_base(
             citation_urls: List[str] = []
             citation_index_by_source: Dict[str, int] = {}
             grounding_chunks: List[str] = []
+            grounding_chars = 0
 
             for chunk in top_chunks:
                 doc_id, doc_type = str(chunk["document_id"]), chunk["document_type"]
-                content = chunk["content"]
+                content = _truncate_text(chunk["content"] or "", RAG_MAX_CHUNK_CHARS)
                 score = f"{float(chunk['hybrid_score']):.3f}"
 
                 # Prefer canonical URL for websites; otherwise fall back to a stable KB reference.
@@ -308,7 +321,15 @@ async def search_knowledge_base(
                     f"{content}\n"
                 )
 
+                if grounding_chunks and grounding_chars + len(chunk_str) > RAG_MAX_TOOL_CONTEXT_CHARS:
+                    logger.info(
+                        f"🧭 [RAG_CONTEXT_BUDGET] Stopping grounding assembly at {len(grounding_chunks)} chunks "
+                        f"to stay under {RAG_MAX_TOOL_CONTEXT_CHARS} chars"
+                    )
+                    break
+
                 grounding_chunks.append(chunk_str)
+                grounding_chars += len(chunk_str)
 
             grounding_context = "\n".join(grounding_chunks).strip()
             grounding_before_chars = len(grounding_context)
