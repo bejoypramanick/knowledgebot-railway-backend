@@ -27,7 +27,7 @@ def clean_html_preserving_images(html_content: str, url: Optional[str] = None) -
 
         soup = BeautifulSoup(html_content, "lxml")
         removed = 0
-        unwrapped_links = 0
+        stripped_links = 0
 
         for tag_name in ("script", "noscript", "iframe", "template"):
             for element in soup.find_all(tag_name):
@@ -65,17 +65,19 @@ def clean_html_preserving_images(html_content: str, url: Optional[str] = None) -
                 removed += 1
 
         for anchor in soup.find_all("a"):
+            anchor.attrs.pop("href", None)
+            anchor.attrs.pop("title", None)
             if anchor.get_text(strip=True) or any(str(child).strip() for child in anchor.children):
                 anchor.unwrap()
             else:
                 anchor.decompose()
-            unwrapped_links += 1
+            stripped_links += 1
 
         logger.info(
             f"✅ [HTML_CLEAN] Removed navigation/footer/link noise without touching images"
             f" | url={url or 'none'}"
             f" | removed_elements={removed}"
-            f" | unwrapped_links={unwrapped_links}"
+            f" | stripped_links={stripped_links}"
             f" | input_chars={len(html_content)}"
             f" | output_chars={len(str(soup))}"
         )
