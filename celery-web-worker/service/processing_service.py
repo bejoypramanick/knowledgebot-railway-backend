@@ -847,8 +847,6 @@ class ProcessingService:
                 img for img in soup.find_all('img')
                 if img.get('src') and not self._isTinyInlineAsset(img.get('src', ''), img.get('alt', ''))
             ]
-            if not image_tags:
-                return self._stripDataUrlImageSources(str(soup))
 
             processed = 0
             async with httpx.AsyncClient(
@@ -856,6 +854,10 @@ class ProcessingService:
                 follow_redirects=True,
                 headers={"User-Agent": CRAWL4AI_DEFAULT_USER_AGENT},
             ) as client:
+                background_images = await self._findBackgroundImagesForOCR(soup, client=client, page_url=page_url)
+                if not image_tags and not background_images:
+                    return self._stripDataUrlImageSources(str(soup))
+
                 for index, img in enumerate(image_tags, start=1):
                     alt_text = img.get('alt', '').strip()
                     if processed >= WEB_IMAGE_OCR_MAX_IMAGES:
@@ -893,11 +895,137 @@ class ProcessingService:
                         )
                         self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image OCR failed")
 
-            logger.info(f"🖼️ [WEB_IMAGE_OCR] Processed {processed} images for {page_url}")
+                for bg_index, background in enumerate(background_images, start=1):
+                    if processed >= WEB_IMAGE_OCR_MAX_IMAGES:
+                        self._insertBackgroundImageOCRText(soup, background["element"], "Skipped: image OCR limit reached")
+                        continue
+
+                    src = background["src"]
+                    image_url = urljoin(page_url, src) if not src.startswith('data:') else f"{page_url}#background-image-{bg_index}"
+                    try:
+                        image_bytes, mime_type = await self._loadImageBytesForOCR(client, src, page_url)
+                        if not image_bytes:
+                            self._insertBackgroundImageOCRText(soup, background["element"], "Skipped: background image could not be loaded")
+                            continue
+                        if len(image_bytes) > WEB_IMAGE_OCR_MAX_BYTES:
+                            self._insertBackgroundImageOCRText(soup, background["element"], "Skipped: background image too large for OCR")
+                            continue
+
+                        ocr_text = await self._ocrWebImageWithKreuzberg(
+                            image_bytes=image_bytes,
+                            mime_type=mime_type,
+                            image_url=image_url,
+                            page_url=page_url,
+                            website_id=website_id,
+                            index=len(image_tags) + bg_index,
+                        )
+                        processed += 1
+                        self._insertBackgroundImageOCRText(soup, background["element"], ocr_text)
+                    except Exception as image_err:
+                        logger.warning(
+                            f"⚠️ [WEB_IMAGE_OCR] Failed background image OCR"
+                            f" | page_url={page_url}"
+                            f" | image_url={image_url[:200]}"
+                            f" | error={image_err}"
+                        )
+                        self._insertBackgroundImageOCRText(soup, background["element"], "Skipped: background image OCR failed")
+
+            logger.info(
+                f"🖼️ [WEB_IMAGE_OCR] Processed {processed} images for {page_url}"
+                f" | img_tags={len(image_tags)}"
+                f" | background_images={len(background_images)}"
+            )
             return self._stripDataUrlImageSources(str(soup))
         except Exception as e:
             logger.warning(f"⚠️ [WEB_IMAGE_OCR] Image OCR preprocessing failed for {page_url}: {e}")
             return self._stripDataUrlImageSources(html_content)
+
+    async def _findBackgroundImagesForOCR(self, soup: Any, client: Any, page_url: str) -> List[Dict[str, Any]]:
+        """Find background-image URLs and the elements where their OCR text belongs."""
+        found: List[Dict[str, Any]] = []
+        seen = set()
+
+        def add(element: Any, src: str, base_url: str = page_url) -> None:
+            if not src or self._isSkippableImageReference(src):
+                return
+            if not src.startswith('data:'):
+                src = urljoin(base_url, src)
+            key = (id(element), src)
+            if key in seen:
+                return
+            seen.add(key)
+            found.append({"element": element, "src": src})
+
+        for element in soup.find_all(style=True):
+            for src in self._extractCssImageUrls(element.get("style", "")):
+                add(element, src, page_url)
+
+        for style_tag in soup.find_all("style"):
+            css_text = style_tag.string or style_tag.get_text() or ""
+            self._collectCssBackgroundMatches(soup, css_text, add, page_url)
+
+        if client:
+            stylesheet_urls = []
+            for link in soup.find_all("link", href=True):
+                rel = " ".join(link.get("rel", [])).lower() if isinstance(link.get("rel"), list) else str(link.get("rel", "")).lower()
+                if "stylesheet" in rel:
+                    stylesheet_urls.append(urljoin(page_url, link["href"]))
+
+            for css_url in stylesheet_urls[:5]:
+                try:
+                    response = await client.get(css_url)
+                    if response.status_code == 200:
+                        self._collectCssBackgroundMatches(soup, response.text, add, css_url)
+                except Exception as css_err:
+                    logger.warning(f"⚠️ [WEB_IMAGE_OCR] Failed to load stylesheet {css_url}: {css_err}")
+
+        return found
+
+    def _collectCssBackgroundMatches(self, soup: Any, css_text: str, add: Any, base_url: str) -> None:
+        for selector, body in re.findall(r"([^{}]+)\{([^{}]*url\([^{}]*\)[^{}]*)\}", css_text, flags=re.IGNORECASE | re.DOTALL):
+            image_urls = self._extractCssImageUrls(body)
+            if not image_urls:
+                continue
+            for element in self._selectElementsForSimpleCssSelector(soup, selector):
+                for src in image_urls:
+                    add(element, src, base_url)
+
+    def _selectElementsForSimpleCssSelector(self, soup: Any, selector_text: str) -> List[Any]:
+        matches = []
+        for selector in selector_text.split(","):
+            selector = selector.strip()
+            if not selector or any(token in selector for token in (":", ">", "+", "~", "[", "*")):
+                continue
+            simple_selector = selector.split()[-1].strip()
+            try:
+                if simple_selector.startswith("#"):
+                    element = soup.find(id=simple_selector[1:])
+                    if element:
+                        matches.append(element)
+                elif simple_selector.startswith("."):
+                    matches.extend(soup.find_all(class_=simple_selector[1:]))
+                elif re.match(r"^[a-zA-Z][\w-]*$", simple_selector):
+                    matches.extend(soup.find_all(simple_selector))
+            except Exception:
+                continue
+        return matches
+
+    def _extractCssImageUrls(self, css_text: str) -> List[str]:
+        urls = []
+        for raw_url in re.findall(r"url\(\s*(['\"]?)(.*?)\1\s*\)", css_text, flags=re.IGNORECASE | re.DOTALL):
+            url_value = raw_url[1].strip()
+            if url_value:
+                urls.append(url_value)
+        return urls
+
+    def _isSkippableImageReference(self, src: str) -> bool:
+        normalized = src.strip().lower()
+        return (
+            not normalized
+            or normalized.startswith("#")
+            or normalized.startswith("blob:")
+            or normalized.startswith("javascript:")
+        )
 
     async def _loadImageBytesForOCR(self, client: Any, src: str, page_url: str) -> Tuple[Optional[bytes], str]:
         if src.startswith('data:'):
@@ -989,6 +1117,18 @@ class ProcessingService:
         replacement.append(text_node)
         img.replace_with(replacement)
 
+    def _insertBackgroundImageOCRText(self, soup: Any, element: Any, ocr_text: Optional[str]) -> None:
+        section = soup.new_tag("section")
+        section["data-kb-background-image-ocr"] = "true"
+        text_node = soup.new_tag("p")
+        text_node.string = (
+            f"Background image OCR text: {ocr_text.strip()}"
+            if ocr_text and ocr_text.strip()
+            else "Background image OCR text: No readable text extracted."
+        )
+        section.append(text_node)
+        element.insert(0, section)
+
     def _stripDataUrlImageSources(self, html_content: str) -> str:
         try:
             from bs4 import BeautifulSoup
@@ -998,9 +1138,24 @@ class ProcessingService:
                 src = img.get('src', '')
                 if src.startswith('data:'):
                     img.attrs.pop('src', None)
+            for element in soup.find_all(style=True):
+                element["style"] = self._stripDataUrlsFromCss(element.get("style", ""))
+            for style_tag in soup.find_all("style"):
+                css_text = style_tag.string or style_tag.get_text() or ""
+                cleaned_css = self._stripDataUrlsFromCss(css_text)
+                style_tag.clear()
+                style_tag.string = cleaned_css
             return str(soup)
         except Exception:
             return re.sub(r'\s+src=["\']data:[^"\']+["\']', '', html_content, flags=re.IGNORECASE)
+
+    def _stripDataUrlsFromCss(self, css_text: str) -> str:
+        return re.sub(
+            r"url\(\s*(['\"]?)data:image/[^)]*\1\s*\)",
+            "url()",
+            css_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
 
     def _isTinyInlineAsset(self, src: str, alt_text: str) -> bool:
         if not src.startswith('data:image/svg+xml'):
