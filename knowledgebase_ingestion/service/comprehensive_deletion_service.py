@@ -13,6 +13,7 @@ Handles:
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
+import re
 
 from shared.otel_logger import get_otel_logger
 from shared.sqlalchemy_db import get_db_session, get_db_connection
@@ -187,6 +188,8 @@ class ComprehensiveDeletionService:
                     redis_cleaned = await self._cleanup_redis_task_state(file_record['celery_task_id'])
                     if redis_cleaned:
                         deletion_report["cleanup_summary"]["redis_keys_deleted"] += 1
+                    file_redis_keys_deleted = await self._cleanup_file_redis_references(file_id, file_record)
+                    deletion_report["cleanup_summary"]["redis_keys_deleted"] += file_redis_keys_deleted
 
                     # Step 4: S3 CLEANUP - BOTH raw and processed
                     logger.info(f"☁️  [S3_DELETE] Deleting from S3...")
@@ -466,6 +469,87 @@ class ComprehensiveDeletionService:
         except Exception as e:
             logger.warning(f"   ⚠️  Could not clean Redis: {e}")
             return False
+
+    async def _cleanup_file_redis_references(self, file_id: str, file_record: Any) -> int:
+        """Delete Redis cache/state keys that directly reference an individual file."""
+        terms = self._redis_search_terms(
+            [
+                file_id,
+                self._record_value(file_record, "celery_task_id"),
+                self._record_value(file_record, "storage_document_name"),
+                self._record_value(file_record, "s3_key"),
+                self._record_value(file_record, "processed_content_s3_key"),
+            ]
+        )
+        if not terms:
+            return 0
+
+        redis_targets = [
+            ("file_task_queue", "FILE_TASK_QUEUE_REDIS_DB", 0),
+            ("citation_cache", "CITATION_CACHE_REDIS_DB", 4),
+            ("ui_data_cache", "UI_CACHE_REDIS_DB", 7),
+        ]
+        total_deleted = 0
+
+        for purpose, db_env_var, default_db in redis_targets:
+            try:
+                from shared.redis_factory import create_async_redis_client
+
+                client = await create_async_redis_client(
+                    primary_env_var=f"delete_file_{purpose}",
+                    db_env_var=db_env_var,
+                    default_db=default_db,
+                    cache=False,
+                )
+                try:
+                    deleted = await self._delete_redis_keys_matching_terms(client, terms)
+                    total_deleted += deleted
+                    logger.info(
+                        f"   🧹 [REDIS_FILE_CLEANUP] Deleted {deleted} keys from {purpose} "
+                        f"for file {file_id}"
+                    )
+                finally:
+                    await client.aclose()
+            except Exception as redis_err:
+                logger.warning(
+                    f"   ⚠️ [REDIS_FILE_CLEANUP] Failed for {purpose} on file {file_id}: {redis_err}"
+                )
+
+        return total_deleted
+
+    def _record_value(self, record: Any, field: str) -> Optional[Any]:
+        try:
+            return record[field]
+        except Exception:
+            return None
+
+    def _redis_search_terms(self, values: List[Optional[Any]]) -> List[str]:
+        terms = []
+        seen = set()
+        for value in values:
+            if value is None:
+                continue
+            text_value = str(value).strip()
+            if len(text_value) < 8 or text_value in seen:
+                continue
+            seen.add(text_value)
+            terms.append(text_value)
+        return terms
+
+    async def _delete_redis_keys_matching_terms(self, client: Any, terms: List[str]) -> int:
+        deleted = 0
+        key_names = set()
+        for term in terms:
+            safe_pattern = self._redis_glob_escape(term)
+            async for key in client.scan_iter(match=f"*{safe_pattern}*", count=500):
+                key_names.add(key)
+
+        if key_names:
+            deleted = await client.delete(*key_names)
+        return int(deleted or 0)
+
+    def _redis_glob_escape(self, value: str) -> str:
+        return re.sub(r"([][?*\\])", r"\\\1", value)
 
 
 
