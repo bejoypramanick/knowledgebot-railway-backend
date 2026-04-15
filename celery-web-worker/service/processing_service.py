@@ -797,10 +797,16 @@ class ProcessingService:
                 error_detail = kreuzberg_metadata.get('error', 'unknown') if kreuzberg_metadata else 'unknown'
                 raise Exception(f"Kreuzberg processing failed for {page_url}: {error_detail}")
 
-            markdown_content = kreuzberg_markdown
+            markdown_content = self._stripDataUrlImagesFromMarkdown(kreuzberg_markdown)
             chunks = kreuzberg_metadata.get("chunks") or []
             if not chunks:
                 raise Exception(f"Kreuzberg returned no chunks for {page_url}")
+
+            for chunk in chunks:
+                if isinstance(chunk.get("content"), str):
+                    chunk["content"] = self._stripDataUrlImagesFromMarkdown(chunk["content"])
+                if isinstance(chunk.get("text"), str):
+                    chunk["text"] = self._stripDataUrlImagesFromMarkdown(chunk["text"])
 
             for chunk in chunks:
                 if "metadata" not in chunk:
@@ -1174,6 +1180,21 @@ class ProcessingService:
             css_text,
             flags=re.IGNORECASE | re.DOTALL,
         )
+
+    def _stripDataUrlImagesFromMarkdown(self, markdown_content: str) -> str:
+        markdown_content = re.sub(
+            r"!\[[^\]]*\]\(\s*data:image/[^)]*\)",
+            "",
+            markdown_content,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        markdown_content = re.sub(
+            r"<img\b[^>]*\bsrc=[\"']data:image/.*?[\"'][^>]*>",
+            "",
+            markdown_content,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return markdown_content
 
     def _isTinyInlineAsset(self, src: str, alt_text: str) -> bool:
         if not src.startswith('data:image/svg+xml'):
