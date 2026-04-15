@@ -16,6 +16,7 @@ import mimetypes
 from shared.otel_logger import get_otel_logger
 from urllib.parse import urljoin, urlparse
 from shared.file_metrics import calculate_metrics
+from shared.html_cleaner import clean_html_with_trafilatura
 from shared.kreuzberg_integration import process_with_kreuzberg
 from shared.s3_file_storage import s3_file_storage
 
@@ -744,8 +745,8 @@ class ProcessingService:
         if this is still the optimal way to use the Rust worker features.
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
-        cleaned_html = await self._replacePageImagesWithOCRText(html_content, page_url, website_id)
-        logger.info(f"⏭️ [HTML_CLEAN] Trafilatura disabled completely | page_url={page_url}")
+        cleaned_html = clean_html_with_trafilatura(html_content, page_url)
+        cleaned_html = await self._replacePageImagesWithOCRText(cleaned_html, page_url, website_id)
         html_filename = f"page_{url_hash}.html"
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
             file_data=cleaned_html.encode('utf-8'),
