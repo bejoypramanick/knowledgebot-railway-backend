@@ -849,6 +849,7 @@ class ProcessingService:
             ]
 
             processed = 0
+            ocr_cache: Dict[str, Optional[str]] = {}
             async with httpx.AsyncClient(
                 timeout=WEB_IMAGE_OCR_TIMEOUT_SECONDS,
                 follow_redirects=True,
@@ -868,6 +869,11 @@ class ProcessingService:
                     image_url = urljoin(page_url, src) if not src.startswith('data:') else f"{page_url}#inline-image-{index}"
 
                     try:
+                        cache_key = self._imageOCRCacheKey(src, page_url)
+                        if cache_key in ocr_cache:
+                            self._replaceImageTagWithText(soup, img, alt_text, ocr_cache[cache_key])
+                            continue
+
                         image_bytes, mime_type = await self._loadImageBytesForOCR(client, src, page_url)
                         if not image_bytes:
                             self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image could not be loaded")
@@ -885,6 +891,7 @@ class ProcessingService:
                             index=index,
                         )
                         processed += 1
+                        ocr_cache[cache_key] = ocr_text
                         self._replaceImageTagWithText(soup, img, alt_text, ocr_text)
                     except Exception as image_err:
                         logger.warning(
@@ -903,6 +910,11 @@ class ProcessingService:
                     src = background["src"]
                     image_url = urljoin(page_url, src) if not src.startswith('data:') else f"{page_url}#background-image-{bg_index}"
                     try:
+                        cache_key = self._imageOCRCacheKey(src, page_url)
+                        if cache_key in ocr_cache:
+                            self._insertBackgroundImageOCRText(soup, background["element"], ocr_cache[cache_key])
+                            continue
+
                         image_bytes, mime_type = await self._loadImageBytesForOCR(client, src, page_url)
                         if not image_bytes:
                             self._insertBackgroundImageOCRText(soup, background["element"], "Skipped: background image could not be loaded")
@@ -920,6 +932,7 @@ class ProcessingService:
                             index=len(image_tags) + bg_index,
                         )
                         processed += 1
+                        ocr_cache[cache_key] = ocr_text
                         self._insertBackgroundImageOCRText(soup, background["element"], ocr_text)
                     except Exception as image_err:
                         logger.warning(
@@ -1027,6 +1040,11 @@ class ProcessingService:
             or normalized.startswith("javascript:")
         )
 
+    def _imageOCRCacheKey(self, src: str, page_url: str) -> str:
+        if src.startswith('data:'):
+            return hashlib.sha256(src.encode("utf-8", errors="ignore")).hexdigest()
+        return urljoin(page_url, src)
+
     async def _loadImageBytesForOCR(self, client: Any, src: str, page_url: str) -> Tuple[Optional[bytes], str]:
         if src.startswith('data:'):
             return self._decodeDataUrlImage(src)
@@ -1089,8 +1107,8 @@ class ProcessingService:
                 source_name=f"{page_url}#image-{index}",
             )
             if not markdown_content:
-                logger.warning(
-                    f"⚠️ [WEB_IMAGE_OCR] Empty OCR result"
+                logger.info(
+                    f"ℹ️ [WEB_IMAGE_OCR] No readable text found"
                     f" | page_url={page_url}"
                     f" | image_url={image_url[:200]}"
                     f" | error={(metadata or {}).get('error', 'unknown')}"
