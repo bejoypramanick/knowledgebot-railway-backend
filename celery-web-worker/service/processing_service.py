@@ -6,10 +6,13 @@ import asyncio
 import time
 import os
 import json
+import base64
+import re
 from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
 import logging
 import hashlib
+import mimetypes
 from shared.otel_logger import get_otel_logger
 from urllib.parse import urljoin, urlparse
 from shared.file_metrics import calculate_metrics
@@ -63,6 +66,12 @@ def _json_env(name: str, default: Any) -> Any:
     except json.JSONDecodeError as exc:
         logger.warning(f"⚠️ Invalid JSON in {name}; ignoring value: {exc}")
         return default
+
+
+WEB_IMAGE_OCR_ENABLED = _env_bool("WEB_IMAGE_OCR_ENABLED", True)
+WEB_IMAGE_OCR_MAX_IMAGES = int(os.environ.get("WEB_IMAGE_OCR_MAX_IMAGES", "10"))
+WEB_IMAGE_OCR_MAX_BYTES = int(os.environ.get("WEB_IMAGE_OCR_MAX_BYTES", str(10 * 1024 * 1024)))
+WEB_IMAGE_OCR_TIMEOUT_SECONDS = float(os.environ.get("WEB_IMAGE_OCR_TIMEOUT_SECONDS", "20"))
 
 
 class ProcessingService:
@@ -735,7 +744,7 @@ class ProcessingService:
         if this is still the optimal way to use the Rust worker features.
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
-        cleaned_html = html_content
+        cleaned_html = await self._replacePageImagesWithOCRText(html_content, page_url, website_id)
         logger.info(f"⏭️ [HTML_CLEAN] Trafilatura disabled completely | page_url={page_url}")
         html_filename = f"page_{url_hash}.html"
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
@@ -823,6 +832,180 @@ class ProcessingService:
                 pass
 
             raise Exception(f"Kreuzberg processing failed for {page_url}: {kreuzberg_err}")
+
+    async def _replacePageImagesWithOCRText(self, html_content: str, page_url: str, website_id: Optional[str]) -> str:
+        """OCR page images separately and replace image tags with extracted text in-place."""
+        if not WEB_IMAGE_OCR_ENABLED:
+            return self._stripDataUrlImageSources(html_content)
+
+        try:
+            from bs4 import BeautifulSoup
+            import httpx
+
+            soup = BeautifulSoup(html_content, 'lxml')
+            image_tags = [
+                img for img in soup.find_all('img')
+                if img.get('src') and not self._isTinyInlineAsset(img.get('src', ''), img.get('alt', ''))
+            ]
+            if not image_tags:
+                return self._stripDataUrlImageSources(str(soup))
+
+            processed = 0
+            async with httpx.AsyncClient(
+                timeout=WEB_IMAGE_OCR_TIMEOUT_SECONDS,
+                follow_redirects=True,
+                headers={"User-Agent": CRAWL4AI_DEFAULT_USER_AGENT},
+            ) as client:
+                for index, img in enumerate(image_tags, start=1):
+                    alt_text = img.get('alt', '').strip()
+                    if processed >= WEB_IMAGE_OCR_MAX_IMAGES:
+                        self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image OCR limit reached")
+                        continue
+
+                    src = img.get('src', '')
+                    image_url = urljoin(page_url, src) if not src.startswith('data:') else f"{page_url}#inline-image-{index}"
+
+                    try:
+                        image_bytes, mime_type = await self._loadImageBytesForOCR(client, src, page_url)
+                        if not image_bytes:
+                            self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image could not be loaded")
+                            continue
+                        if len(image_bytes) > WEB_IMAGE_OCR_MAX_BYTES:
+                            self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image too large for OCR")
+                            continue
+
+                        ocr_text = await self._ocrWebImageWithKreuzberg(
+                            image_bytes=image_bytes,
+                            mime_type=mime_type,
+                            image_url=image_url,
+                            page_url=page_url,
+                            website_id=website_id,
+                            index=index,
+                        )
+                        processed += 1
+                        self._replaceImageTagWithText(soup, img, alt_text, ocr_text)
+                    except Exception as image_err:
+                        logger.warning(
+                            f"⚠️ [WEB_IMAGE_OCR] Failed image OCR"
+                            f" | page_url={page_url}"
+                            f" | image_url={image_url[:200]}"
+                            f" | error={image_err}"
+                        )
+                        self._replaceImageTagWithText(soup, img, alt_text, "Skipped: image OCR failed")
+
+            logger.info(f"🖼️ [WEB_IMAGE_OCR] Processed {processed} images for {page_url}")
+            return self._stripDataUrlImageSources(str(soup))
+        except Exception as e:
+            logger.warning(f"⚠️ [WEB_IMAGE_OCR] Image OCR preprocessing failed for {page_url}: {e}")
+            return self._stripDataUrlImageSources(html_content)
+
+    async def _loadImageBytesForOCR(self, client: Any, src: str, page_url: str) -> Tuple[Optional[bytes], str]:
+        if src.startswith('data:'):
+            return self._decodeDataUrlImage(src)
+
+        image_url = urljoin(page_url, src)
+        response = await client.get(image_url)
+        if response.status_code != 200:
+            return None, "application/octet-stream"
+
+        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+        mime_type = content_type or mimetypes.guess_type(urlparse(image_url).path)[0] or "application/octet-stream"
+        if not mime_type.startswith("image/"):
+            return None, mime_type
+
+        return response.content, mime_type
+
+    def _decodeDataUrlImage(self, src: str) -> Tuple[Optional[bytes], str]:
+        match = re.match(r"^data:(image/[^;,]+)(;base64)?,(.*)$", src, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return None, "application/octet-stream"
+
+        mime_type = match.group(1).lower()
+        is_base64 = bool(match.group(2))
+        payload = match.group(3)
+        try:
+            if is_base64:
+                return base64.b64decode(payload, validate=False), mime_type
+            from urllib.parse import unquote_to_bytes
+            return unquote_to_bytes(payload), mime_type
+        except Exception:
+            return None, mime_type
+
+    async def _ocrWebImageWithKreuzberg(
+        self,
+        image_bytes: bytes,
+        mime_type: str,
+        image_url: str,
+        page_url: str,
+        website_id: Optional[str],
+        index: int,
+    ) -> Optional[str]:
+        ext = mimetypes.guess_extension(mime_type) or ".img"
+        image_hash = hashlib.md5(f"{page_url}:{index}:{image_url}".encode()).hexdigest()[:12]
+        filename = f"page_image_{image_hash}{ext}"
+        upload_success, image_s3_key = await s3_file_storage.upload_file(
+            file_data=image_bytes,
+            original_filename=filename,
+            file_type="web-worker-temp"
+        )
+        if not upload_success:
+            raise Exception("failed to upload image for OCR")
+
+        try:
+            markdown_content, metadata = await process_with_kreuzberg(
+                s3_key=image_s3_key,
+                original_filename=filename,
+                mime_type=mime_type,
+                worker_type="web",
+                source_id=website_id,
+                source_name=f"{page_url}#image-{index}",
+            )
+            if not markdown_content:
+                logger.warning(
+                    f"⚠️ [WEB_IMAGE_OCR] Empty OCR result"
+                    f" | page_url={page_url}"
+                    f" | image_url={image_url[:200]}"
+                    f" | error={(metadata or {}).get('error', 'unknown')}"
+                )
+                return None
+            return markdown_content.strip()
+        finally:
+            try:
+                await s3_file_storage.delete_file(image_s3_key)
+            except Exception as cleanup_err:
+                logger.warning(f"⚠️ [WEB_IMAGE_OCR] Failed to delete temp image: {cleanup_err}")
+
+    def _replaceImageTagWithText(self, soup: Any, img: Any, alt_text: Optional[str], ocr_text: Optional[str]) -> None:
+        replacement = soup.new_tag("section")
+        replacement["data-kb-image-ocr"] = "true"
+
+        if alt_text:
+            alt_node = soup.new_tag("p")
+            alt_node.string = f"Image alt text: {alt_text}"
+            replacement.append(alt_node)
+
+        text_node = soup.new_tag("p")
+        text_node.string = f"Image OCR text: {ocr_text.strip()}" if ocr_text and ocr_text.strip() else "Image OCR text: No readable text extracted."
+        replacement.append(text_node)
+        img.replace_with(replacement)
+
+    def _stripDataUrlImageSources(self, html_content: str) -> str:
+        try:
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(html_content, 'lxml')
+            for img in soup.find_all('img'):
+                src = img.get('src', '')
+                if src.startswith('data:'):
+                    img.attrs.pop('src', None)
+            return str(soup)
+        except Exception:
+            return re.sub(r'\s+src=["\']data:[^"\']+["\']', '', html_content, flags=re.IGNORECASE)
+
+    def _isTinyInlineAsset(self, src: str, alt_text: str) -> bool:
+        if not src.startswith('data:image/svg+xml'):
+            return False
+        return not alt_text.strip()
 
     async def _extractDocumentsFromPage(
         self, html_content: str, page_url: str, page_markdown: str
