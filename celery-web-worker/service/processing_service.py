@@ -72,6 +72,7 @@ WEB_IMAGE_OCR_ENABLED = _env_bool("WEB_IMAGE_OCR_ENABLED", True)
 WEB_IMAGE_OCR_MAX_IMAGES = int(os.environ.get("WEB_IMAGE_OCR_MAX_IMAGES", "10"))
 WEB_IMAGE_OCR_MAX_BYTES = int(os.environ.get("WEB_IMAGE_OCR_MAX_BYTES", str(10 * 1024 * 1024)))
 WEB_IMAGE_OCR_TIMEOUT_SECONDS = float(os.environ.get("WEB_IMAGE_OCR_TIMEOUT_SECONDS", "20"))
+WEB_STRIP_LINK_URLS = _env_bool("WEB_STRIP_LINK_URLS", True)
 
 
 class ProcessingService:
@@ -745,6 +746,7 @@ class ProcessingService:
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
         cleaned_html = await self._replacePageImagesWithOCRText(html_content, page_url, website_id)
+        cleaned_html = self._stripLinkUrlsFromHTML(cleaned_html, page_url)
         logger.info(f"⏭️ [HTML_CLEAN] Trafilatura disabled completely | page_url={page_url}")
         html_filename = f"page_{url_hash}.html"
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
@@ -1193,6 +1195,32 @@ class ProcessingService:
         except Exception:
             return re.sub(r'\s+src=["\']data:[^"\']+["\']', '', html_content, flags=re.IGNORECASE)
 
+    def _stripLinkUrlsFromHTML(self, html_content: str, page_url: str) -> str:
+        if not WEB_STRIP_LINK_URLS:
+            return html_content
+
+        try:
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(html_content, 'lxml')
+            stripped_count = 0
+            for anchor in soup.find_all("a"):
+                if anchor.get_text(strip=True) or any(str(child).strip() for child in anchor.children):
+                    anchor.unwrap()
+                else:
+                    anchor.decompose()
+                stripped_count += 1
+
+            if stripped_count:
+                logger.info(
+                    f"🔗 [HTML_LINK_CLEAN] Removed {stripped_count} link URLs while preserving anchor text"
+                    f" | page_url={page_url}"
+                )
+            return str(soup)
+        except Exception as e:
+            logger.warning(f"⚠️ [HTML_LINK_CLEAN] Failed to strip link URLs for {page_url}: {e}")
+            return html_content
+
     def _stripDataUrlsFromCss(self, css_text: str) -> str:
         return re.sub(
             r"url\(\s*(['\"]?)data:image/[^)]*\1\s*\)",
@@ -1214,6 +1242,19 @@ class ProcessingService:
             markdown_content,
             flags=re.IGNORECASE | re.DOTALL,
         )
+        if WEB_STRIP_LINK_URLS:
+            markdown_content = self._stripMarkdownLinkUrls(markdown_content)
+        return markdown_content
+
+    def _stripMarkdownLinkUrls(self, markdown_content: str) -> str:
+        previous_content = None
+        while previous_content != markdown_content:
+            previous_content = markdown_content
+            markdown_content = re.sub(
+                r"(?<!!)\[([^\[\]]+)\]\((?:[^()]|\([^)]*\))*\)",
+                r"\1",
+                markdown_content,
+            )
         return markdown_content
 
     def _isTinyInlineAsset(self, src: str, alt_text: str) -> bool:
