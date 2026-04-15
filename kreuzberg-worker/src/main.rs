@@ -240,20 +240,41 @@ async fn process_job(state: &AppState, job: &ExtractionJob) -> Result<Extraction
     );
     let file_bytes = download_from_s3(state, &job.s3_key).await?;
     let extraction = extract_and_chunk(job, &file_bytes).await?;
+    let mime_type = extraction
+        .metadata
+        .get("mime_type")
+        .and_then(|value| value.as_str())
+        .or(job.mime_type.as_deref())
+        .unwrap_or("unknown");
+    let empty_image_ocr = extraction.markdown.trim().is_empty() && is_image_mime_type(mime_type);
 
     if extraction.markdown.trim().is_empty() {
-        return Err(anyhow!(
-            "extraction produced empty markdown for filename={} mime_type={} s3_key={} (mime_type may be unsupported or content extraction failed)",
-            job.original_filename.as_deref().unwrap_or("unknown"),
-            job.mime_type.as_deref().unwrap_or("unknown"),
-            job.s3_key,
-        ));
+        if empty_image_ocr {
+            info!(
+                filename = %job.original_filename.as_deref().unwrap_or("unknown"),
+                mime_type = %mime_type,
+                s3_key = %job.s3_key,
+                "image OCR produced no readable text"
+            );
+        } else {
+            return Err(anyhow!(
+                "extraction produced empty markdown for filename={} mime_type={} s3_key={} (mime_type may be unsupported or content extraction failed)",
+                job.original_filename.as_deref().unwrap_or("unknown"),
+                mime_type,
+                job.s3_key,
+            ));
+        }
     }
 
+    let markdown = if empty_image_ocr {
+        "\n"
+    } else {
+        extraction.markdown.as_str()
+    };
     let markdown_key = upload_bytes(
         state,
         format!("{}.md", job.artifact_prefix),
-        extraction.markdown.as_bytes().to_vec(),
+        markdown.as_bytes().to_vec(),
         "text/markdown; charset=utf-8",
     )
     .await?;
@@ -544,6 +565,10 @@ fn resolve_mime_type(job: &ExtractionJob, file_bytes: &[u8]) -> Result<String> {
             .or_else(|_| validate_mime_type("application/octet-stream"))
             .map(|mime| mime.to_string())?,
     )
+}
+
+fn is_image_mime_type(mime_type: &str) -> bool {
+    mime_type.trim().to_ascii_lowercase().starts_with("image/")
 }
 
 fn build_extraction_config() -> ExtractionConfig {
