@@ -1133,13 +1133,8 @@ class ProcessingService:
         replacement = soup.new_tag("section")
         replacement["data-kb-image-ocr"] = "true"
 
-        if alt_text:
-            alt_node = soup.new_tag("p")
-            alt_node.string = f"Image alt text: {alt_text}"
-            replacement.append(alt_node)
-
         text_node = soup.new_tag("p")
-        text_node.string = f"Image OCR text: {ocr_text.strip()}"
+        text_node.string = ocr_text.strip()
         replacement.append(text_node)
         img.replace_with(replacement)
 
@@ -1150,7 +1145,7 @@ class ProcessingService:
         section = soup.new_tag("section")
         section["data-kb-background-image-ocr"] = "true"
         text_node = soup.new_tag("p")
-        text_node.string = f"Background image OCR text: {ocr_text.strip()}"
+        text_node.string = ocr_text.strip()
         section.append(text_node)
         element.insert(0, section)
 
