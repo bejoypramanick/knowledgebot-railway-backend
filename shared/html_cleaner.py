@@ -1,63 +1,88 @@
 """
-HTML cleaning utilities using Trafilatura for high-quality noise removal.
-Designed to strip headers, footers, and ads while preserving table structures for RAG.
+HTML cleaning utilities for web extraction.
+Designed to strip navigation/header/footer noise while preserving tables and images.
 """
+import re
 from typing import Optional
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("html_cleaner", "shared")
 
 
-def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) -> str:
+def clean_html_preserving_images(html_content: str, url: Optional[str] = None) -> str:
     """
-    Extract the main content from HTML before Kreuzberg extraction.
+    Clean obvious navigation/footer/link noise before Kreuzberg extraction.
 
-    Trafilatura removes common boilerplate such as headers, navigation menus,
-    footers, cookie banners, ads, and sidebars. Links are kept as visible text
-    only so downstream markdown does not preserve noisy URL wrappers.
+    We intentionally do not run Trafilatura extraction here because it can drop
+    images. Kreuzberg needs those images intact so the OCR pass can read them
+    and inject the text back in the right position. This cleaner therefore only
+    removes explicit boilerplate containers and unwraps links while preserving
+    tables, images, and surrounding content.
     """
     if not html_content:
         return ""
 
     try:
-        import trafilatura
+        from bs4 import BeautifulSoup
 
-        extract_kwargs = {
-            "favor_precision": False,
-            "include_comments": False,
-            "include_tables": True,
-            "include_links": False,
-            "no_fallback": False,
-            "output_format": "html",
-            "url": url,
-        }
+        soup = BeautifulSoup(html_content, "lxml")
+        removed = 0
+        unwrapped_links = 0
 
-        try:
-            extracted_html = trafilatura.extract(
-                html_content,
-                include_images=True,
-                **extract_kwargs,
-            )
-        except TypeError:
-            extracted_html = trafilatura.extract(html_content, **extract_kwargs)
+        for tag_name in ("script", "noscript", "iframe", "template"):
+            for element in soup.find_all(tag_name):
+                element.decompose()
+                removed += 1
 
-        if extracted_html and extracted_html.strip():
-            logger.info(
-                f"✅ [HTML_CLEAN] Trafilatura extracted main content"
-                f" | url={url or 'none'}"
-                f" | input_chars={len(html_content)}"
-                f" | output_chars={len(extracted_html)}"
-            )
-            return extracted_html
+        for selector in (
+            "header",
+            "footer",
+            "nav",
+            "[role='banner']",
+            "[role='navigation']",
+            "[role='contentinfo']",
+        ):
+            for element in soup.select(selector):
+                element.decompose()
+                removed += 1
 
-        logger.warning(
-            f"⚠️ [HTML_CLEAN] Trafilatura returned empty content; using raw HTML"
-            f" | url={url or 'none'}"
+        menu_pattern = re.compile(
+            r"(^|[-_\s])(menu|nav|navbar|nav-bar|mega-menu|breadcrumb|breadcrumbs|footer|header)($|[-_\s])",
+            re.IGNORECASE,
         )
-        return html_content
+        for element in list(soup.find_all(True)):
+            tokens = " ".join(
+                str(value)
+                for attr in ("id", "class", "role", "aria-label", "data-testid", "data-test")
+                for value in (
+                    element.get(attr, [])
+                    if isinstance(element.get(attr), list)
+                    else [element.get(attr)] if element.get(attr) else []
+                )
+            )
+            if menu_pattern.search(tokens):
+                element.decompose()
+                removed += 1
+
+        for anchor in soup.find_all("a"):
+            if anchor.get_text(strip=True) or any(str(child).strip() for child in anchor.children):
+                anchor.unwrap()
+            else:
+                anchor.decompose()
+            unwrapped_links += 1
+
+        logger.info(
+            f"✅ [HTML_CLEAN] Removed navigation/footer/link noise without touching images"
+            f" | url={url or 'none'}"
+            f" | removed_elements={removed}"
+            f" | unwrapped_links={unwrapped_links}"
+            f" | input_chars={len(html_content)}"
+            f" | output_chars={len(str(soup))}"
+        )
+        return str(soup)
     except Exception as e:
         logger.warning(
-            f"⚠️ [HTML_CLEAN] Trafilatura failed; using raw HTML"
+            f"⚠️ [HTML_CLEAN] Navigation/link cleanup failed; using raw HTML"
             f" | url={url or 'none'}"
             f" | error={e}"
         )

@@ -16,7 +16,7 @@ import mimetypes
 from shared.otel_logger import get_otel_logger
 from urllib.parse import urljoin, urlparse
 from shared.file_metrics import calculate_metrics
-from shared.html_cleaner import clean_html_with_trafilatura
+from shared.html_cleaner import clean_html_preserving_images
 from shared.kreuzberg_integration import process_with_kreuzberg
 from shared.s3_file_storage import s3_file_storage
 
@@ -73,7 +73,6 @@ WEB_IMAGE_OCR_ENABLED = _env_bool("WEB_IMAGE_OCR_ENABLED", True)
 WEB_IMAGE_OCR_MAX_IMAGES = int(os.environ.get("WEB_IMAGE_OCR_MAX_IMAGES", "10"))
 WEB_IMAGE_OCR_MAX_BYTES = int(os.environ.get("WEB_IMAGE_OCR_MAX_BYTES", str(10 * 1024 * 1024)))
 WEB_IMAGE_OCR_TIMEOUT_SECONDS = float(os.environ.get("WEB_IMAGE_OCR_TIMEOUT_SECONDS", "20"))
-WEB_PRE_OCR_BOILERPLATE_PRUNE_ENABLED = _env_bool("WEB_PRE_OCR_BOILERPLATE_PRUNE_ENABLED", True)
 
 
 class ProcessingService:
@@ -746,12 +745,11 @@ class ProcessingService:
         if this is still the optimal way to use the Rust worker features.
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
-        pre_ocr_html = self._pruneBoilerplateBeforeImageOCR(html_content, page_url)
-        html_with_image_text = await self._replacePageImagesWithOCRText(pre_ocr_html, page_url, website_id)
-        cleaned_html = clean_html_with_trafilatura(html_with_image_text, page_url)
+        cleaned_html = clean_html_preserving_images(html_content, page_url)
+        html_with_image_text = await self._replacePageImagesWithOCRText(cleaned_html, page_url, website_id)
         html_filename = f"page_{url_hash}.html"
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
-            file_data=cleaned_html.encode('utf-8'),
+            file_data=html_with_image_text.encode('utf-8'),
             original_filename=html_filename,
             file_type="web-worker-temp"
         )
@@ -841,101 +839,6 @@ class ProcessingService:
                 pass
 
             raise Exception(f"Kreuzberg processing failed for {page_url}: {kreuzberg_err}")
-
-    def _pruneBoilerplateBeforeImageOCR(self, html_content: str, page_url: str) -> str:
-        """Remove obvious non-content regions before expensive image OCR."""
-        if not WEB_PRE_OCR_BOILERPLATE_PRUNE_ENABLED:
-            return html_content
-
-        try:
-            from bs4 import BeautifulSoup
-
-            soup = BeautifulSoup(html_content, 'lxml')
-            removed = 0
-
-            for tag_name in ("script", "noscript", "iframe", "template"):
-                for element in soup.find_all(tag_name):
-                    element.decompose()
-                    removed += 1
-
-            for selector in (
-                "header",
-                "footer",
-                "nav",
-                "aside",
-                "[role='banner']",
-                "[role='navigation']",
-                "[role='complementary']",
-                "[role='contentinfo']",
-                "[aria-hidden='true']",
-                "[hidden]",
-            ):
-                for element in soup.select(selector):
-                    if self._isLikelyMainContentElement(element):
-                        continue
-                    element.decompose()
-                    removed += 1
-
-            boilerplate_pattern = re.compile(
-                r"(^|[-_\s])("
-                r"ad|ads|advert|advertisement|banner|cookie|consent|gdpr|"
-                r"promo|promotion|sponsor|sponsored|social|share|sharing|"
-                r"navbar|nav-bar|menu|mega-menu|breadcrumb|breadcrumbs|"
-                r"footer|header|sidebar|side-bar|masthead|subscribe|newsletter|"
-                r"related|recommend|recommended|popup|modal|overlay"
-                r")($|[-_\s])",
-                re.IGNORECASE,
-            )
-
-            for element in list(soup.find_all(True)):
-                if self._isLikelyMainContentElement(element):
-                    continue
-                tokens = " ".join(
-                    str(value)
-                    for attr in ("id", "class", "role", "aria-label", "data-testid", "data-test")
-                    for value in (
-                        element.get(attr, [])
-                        if isinstance(element.get(attr), list)
-                        else [element.get(attr)] if element.get(attr) else []
-                    )
-                )
-                if boilerplate_pattern.search(tokens):
-                    element.decompose()
-                    removed += 1
-
-            for element in list(soup.find_all(style=True)):
-                style = element.get("style", "").lower()
-                if "display:none" in style.replace(" ", "") or "visibility:hidden" in style.replace(" ", ""):
-                    element.decompose()
-                    removed += 1
-
-            if removed:
-                logger.info(
-                    f"🧹 [PRE_OCR_PRUNE] Removed {removed} obvious boilerplate elements before image OCR"
-                    f" | page_url={page_url}"
-                )
-            return str(soup)
-        except Exception as e:
-            logger.warning(f"⚠️ [PRE_OCR_PRUNE] Failed to prune boilerplate before OCR for {page_url}: {e}")
-            return html_content
-
-    def _isLikelyMainContentElement(self, element: Any) -> bool:
-        try:
-            tag_name = (getattr(element, "name", "") or "").lower()
-            if tag_name in {"main", "article"}:
-                return True
-            tokens = " ".join(
-                str(value).lower()
-                for attr in ("id", "class", "role", "itemprop")
-                for value in (
-                    element.get(attr, [])
-                    if isinstance(element.get(attr), list)
-                    else [element.get(attr)] if element.get(attr) else []
-                )
-            )
-            return bool(re.search(r"\b(main|article|content|post|entry|body|page-content)\b", tokens))
-        except Exception:
-            return False
 
     async def _replacePageImagesWithOCRText(self, html_content: str, page_url: str, website_id: Optional[str]) -> str:
         """OCR page images separately and replace image tags with extracted text in-place."""
