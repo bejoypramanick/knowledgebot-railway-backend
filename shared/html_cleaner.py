@@ -23,7 +23,7 @@ def clean_html_with_trafilatura(html_content: str, url: Optional[str] = None) ->
         import trafilatura
 
         extract_kwargs = {
-            "favor_precision": True,
+            "favor_precision": False,
             "include_comments": False,
             "include_tables": True,
             "include_links": False,
