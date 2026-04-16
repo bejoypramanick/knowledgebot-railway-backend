@@ -1,8 +1,7 @@
 """
 HTML cleaning utilities for web extraction.
-Designed to strip navigation/header/footer noise while preserving tables and images.
+Designed to strip obvious boilerplate while preserving rich page HTML for Kreuzberg.
 """
-import re
 from typing import Optional
 from shared.otel_logger import get_otel_logger
 
@@ -11,80 +10,53 @@ logger = get_otel_logger("html_cleaner", "shared")
 
 def clean_html_preserving_images(html_content: str, url: Optional[str] = None) -> str:
     """
-    Clean obvious navigation/footer/link noise before Kreuzberg extraction.
+    Use Trafilatura's permissive HTML extraction to strip boilerplate before
+    Kreuzberg processing while keeping the remaining page as HTML.
 
-    We intentionally do not run Trafilatura extraction here because it can drop
-    images. Kreuzberg needs those images intact so the OCR pass can read them
-    and inject the text back in the right position. This cleaner therefore only
-    removes explicit boilerplate containers and unwraps links while preserving
-    tables, images, and surrounding content.
+    The goal here is intentionally broad retention: remove comments, menus,
+    cookie banners, ads, and similar chrome, but preserve the main content
+    structure, tables, images, and links so Kreuzberg can do the heavier
+    downstream extraction and chunking work.
     """
     if not html_content:
         return ""
 
     try:
-        from bs4 import BeautifulSoup
+        from trafilatura import extract
 
-        soup = BeautifulSoup(html_content, "lxml")
-        removed = 0
-        stripped_links = 0
-
-        for tag_name in ("script", "noscript", "iframe", "template"):
-            for element in soup.find_all(tag_name):
-                element.decompose()
-                removed += 1
-
-        for selector in (
-            "header",
-            "footer",
-            "nav",
-            "[role='banner']",
-            "[role='navigation']",
-            "[role='contentinfo']",
-        ):
-            for element in soup.select(selector):
-                element.decompose()
-                removed += 1
-
-        menu_pattern = re.compile(
-            r"(^|[-_\s])(menu|nav|navbar|nav-bar|mega-menu|breadcrumb|breadcrumbs|footer|header)($|[-_\s])",
-            re.IGNORECASE,
+        cleaned_html = extract(
+            html_content,
+            output_format="html",
+            include_comments=False,
+            include_images=True,
+            include_links=False,
+            include_tables=True,
+            favor_recall=True,
+            no_fallback=False,
+            fast=False,
         )
-        for element in list(soup.find_all(True)):
-            tokens = " ".join(
-                str(value)
-                for attr in ("id", "class", "role", "aria-label", "data-testid", "data-test")
-                for value in (
-                    element.get(attr, [])
-                    if isinstance(element.get(attr), list)
-                    else [element.get(attr)] if element.get(attr) else []
-                )
-            )
-            if menu_pattern.search(tokens):
-                element.decompose()
-                removed += 1
 
-        for anchor in soup.find_all("a"):
-            anchor.attrs.pop("href", None)
-            anchor.attrs.pop("title", None)
-            if anchor.get_text(strip=True) or any(str(child).strip() for child in anchor.children):
-                anchor.unwrap()
-            else:
-                anchor.decompose()
-            stripped_links += 1
+        if not cleaned_html:
+            logger.warning(
+                f"⚠️ [HTML_CLEAN] Trafilatura returned no cleaned HTML; using raw HTML"
+                f" | url={url or 'none'}"
+                f" | input_chars={len(html_content)}"
+            )
+            return html_content
+
+        if "<html" not in cleaned_html.lower():
+            cleaned_html = f"<html><body>{cleaned_html}</body></html>"
 
         logger.info(
-            f"✅ [HTML_CLEAN] Removed navigation/footer/link noise without touching images"
+            f"✅ [HTML_CLEAN] Trafilatura cleaned HTML for Kreuzberg"
             f" | url={url or 'none'}"
-            f" | removed_elements={removed}"
-            f" | stripped_links={stripped_links}"
             f" | input_chars={len(html_content)}"
-            f" | output_chars={len(str(soup))}"
+            f" | output_chars={len(cleaned_html)}"
         )
-        return str(soup)
+        return cleaned_html
     except Exception as e:
         logger.warning(
-            f"⚠️ [HTML_CLEAN] Navigation/link cleanup failed; using raw HTML"
+            f"⚠️ [HTML_CLEAN] Trafilatura cleanup failed; using raw HTML"
             f" | url={url or 'none'}"
             f" | error={e}"
         )
