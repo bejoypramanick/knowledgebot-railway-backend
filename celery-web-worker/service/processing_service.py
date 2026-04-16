@@ -2,6 +2,7 @@
 Website Processing Service for Celery Web Worker
 Handles website scraping, extraction, and pgvector ingestion.
 """
+
 import asyncio
 import time
 import os
@@ -33,10 +34,12 @@ from models.value_objects import (
 logger = get_otel_logger("processing_service", "celery-web-worker")
 
 # Reduce crawl4ai logging verbosity (it logs database migrations at INFO level)
-logging.getLogger('crawl4ai').setLevel(logging.WARNING)
+logging.getLogger("crawl4ai").setLevel(logging.WARNING)
 
 CRAWL4AI_FETCH_RETRIES = int(os.environ.get("CRAWL4AI_FETCH_RETRIES", "2"))
-CRAWL4AI_FETCH_RETRY_DELAY_SECONDS = float(os.environ.get("CRAWL4AI_FETCH_RETRY_DELAY_SECONDS", "2"))
+CRAWL4AI_FETCH_RETRY_DELAY_SECONDS = float(
+    os.environ.get("CRAWL4AI_FETCH_RETRY_DELAY_SECONDS", "2")
+)
 CRAWL4AI_DEFAULT_USER_AGENT = os.environ.get(
     "CRAWL4AI_USER_AGENT",
     (
@@ -45,10 +48,16 @@ CRAWL4AI_DEFAULT_USER_AGENT = os.environ.get(
     ),
 )
 CRAWL4AI_DEFAULT_WAIT_UNTIL = os.environ.get("CRAWL4AI_WAIT_UNTIL", "networkidle")
-CRAWL4AI_DEFAULT_PAGE_TIMEOUT_MS = int(os.environ.get("CRAWL4AI_PAGE_TIMEOUT_MS", "90000"))
-CRAWL4AI_DEFAULT_DELAY_BEFORE_HTML = float(os.environ.get("CRAWL4AI_DELAY_BEFORE_HTML", "1.5"))
+CRAWL4AI_DEFAULT_PAGE_TIMEOUT_MS = int(
+    os.environ.get("CRAWL4AI_PAGE_TIMEOUT_MS", "90000")
+)
+CRAWL4AI_DEFAULT_DELAY_BEFORE_HTML = float(
+    os.environ.get("CRAWL4AI_DELAY_BEFORE_HTML", "1.5")
+)
 CRAWL4AI_DEFAULT_LOCALE = os.environ.get("CRAWL4AI_LOCALE", "en-US")
-CRAWL4AI_DEFAULT_TIMEZONE_ID = os.environ.get("CRAWL4AI_TIMEZONE_ID", "America/New_York")
+CRAWL4AI_DEFAULT_TIMEZONE_ID = os.environ.get(
+    "CRAWL4AI_TIMEZONE_ID", "America/New_York"
+)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -71,8 +80,12 @@ def _json_env(name: str, default: Any) -> Any:
 
 WEB_IMAGE_OCR_ENABLED = _env_bool("WEB_IMAGE_OCR_ENABLED", True)
 WEB_IMAGE_OCR_MAX_IMAGES = int(os.environ.get("WEB_IMAGE_OCR_MAX_IMAGES", "10"))
-WEB_IMAGE_OCR_MAX_BYTES = int(os.environ.get("WEB_IMAGE_OCR_MAX_BYTES", str(10 * 1024 * 1024)))
-WEB_IMAGE_OCR_TIMEOUT_SECONDS = float(os.environ.get("WEB_IMAGE_OCR_TIMEOUT_SECONDS", "20"))
+WEB_IMAGE_OCR_MAX_BYTES = int(
+    os.environ.get("WEB_IMAGE_OCR_MAX_BYTES", str(10 * 1024 * 1024))
+)
+WEB_IMAGE_OCR_TIMEOUT_SECONDS = float(
+    os.environ.get("WEB_IMAGE_OCR_TIMEOUT_SECONDS", "20")
+)
 
 
 class ProcessingService:
@@ -80,13 +93,13 @@ class ProcessingService:
 
     def __init__(self):
         from dao.scraping_dao import ScrapingDAO
+
         self.scraping_dao = ScrapingDAO()
 
     # ==================== MAIN ORCHESTRATOR ====================
 
     async def process_website_content(
-        self,
-        request: ProcessingRequest
+        self, request: ProcessingRequest
     ) -> Dict[str, Any]:
         """
         Main orchestration: Resolve dependencies → Stream pages → Return result
@@ -133,13 +146,19 @@ class ProcessingService:
             # ========== PHASE 1: RESOLVE DEPENDENCIES ==========
             # Resolve access-control context before starting the crawl.
 
-            logger.info(f"🚀 [SCRAPING] Starting website processing: {request.website_id}")
+            logger.info(
+                f"🚀 [SCRAPING] Starting website processing: {request.website_id}"
+            )
             logger.info(f"   URL: {request.url}")
-            logger.info(f"   Depth: {request.crawl_config.max_depth}, Max Pages: {request.crawl_config.max_pages}")
+            logger.info(
+                f"   Depth: {request.crawl_config.max_depth}, Max Pages: {request.crawl_config.max_pages}"
+            )
 
             # Resolve user role ID for access control
             # Returns None if not found (NULL is allowed in schema)
-            resolved_user_role_id = await self._resolveUserRoleID(request.user_email, request.user_role_id)
+            resolved_user_role_id = await self._resolveUserRoleID(
+                request.user_email, request.user_role_id
+            )
 
             # Build JobContext: Immutable object passed to all sub-operations
             # Contains: website_id, root_url, task_id, store, user_role
@@ -149,7 +168,7 @@ class ProcessingService:
                 root_url=request.url,
                 celery_task_id=request.celery_task_id,
                 store_name="pgvector",
-                user_role_id=resolved_user_role_id
+                user_role_id=resolved_user_role_id,
             )
 
             # ========== PHASE 2: STREAM PAGES ==========
@@ -174,17 +193,31 @@ class ProcessingService:
             # Now that ALL pages have been discovered and processed, check if parent should be marked completed
             # This must happen AFTER crawling finishes to avoid premature completion
             # Add delay to ensure all database writes are fully committed and visible
-            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] All {pages_uploaded} pages crawled")
-            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] Waiting 3 seconds for all DB writes to commit...")
+            logger.info(
+                f"🔍 [PARENT_COMPLETION_CHECK] All {pages_uploaded} pages crawled"
+            )
+            logger.info(
+                f"🔍 [PARENT_COMPLETION_CHECK] Waiting 3 seconds for all DB writes to commit..."
+            )
             await asyncio.sleep(3.0)  # Increased delay to ensure DB consistency
-            
-            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] Now checking parent completion status for website {job_context.website_id}")
-            parent_completed = await self.scraping_dao.check_and_update_parent_completion(job_context.website_id)
-            
+
+            logger.info(
+                f"🔍 [PARENT_COMPLETION_CHECK] Now checking parent completion status for website {job_context.website_id}"
+            )
+            parent_completed = (
+                await self.scraping_dao.check_and_update_parent_completion(
+                    job_context.website_id
+                )
+            )
+
             if parent_completed:
-                logger.info(f"✅ [PARENT_COMPLETION_CHECK] Parent {job_context.website_id} marked as completed")
+                logger.info(
+                    f"✅ [PARENT_COMPLETION_CHECK] Parent {job_context.website_id} marked as completed"
+                )
             else:
-                logger.info(f"ℹ️  [PARENT_COMPLETION_CHECK] Parent {job_context.website_id} not marked as completed (may have children still processing)")
+                logger.info(
+                    f"ℹ️  [PARENT_COMPLETION_CHECK] Parent {job_context.website_id} not marked as completed (may have children still processing)"
+                )
 
             # ========== PHASE 3: BUILD SUCCESS RESULT ==========
             # Build simple success result for Celery task logging.
@@ -199,10 +232,12 @@ class ProcessingService:
                 page_count=pages_uploaded,
                 total_size_bytes=0,
                 total_char_count=0,
-                processing_time_seconds=processing_time
+                processing_time_seconds=processing_time,
             )
 
-            logger.info(f"✅ [COMPLETE] Website {request.website_id} processed: {pages_uploaded} pages in {processing_time:.1f}s")
+            logger.info(
+                f"✅ [COMPLETE] Website {request.website_id} processed: {pages_uploaded} pages in {processing_time:.1f}s"
+            )
 
             return result.to_dict()
 
@@ -221,162 +256,205 @@ class ProcessingService:
                 total_size_bytes=0,
                 total_char_count=0,
                 processing_time_seconds=processing_time,
-                error=str(e)
+                error=str(e),
             )
             logger.error(f"❌ Processing error: {e}")
             return result.to_dict()
 
     async def _crawlWebsitePages(
-            self,
-            crawl_config: CrawlConfig,
-            job_context: JobContext,
-            options: Optional[Dict[str, Any]] = None,
-        ) -> int:
-            """Stream each page: crawl → process → upload → record. Return page count only."""
-            pages_uploaded = 0
-            start_time = time.time()
-            self._last_fetch_error = None
+        self,
+        crawl_config: CrawlConfig,
+        job_context: JobContext,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Stream each page: crawl → process → upload → record. Return page count only."""
+        pages_uploaded = 0
+        start_time = time.time()
+        self._last_fetch_error = None
 
-            logger.info(f"📄 [PIPELINE] Starting page-by-page streaming...")
+        logger.info(f"📄 [PIPELINE] Starting page-by-page streaming...")
 
-            async for page_data in self._crawlPagesWithBFS(crawl_config, job_context, options or {}):
-                metrics = await self._processPageInPipeline(page_data, job_context, crawl_config)
-                if metrics:
-                    pages_uploaded += 1
+        async for page_data in self._crawlPagesWithBFS(
+            crawl_config, job_context, options or {}
+        ):
+            metrics = await self._processPageInPipeline(
+                page_data, job_context, crawl_config
+            )
+            if metrics:
+                pages_uploaded += 1
 
-            if pages_uploaded == 0:
-                last_error = getattr(self, "_last_fetch_error", None)
-                if last_error:
-                    raise Exception(f"No pages successfully processed. Last fetch error: {last_error}")
-                raise Exception("No pages successfully processed")
+        if pages_uploaded == 0:
+            last_error = getattr(self, "_last_fetch_error", None)
+            if last_error:
+                raise Exception(
+                    f"No pages successfully processed. Last fetch error: {last_error}"
+                )
+            raise Exception("No pages successfully processed")
 
-            total_time = time.time() - start_time
-            logger.info(f"✅ [PIPELINE] Completed: {pages_uploaded} pages in {total_time:.1f}s")
+        total_time = time.time() - start_time
+        logger.info(
+            f"✅ [PIPELINE] Completed: {pages_uploaded} pages in {total_time:.1f}s"
+        )
 
-            return pages_uploaded
-
+        return pages_uploaded
 
     async def _processPageInPipeline(
-            self,
-            page_data: PageData,
-            job_context: JobContext,
-            crawl_config: CrawlConfig
-        ) -> Optional[PageMetrics]:
-            """Process one page: convert (kreuzberg) → upload → record"""
-            logger.info(f"📄 [PIPELINE] Processing: {page_data.page_url}")
+        self, page_data: PageData, job_context: JobContext, crawl_config: CrawlConfig
+    ) -> Optional[PageMetrics]:
+        """Process one page: convert (kreuzberg) → upload → record"""
+        logger.info(f"📄 [PIPELINE] Processing: {page_data.page_url}")
 
+        try:
+            start_time = time.time()
+
+            # Convert HTML to markdown via kreuzberg
+            # HTML is pre-cleaned by crawl4ai (menus, navbars, ads removed)
             try:
-                start_time = time.time()
-
-                # Convert HTML to markdown via kreuzberg
-                # HTML is pre-cleaned by crawl4ai (menus, navbars, ads removed)
-                try:
-                    markdown_content, processed_content_s3_key, chunks = await self._preparePageAsMarkdown(
-                        page_data.page_html, page_data.page_url, website_id=job_context.website_id, remove_ads=True
-                    )
-                except Exception as kreuzberg_error:
-                    logger.error(f"   ❌ Kreuzberg processing failed: {kreuzberg_error}")
-                    logger.warning(f"   ⏭️ Skipping page due to kreuzberg error")
-                    return None
-
-                page_data = PageData(
-                    page_url=page_data.page_url,
-                    page_html=page_data.page_html,
-                    markdown=markdown_content,
-                    title=page_data.title,
-                    description=page_data.description,
-                    session_id=page_data.session_id
+                (
+                    markdown_content,
+                    processed_content_s3_key,
+                    chunks,
+                ) = await self._preparePageAsMarkdown(
+                    page_data.page_html,
+                    page_data.page_url,
+                    website_id=job_context.website_id,
+                    remove_ads=True,
                 )
-
-                # Upload chunks to Vector DB
-                from shared.vector_dao import vector_dao
-                
-                # Check if we have chunks
-                if chunks:
-                    # Generate embeddings using our model-agnostic utility
-                    logger.info(f"🧬 Generating embeddings for {len(chunks)} chunks from {page_data.page_url}...")
-                    from shared.embeddings import batch_generate_embeddings
-                    chunk_texts = [c.get("text") or c.get("content", "") for c in chunks]
-                    
-                    # Pass source information for better usage observability
-                    usage_metadata = {
-                        "source_url": page_data.page_url,
-                        "webpage_name": page_data.title,
-                        "website_id": str(job_context.website_id),
-                        "ingestion_workflow": "web_scrape_pipeline"
-                    }
-                    logger.info(f"🧬 Sending embedding request with metadata: {usage_metadata}")
-                    embeddings = await batch_generate_embeddings(chunk_texts, request_metadata=usage_metadata)
-                    
-                    # Attach embeddings to chunks
-                    for i, embedding in enumerate(embeddings):
-                        if i < len(chunks):
-                            chunks[i]["embedding"] = embedding
-
-                    success = await vector_dao.batch_insert_chunks(
-                        chunks=chunks, 
-                        document_id=job_context.website_id,
-                        document_type='website'
-                    )
-                    if not success:
-                        logger.warning(f"   ⚠️ Chunk batch insert failed, skipping this page")
-                        return None
-                    logger.info(f"   ✅ Uploaded {len(chunks)} chunks with OpenAI embeddings to vector DB")
-                else:
-                    logger.error(f"   ❌ No chunks produced by Kreuzberg for {page_data.page_url}")
-                    raise Exception(f"No chunks produced by extractor for {page_data.page_url}")
-
-                self._current_page_data = page_data
-                
-                # Create a mock upload result for backwards compatibility with _recordPageToDB
-                upload_result = UploadResult(
-                    document_name=f"vector_db_{job_context.website_id}",
-                    storage_backend_name="pgvector",
-                    uploaded_at=datetime.utcnow(),
-                    storage_document_uri=f"vector_db_{job_context.website_id}",
-                    confirmed=True,
-                    metadata_type="vector_db",
-                    extra_metadata={
-                        "grounding_source": "pgvector",
-                        "retrieval_pipeline": "kreuzberg_rust -> pgvector",
-                    },
-                )
-
-                # Delete processed markdown from S3 (now safely represented in vector storage)
-                # Check RETAIN_MD_FILE environment variable to decide whether to delete
-                # Note: Manual atomic delete operations will still delete retained files
-                retain_md_file = os.getenv("RETAIN_MD_FILE", "false").lower() == "true"
-                
-                if processed_content_s3_key:
-                    if retain_md_file:
-                        logger.info(f"📁 [MD_RETENTION] Retaining processed markdown in S3: {processed_content_s3_key}")
-                        logger.info(f"   RETAIN_MD_FILE=true - file will be available as attachment")
-                    else:
-                        try:
-                            deleted = await s3_file_storage.delete_file(processed_content_s3_key)
-                            if deleted:
-                                logger.info(f"   🧹 [S3_CLEANUP] Deleted processed markdown: {processed_content_s3_key}")
-                            else:
-                                logger.warning(f"   ⚠️ [S3_CLEANUP] Failed to delete processed markdown: {processed_content_s3_key}")
-                        except Exception as cleanup_err:
-                            logger.warning(f"   ⚠️ [S3_CLEANUP] Error deleting processed markdown: {cleanup_err}")
-
-                # Record to database
-                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config, processed_content_s3_key)
-
-                # Metrics
-                metrics = calculate_metrics(markdown_content)
-                processing_time = time.time() - start_time
-
-                return PageMetrics(
-                    file_size_bytes=metrics.get('file_size_bytes', 0),
-                    char_count=metrics.get('char_count', 0),
-                    processing_time_seconds=processing_time
-                )
-            except Exception as e:
-                logger.error(f"   ❌ Pipeline error: {e}")
+            except Exception as kreuzberg_error:
+                logger.error(f"   ❌ Kreuzberg processing failed: {kreuzberg_error}")
+                logger.warning(f"   ⏭️ Skipping page due to kreuzberg error")
                 return None
 
+            page_data = PageData(
+                page_url=page_data.page_url,
+                page_html=page_data.page_html,
+                markdown=markdown_content,
+                title=page_data.title,
+                description=page_data.description,
+                session_id=page_data.session_id,
+            )
+
+            # Upload chunks to Vector DB
+            from shared.vector_dao import vector_dao
+
+            # Check if we have chunks
+            if chunks:
+                # Generate embeddings using our model-agnostic utility
+                logger.info(
+                    f"🧬 Generating embeddings for {len(chunks)} chunks from {page_data.page_url}..."
+                )
+                from shared.embeddings import batch_generate_embeddings
+
+                chunk_texts = [c.get("text") or c.get("content", "") for c in chunks]
+
+                # Pass source information for better usage observability
+                usage_metadata = {
+                    "source_url": page_data.page_url,
+                    "webpage_name": page_data.title,
+                    "website_id": str(job_context.website_id),
+                    "ingestion_workflow": "web_scrape_pipeline",
+                }
+                logger.info(
+                    f"🧬 Sending embedding request with metadata: {usage_metadata}"
+                )
+                embeddings = await batch_generate_embeddings(
+                    chunk_texts, request_metadata=usage_metadata
+                )
+
+                # Attach embeddings to chunks
+                for i, embedding in enumerate(embeddings):
+                    if i < len(chunks):
+                        chunks[i]["embedding"] = embedding
+
+                success = await vector_dao.batch_insert_chunks(
+                    chunks=chunks,
+                    document_id=job_context.website_id,
+                    document_type="website",
+                )
+                if not success:
+                    logger.warning(
+                        f"   ⚠️ Chunk batch insert failed, skipping this page"
+                    )
+                    return None
+                logger.info(
+                    f"   ✅ Uploaded {len(chunks)} chunks with OpenAI embeddings to vector DB"
+                )
+            else:
+                logger.error(
+                    f"   ❌ No chunks produced by Kreuzberg for {page_data.page_url}"
+                )
+                raise Exception(
+                    f"No chunks produced by extractor for {page_data.page_url}"
+                )
+
+            self._current_page_data = page_data
+
+            # Create a mock upload result for backwards compatibility with _recordPageToDB
+            upload_result = UploadResult(
+                document_name=f"vector_db_{job_context.website_id}",
+                storage_backend_name="pgvector",
+                uploaded_at=datetime.utcnow(),
+                storage_document_uri=f"vector_db_{job_context.website_id}",
+                confirmed=True,
+                metadata_type="vector_db",
+                extra_metadata={
+                    "grounding_source": "pgvector",
+                    "retrieval_pipeline": "kreuzberg_rust -> pgvector",
+                },
+            )
+
+            # Delete processed markdown from S3 (now safely represented in vector storage)
+            # Check RETAIN_MD_FILE environment variable to decide whether to delete
+            # Note: Manual atomic delete operations will still delete retained files
+            retain_md_file = os.getenv("RETAIN_MD_FILE", "false").lower() == "true"
+
+            if processed_content_s3_key:
+                if retain_md_file:
+                    logger.info(
+                        f"📁 [MD_RETENTION] Retaining processed markdown in S3: {processed_content_s3_key}"
+                    )
+                    logger.info(
+                        f"   RETAIN_MD_FILE=true - file will be available as attachment"
+                    )
+                else:
+                    try:
+                        deleted = await s3_file_storage.delete_file(
+                            processed_content_s3_key
+                        )
+                        if deleted:
+                            logger.info(
+                                f"   🧹 [S3_CLEANUP] Deleted processed markdown: {processed_content_s3_key}"
+                            )
+                        else:
+                            logger.warning(
+                                f"   ⚠️ [S3_CLEANUP] Failed to delete processed markdown: {processed_content_s3_key}"
+                            )
+                    except Exception as cleanup_err:
+                        logger.warning(
+                            f"   ⚠️ [S3_CLEANUP] Error deleting processed markdown: {cleanup_err}"
+                        )
+
+            # Record to database
+            await self._recordPageToDB(
+                page_data,
+                upload_result,
+                job_context,
+                crawl_config,
+                processed_content_s3_key,
+            )
+
+            # Metrics
+            metrics = calculate_metrics(markdown_content)
+            processing_time = time.time() - start_time
+
+            return PageMetrics(
+                file_size_bytes=metrics.get("file_size_bytes", 0),
+                char_count=metrics.get("char_count", 0),
+                processing_time_seconds=processing_time,
+            )
+        except Exception as e:
+            logger.error(f"   ❌ Pipeline error: {e}")
+            return None
 
     # ==================== CRAWL LAYER ====================
 
@@ -384,24 +462,23 @@ class ProcessingService:
         """Check if URL is a sitemap"""
         url_lower = url.lower()
         return (
-            url_lower.endswith('sitemap.xml') or
-            url_lower.endswith('sitemap.xml.gz') or
-            url_lower.endswith('sitemap_index.xml') or
-            '/sitemap' in url_lower and url_lower.endswith('.xml')
+            url_lower.endswith("sitemap.xml")
+            or url_lower.endswith("sitemap.xml.gz")
+            or url_lower.endswith("sitemap_index.xml")
+            or "/sitemap" in url_lower
+            and url_lower.endswith(".xml")
         )
 
     async def _discoverSitemapURLs(
-        self,
-        sitemap_url: str,
-        max_urls: int = 100
+        self, sitemap_url: str, max_urls: int = 100
     ) -> List[str]:
         """
         Discover URLs from a sitemap by directly parsing the XML.
-        
+
         Args:
             sitemap_url: Full URL of the sitemap
             max_urls: Maximum URLs to extract
-            
+
         Returns:
             List of URLs found in the sitemap
         """
@@ -410,85 +487,99 @@ class ProcessingService:
             import aiohttp
             import gzip
             from io import BytesIO
-            
+
             logger.info(f"🗺️ [SITEMAP] Discovering URLs from {sitemap_url}")
             logger.info(f"   Max URLs: {max_urls}")
-            
+
             # Fetch the sitemap
             async with aiohttp.ClientSession() as session:
-                async with session.get(sitemap_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                async with session.get(
+                    sitemap_url, timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
                     if response.status != 200:
-                        logger.error(f"❌ [SITEMAP] Failed to fetch sitemap: HTTP {response.status}")
+                        logger.error(
+                            f"❌ [SITEMAP] Failed to fetch sitemap: HTTP {response.status}"
+                        )
                         return []
-                    
+
                     content = await response.read()
-                    
+
                     # Handle compressed sitemaps
-                    if sitemap_url.endswith('.gz'):
+                    if sitemap_url.endswith(".gz"):
                         logger.info(f"📦 [SITEMAP] Decompressing gzipped sitemap")
                         content = gzip.decompress(content)
-                    
+
                     # Parse XML
                     try:
                         root = ET.fromstring(content)
                     except ET.ParseError as e:
                         logger.error(f"❌ [SITEMAP] Failed to parse XML: {e}")
                         return []
-                    
+
                     # Extract URLs from sitemap
                     urls = []
-                    
+
                     # Handle namespace
                     namespaces = {
-                        'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9',
-                        'xhtml': 'http://www.w3.org/1999/xhtml'
+                        "ns": "http://www.sitemaps.org/schemas/sitemap/0.9",
+                        "xhtml": "http://www.w3.org/1999/xhtml",
                     }
-                    
+
                     # Check if this is a sitemap index (contains other sitemaps)
-                    sitemap_locs = root.findall('.//ns:sitemap/ns:loc', namespaces)
+                    sitemap_locs = root.findall(".//ns:sitemap/ns:loc", namespaces)
                     if sitemap_locs:
                         total_sitemaps = len(sitemap_locs)
-                        logger.info(f"📋 [SITEMAP] Found sitemap index with {total_sitemaps} sub-sitemaps")
-                        
+                        logger.info(
+                            f"📋 [SITEMAP] Found sitemap index with {total_sitemaps} sub-sitemaps"
+                        )
+
                         # Process all sub-sitemaps (no arbitrary limit)
                         for idx, sitemap_loc in enumerate(sitemap_locs, 1):
                             if len(urls) >= max_urls:
-                                logger.info(f"⚠️  [SITEMAP] Reached max_urls limit ({max_urls}), stopping at sub-sitemap {idx}/{total_sitemaps}")
+                                logger.info(
+                                    f"⚠️  [SITEMAP] Reached max_urls limit ({max_urls}), stopping at sub-sitemap {idx}/{total_sitemaps}"
+                                )
                                 break
-                            
+
                             sub_sitemap_url = sitemap_loc.text.strip()
-                            logger.info(f"   [{idx}/{total_sitemaps}] Fetching sub-sitemap: {sub_sitemap_url}")
-                            
+                            logger.info(
+                                f"   [{idx}/{total_sitemaps}] Fetching sub-sitemap: {sub_sitemap_url}"
+                            )
+
                             sub_urls = await self._discoverSitemapURLs(
-                                sub_sitemap_url,
-                                max_urls=max_urls - len(urls)
+                                sub_sitemap_url, max_urls=max_urls - len(urls)
                             )
                             urls.extend(sub_urls)
-                            logger.info(f"   [{idx}/{total_sitemaps}] Got {len(sub_urls)} URLs (total: {len(urls)}/{max_urls})")
+                            logger.info(
+                                f"   [{idx}/{total_sitemaps}] Got {len(sub_urls)} URLs (total: {len(urls)}/{max_urls})"
+                            )
                     else:
                         # Regular sitemap - extract <loc> elements
-                        url_locs = root.findall('.//ns:url/ns:loc', namespaces)
-                        
+                        url_locs = root.findall(".//ns:url/ns:loc", namespaces)
+
                         for url_loc in url_locs:
                             if len(urls) >= max_urls:
                                 break
-                            
+
                             url = url_loc.text.strip()
                             urls.append(url)
-                    
-                    logger.info(f"✅ [SITEMAP] Discovered {len(urls)} URLs from sitemap")
-                    
+
+                    logger.info(
+                        f"✅ [SITEMAP] Discovered {len(urls)} URLs from sitemap"
+                    )
+
                     # Log first few URLs as sample
                     if urls:
                         logger.info(f"📋 [SITEMAP] Sample URLs:")
                         for url in urls[:3]:
                             logger.info(f"   - {url}")
-                    
+
                     return urls
-                    
+
         except Exception as e:
             logger.error(f"❌ [SITEMAP] Failed to discover URLs: {e}")
             import traceback
+
             logger.error(f"   Traceback: {traceback.format_exc()}")
             return []
 
@@ -507,22 +598,23 @@ class ProcessingService:
 
         # Check if root URL is a sitemap
         is_sitemap = self._isSitemapURL(job_context.root_url)
-        
+
         if is_sitemap:
             logger.info(f"🗺️ [SITEMAP] Detected sitemap URL, using URL discovery")
-            
+
             # Discover URLs from sitemap
             sitemap_urls = await self._discoverSitemapURLs(
-                job_context.root_url,
-                max_urls=crawl_config.max_pages
+                job_context.root_url, max_urls=crawl_config.max_pages
             )
-            
+
             if not sitemap_urls:
                 logger.error("❌ [SITEMAP] No URLs discovered from sitemap")
                 return
-            
-            logger.info(f"📋 [SITEMAP] Will crawl {len(sitemap_urls)} URLs from sitemap")
-            
+
+            logger.info(
+                f"📋 [SITEMAP] Will crawl {len(sitemap_urls)} URLs from sitemap"
+            )
+
             # Add all sitemap URLs to crawl queue (depth=1 for all)
             to_visit = [(url, 1) for url in sitemap_urls]
             visited_urls = set()
@@ -534,12 +626,16 @@ class ProcessingService:
         semaphore = asyncio.Semaphore(crawl_config.max_concurrent)
         pages_yielded = 0
 
-        logger.info(f"🔄 Starting {'sitemap' if is_sitemap else 'BFS'} crawl with max_depth={crawl_config.max_depth}, max_pages={crawl_config.max_pages}")
+        logger.info(
+            f"🔄 Starting {'sitemap' if is_sitemap else 'BFS'} crawl with max_depth={crawl_config.max_depth}, max_pages={crawl_config.max_pages}"
+        )
 
         while to_visit and pages_yielded < crawl_config.max_pages:
             current_url, current_depth = to_visit.pop(0)
 
-            if not await self._validateURLForCrawl(current_url, current_depth, crawl_config.max_depth, visited_urls):
+            if not await self._validateURLForCrawl(
+                current_url, current_depth, crawl_config.max_depth, visited_urls
+            ):
                 continue
 
             visited_urls.add(self._normalize_url(current_url))
@@ -553,23 +649,40 @@ class ProcessingService:
             if result:
                 page_url, page_html, title, description, session_id = result
                 pages_yielded += 1
-                logger.info(f"✅ [{'SITEMAP' if is_sitemap else 'BFS'}] Yielded page {pages_yielded}/{crawl_config.max_pages}")
+                logger.info(
+                    f"✅ [{'SITEMAP' if is_sitemap else 'BFS'}] Yielded page {pages_yielded}/{crawl_config.max_pages}"
+                )
 
                 yield PageData(
                     page_url=page_url,
                     page_html=page_html,
                     title=title,
                     description=description,
-                    session_id=session_id
+                    session_id=session_id,
                 )
 
                 # For sitemap crawls, don't follow links (we already have all URLs)
                 # For normal BFS, continue following links
-                if not is_sitemap and current_depth < crawl_config.max_depth and pages_yielded < crawl_config.max_pages:
-                    new_links = await self._extractLinksFromHTML(page_html, page_url, self._get_domain(job_context.root_url), visited_urls)
-                    to_visit.extend((link, current_depth + 1) for link in new_links if pages_yielded < crawl_config.max_pages)
+                if (
+                    not is_sitemap
+                    and current_depth < crawl_config.max_depth
+                    and pages_yielded < crawl_config.max_pages
+                ):
+                    new_links = await self._extractLinksFromHTML(
+                        page_html,
+                        page_url,
+                        self._get_domain(job_context.root_url),
+                        visited_urls,
+                    )
+                    to_visit.extend(
+                        (link, current_depth + 1)
+                        for link in new_links
+                        if pages_yielded < crawl_config.max_pages
+                    )
 
-    async def _validateURLForCrawl(self, url: str, depth: int, max_depth: int, visited_urls: set) -> bool:
+    async def _validateURLForCrawl(
+        self, url: str, depth: int, max_depth: int, visited_urls: set
+    ) -> bool:
         """Check if URL should be crawled"""
         normalized = self._normalize_url(url)
 
@@ -598,6 +711,7 @@ class ProcessingService:
         """
         async with semaphore:
             from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+
             options = options or {}
 
             # JavaScript to unhide all hidden elements
@@ -619,40 +733,61 @@ class ProcessingService:
 
             browser_config = BrowserConfig(
                 headless=True,
-                user_agent=options.get("crawler_user_agent") or CRAWL4AI_DEFAULT_USER_AGENT,
+                user_agent=options.get("crawler_user_agent")
+                or CRAWL4AI_DEFAULT_USER_AGENT,
                 headers=headers or None,
                 cookies=cookies,
-                enable_stealth=bool(options.get(
-                    "crawler_enable_stealth",
-                    _env_bool("CRAWL4AI_ENABLE_STEALTH", True),
-                )),
+                enable_stealth=bool(
+                    options.get(
+                        "crawler_enable_stealth",
+                        _env_bool("CRAWL4AI_ENABLE_STEALTH", True),
+                    )
+                ),
                 viewport_width=int(options.get("crawler_viewport_width") or 1366),
                 viewport_height=int(options.get("crawler_viewport_height") or 900),
             )
             run_config = CrawlerRunConfig(
                 js_code=js_code,
-                wait_until=options.get("crawler_wait_until") or CRAWL4AI_DEFAULT_WAIT_UNTIL,
+                wait_until=options.get("crawler_wait_until")
+                or CRAWL4AI_DEFAULT_WAIT_UNTIL,
                 wait_for=options.get("crawler_wait_for"),
                 wait_for_timeout=options.get("crawler_wait_for_timeout"),
-                page_timeout=int(options.get("crawler_page_timeout") or CRAWL4AI_DEFAULT_PAGE_TIMEOUT_MS),
+                page_timeout=int(
+                    options.get("crawler_page_timeout")
+                    or CRAWL4AI_DEFAULT_PAGE_TIMEOUT_MS
+                ),
                 delay_before_return_html=float(
                     options.get("crawler_delay_before_return_html")
                     or CRAWL4AI_DEFAULT_DELAY_BEFORE_HTML
                 ),
                 remove_overlay_elements=False,
                 remove_forms=False,
-                magic=bool(options.get("crawler_magic", _env_bool("CRAWL4AI_MAGIC", True))),
-                simulate_user=bool(options.get(
-                    "crawler_simulate_user",
-                    _env_bool("CRAWL4AI_SIMULATE_USER", True),
-                )),
-                override_navigator=bool(options.get(
-                    "crawler_override_navigator",
-                    _env_bool("CRAWL4AI_OVERRIDE_NAVIGATOR", True),
-                )),
+                magic=bool(
+                    options.get("crawler_magic", _env_bool("CRAWL4AI_MAGIC", True))
+                ),
+                simulate_user=bool(
+                    options.get(
+                        "crawler_simulate_user",
+                        _env_bool("CRAWL4AI_SIMULATE_USER", True),
+                    )
+                ),
+                override_navigator=bool(
+                    options.get(
+                        "crawler_override_navigator",
+                        _env_bool("CRAWL4AI_OVERRIDE_NAVIGATOR", True),
+                    )
+                ),
                 locale=options.get("crawler_locale") or CRAWL4AI_DEFAULT_LOCALE,
-                timezone_id=options.get("crawler_timezone_id") or CRAWL4AI_DEFAULT_TIMEZONE_ID,
-                user_agent=options.get("crawler_user_agent") or CRAWL4AI_DEFAULT_USER_AGENT,
+                timezone_id=options.get("crawler_timezone_id")
+                or CRAWL4AI_DEFAULT_TIMEZONE_ID,
+                user_agent=options.get("crawler_user_agent")
+                or CRAWL4AI_DEFAULT_USER_AGENT,
+                only_main_content=bool(
+                    options.get(
+                        "crawler_only_main_content",
+                        _env_bool("CRAWL4AI_ONLY_MAIN_CONTENT", True),
+                    )
+                ),
             )
             attempts = max(1, CRAWL4AI_FETCH_RETRIES + 1)
 
@@ -661,7 +796,9 @@ class ProcessingService:
                     async with AsyncWebCrawler(config=browser_config) as crawler:
                         # Get page as-is without any removal
                         # Extract text content from full page using Kreuzberg
-                        logger.info(f"🔍 [CRAWL4AI] Fetching {page_url} (attempt {attempt}/{attempts})...")
+                        logger.info(
+                            f"🔍 [CRAWL4AI] Fetching {page_url} (attempt {attempt}/{attempts})..."
+                        )
                         result = await crawler.arun(
                             url=page_url,
                             config=run_config,
@@ -670,16 +807,30 @@ class ProcessingService:
                         if result.success and result.html:
                             if delay > 0:
                                 await asyncio.sleep(delay)
-                            logger.info(f"✅ [CRAWL4AI] Fetched HTML: {len(result.html)} bytes from {page_url}")
+                            logger.info(
+                                f"✅ [CRAWL4AI] Fetched HTML: {len(result.html)} bytes from {page_url}"
+                            )
+
+                            # Remove all hyperlinks from HTML
+                            cleaned_html = self._removeHyperlinks(result.html)
+                            logger.info(
+                                f"🔗 [CLEANUP] Removed hyperlinks, cleaned HTML: {len(cleaned_html)} bytes"
+                            )
 
                             # Extract title and description from metadata
                             title = None
                             description = None
                             if result.metadata:
-                                title = result.metadata.get('title')
-                                description = result.metadata.get('description')
+                                title = result.metadata.get("title")
+                                description = result.metadata.get("description")
 
-                            return (page_url, result.html, title, description, result.session_id)
+                            return (
+                                page_url,
+                                cleaned_html,
+                                title,
+                                description,
+                                result.session_id,
+                            )
 
                         error_message = (
                             getattr(result, "error_message", None)
@@ -694,12 +845,23 @@ class ProcessingService:
                         )
                 except Exception as e:
                     self._last_fetch_error = f"{page_url}: {e}"
-                    logger.error(f"❌ [CRAWL4AI] Error fetching {page_url} (attempt {attempt}/{attempts}): {e}")
+                    logger.error(
+                        f"❌ [CRAWL4AI] Error fetching {page_url} (attempt {attempt}/{attempts}): {e}"
+                    )
 
                 if attempt < attempts:
                     await asyncio.sleep(CRAWL4AI_FETCH_RETRY_DELAY_SECONDS * attempt)
 
             return None
+
+    def _removeHyperlinks(self, html: str) -> str:
+        """Remove all hyperlinks from HTML, keeping link text"""
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html, "lxml")
+        for a_tag in soup.find_all("a"):
+            a_tag.replace_with(a_tag.get_text())
+        return str(soup)
 
     async def _extractLinksFromHTML(
         self, html: str, page_url: str, base_domain: str, visited_urls: set
@@ -707,11 +869,12 @@ class ProcessingService:
         """Parse HTML and return list of new, same-domain URLs"""
         try:
             from bs4 import BeautifulSoup
-            soup = BeautifulSoup(html, 'lxml')
+
+            soup = BeautifulSoup(html, "lxml")
 
             links = []
-            for a_tag in soup.find_all('a', href=True):
-                href = self._resolvePageUrl(a_tag['href'], page_url)
+            for a_tag in soup.find_all("a", href=True):
+                href = self._resolvePageUrl(a_tag["href"], page_url)
                 if self._isValidPageLink(href, base_domain, visited_urls):
                     links.append(href)
 
@@ -723,9 +886,9 @@ class ProcessingService:
 
     def _resolvePageUrl(self, href: str, page_url: str) -> str:
         """Convert relative URL to absolute"""
-        if href.startswith(('http://', 'https://')):
+        if href.startswith(("http://", "https://")):
             return href
-        if href.startswith('/'):
+        if href.startswith("/"):
             domain = self._get_domain(page_url)
             return f"{domain}{href}"
         return urljoin(page_url, href)
@@ -738,7 +901,13 @@ class ProcessingService:
             return False
         return True
 
-    async def _preparePageAsMarkdown(self, html_content: str, page_url: str, website_id: Optional[str] = None, remove_ads: bool = True) -> Tuple[str, Optional[str], list]:
+    async def _preparePageAsMarkdown(
+        self,
+        html_content: str,
+        page_url: str,
+        website_id: Optional[str] = None,
+        remove_ads: bool = True,
+    ) -> Tuple[str, Optional[str], list]:
         """
         Process HTML with Kreuzberg (Rust worker), which returns both markdown and pre-calculated chunks.
         TODO: The prompt is currently being passed to process_with_kreuzberg for context; we should verify
@@ -746,12 +915,14 @@ class ProcessingService:
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
         cleaned_html = clean_html_preserving_images(html_content, page_url)
-        html_with_image_text = await self._replacePageImagesWithOCRText(cleaned_html, page_url, website_id)
+        html_with_image_text = await self._replacePageImagesWithOCRText(
+            cleaned_html, page_url, website_id
+        )
         html_filename = f"page_{url_hash}.html"
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
-            file_data=html_with_image_text.encode('utf-8'),
+            file_data=html_with_image_text.encode("utf-8"),
             original_filename=html_filename,
-            file_type="web-worker-temp"
+            file_type="web-worker-temp",
         )
 
         if not html_upload_success:
@@ -764,7 +935,9 @@ class ProcessingService:
             f" | html_s3_key={html_s3_key}"
             f" | bucket={s3_file_storage.bucket_name}"
         )
-        logger.info(f"🔍 [KREUZBERG] Verifying temp HTML exists before queueing extraction: {html_s3_key}")
+        logger.info(
+            f"🔍 [KREUZBERG] Verifying temp HTML exists before queueing extraction: {html_s3_key}"
+        )
         success, result = s3_file_storage.generate_presigned_url(
             html_s3_key,
             expiration=3600,
@@ -775,7 +948,9 @@ class ProcessingService:
                 await s3_file_storage.delete_file(html_s3_key)
             except Exception:
                 pass
-            raise Exception(f"Failed to verify temp HTML {html_s3_key} before extraction: {result}")
+            raise Exception(
+                f"Failed to verify temp HTML {html_s3_key} before extraction: {result}"
+            )
 
         try:
             logger.info(
@@ -791,12 +966,18 @@ class ProcessingService:
                 mime_type="text/html",
                 worker_type="web",
                 source_id=website_id,
-                source_name=page_url
+                source_name=page_url,
             )
 
             if not kreuzberg_markdown:
-                error_detail = kreuzberg_metadata.get('error', 'unknown') if kreuzberg_metadata else 'unknown'
-                raise Exception(f"Kreuzberg processing failed for {page_url}: {error_detail}")
+                error_detail = (
+                    kreuzberg_metadata.get("error", "unknown")
+                    if kreuzberg_metadata
+                    else "unknown"
+                )
+                raise Exception(
+                    f"Kreuzberg processing failed for {page_url}: {error_detail}"
+                )
 
             markdown_content = self._stripDataUrlImagesFromMarkdown(kreuzberg_markdown)
             chunks = kreuzberg_metadata.get("chunks") or []
@@ -805,7 +986,9 @@ class ProcessingService:
 
             for chunk in chunks:
                 if isinstance(chunk.get("content"), str):
-                    chunk["content"] = self._stripDataUrlImagesFromMarkdown(chunk["content"])
+                    chunk["content"] = self._stripDataUrlImagesFromMarkdown(
+                        chunk["content"]
+                    )
                 if isinstance(chunk.get("text"), str):
                     chunk["text"] = self._stripDataUrlImagesFromMarkdown(chunk["text"])
 
@@ -813,14 +996,16 @@ class ProcessingService:
                 if "metadata" not in chunk:
                     chunk["metadata"] = {}
                 chunk["metadata"]["url"] = page_url
-                if hasattr(self, "_current_page_data") and getattr(self._current_page_data, "title", None):
+                if hasattr(self, "_current_page_data") and getattr(
+                    self._current_page_data, "title", None
+                ):
                     chunk["metadata"]["title"] = self._current_page_data.title
 
             md_filename = f"page_{url_hash}.md"
             md_success, md_s3_key = await s3_file_storage.upload_file(
-                file_data=markdown_content.encode('utf-8'),
+                file_data=markdown_content.encode("utf-8"),
                 original_filename=md_filename,
-                file_type="processed"
+                file_type="processed",
             )
 
             processed_content_s3_key = md_s3_key if md_success else None
@@ -838,9 +1023,13 @@ class ProcessingService:
             except Exception:
                 pass
 
-            raise Exception(f"Kreuzberg processing failed for {page_url}: {kreuzberg_err}")
+            raise Exception(
+                f"Kreuzberg processing failed for {page_url}: {kreuzberg_err}"
+            )
 
-    async def _replacePageImagesWithOCRText(self, html_content: str, page_url: str, website_id: Optional[str]) -> str:
+    async def _replacePageImagesWithOCRText(
+        self, html_content: str, page_url: str, website_id: Optional[str]
+    ) -> str:
         """OCR page images separately and replace image tags with extracted text in-place."""
         if not WEB_IMAGE_OCR_ENABLED:
             return self._stripDataUrlImageSources(html_content)
@@ -849,10 +1038,12 @@ class ProcessingService:
             from bs4 import BeautifulSoup
             import httpx
 
-            soup = BeautifulSoup(html_content, 'lxml')
+            soup = BeautifulSoup(html_content, "lxml")
             image_tags = [
-                img for img in soup.find_all('img')
-                if img.get('src') and not self._isTinyInlineAsset(img.get('src', ''), img.get('alt', ''))
+                img
+                for img in soup.find_all("img")
+                if img.get("src")
+                and not self._isTinyInlineAsset(img.get("src", ""), img.get("alt", ""))
             ]
 
             processed = 0
@@ -862,26 +1053,36 @@ class ProcessingService:
                 follow_redirects=True,
                 headers={"User-Agent": CRAWL4AI_DEFAULT_USER_AGENT},
             ) as client:
-                background_images = await self._findBackgroundImagesForOCR(soup, client=client, page_url=page_url)
+                background_images = await self._findBackgroundImagesForOCR(
+                    soup, client=client, page_url=page_url
+                )
                 if not image_tags and not background_images:
                     return self._stripDataUrlImageSources(str(soup))
 
                 for index, img in enumerate(image_tags, start=1):
-                    alt_text = img.get('alt', '').strip()
+                    alt_text = img.get("alt", "").strip()
                     if processed >= WEB_IMAGE_OCR_MAX_IMAGES:
                         self._removeImageTagSilently(img)
                         continue
 
-                    src = img.get('src', '')
-                    image_url = urljoin(page_url, src) if not src.startswith('data:') else f"{page_url}#inline-image-{index}"
+                    src = img.get("src", "")
+                    image_url = (
+                        urljoin(page_url, src)
+                        if not src.startswith("data:")
+                        else f"{page_url}#inline-image-{index}"
+                    )
 
                     try:
                         cache_key = self._imageOCRCacheKey(src, page_url)
                         if cache_key in ocr_cache:
-                            self._replaceImageTagWithText(soup, img, alt_text, ocr_cache[cache_key])
+                            self._replaceImageTagWithText(
+                                soup, img, alt_text, ocr_cache[cache_key]
+                            )
                             continue
 
-                        image_bytes, mime_type = await self._loadImageBytesForOCR(client, src, page_url)
+                        image_bytes, mime_type = await self._loadImageBytesForOCR(
+                            client, src, page_url
+                        )
                         if not image_bytes:
                             self._removeImageTagSilently(img)
                             continue
@@ -914,14 +1115,22 @@ class ProcessingService:
                         continue
 
                     src = background["src"]
-                    image_url = urljoin(page_url, src) if not src.startswith('data:') else f"{page_url}#background-image-{bg_index}"
+                    image_url = (
+                        urljoin(page_url, src)
+                        if not src.startswith("data:")
+                        else f"{page_url}#background-image-{bg_index}"
+                    )
                     try:
                         cache_key = self._imageOCRCacheKey(src, page_url)
                         if cache_key in ocr_cache:
-                            self._insertBackgroundImageOCRText(soup, background["element"], ocr_cache[cache_key])
+                            self._insertBackgroundImageOCRText(
+                                soup, background["element"], ocr_cache[cache_key]
+                            )
                             continue
 
-                        image_bytes, mime_type = await self._loadImageBytesForOCR(client, src, page_url)
+                        image_bytes, mime_type = await self._loadImageBytesForOCR(
+                            client, src, page_url
+                        )
                         if not image_bytes:
                             continue
                         if len(image_bytes) > WEB_IMAGE_OCR_MAX_BYTES:
@@ -937,7 +1146,9 @@ class ProcessingService:
                         )
                         processed += 1
                         ocr_cache[cache_key] = ocr_text
-                        self._insertBackgroundImageOCRText(soup, background["element"], ocr_text)
+                        self._insertBackgroundImageOCRText(
+                            soup, background["element"], ocr_text
+                        )
                     except Exception as image_err:
                         logger.warning(
                             f"⚠️ [WEB_IMAGE_OCR] Failed background image OCR"
@@ -954,10 +1165,14 @@ class ProcessingService:
             )
             return self._stripDataUrlImageSources(str(soup))
         except Exception as e:
-            logger.warning(f"⚠️ [WEB_IMAGE_OCR] Image OCR preprocessing failed for {page_url}: {e}")
+            logger.warning(
+                f"⚠️ [WEB_IMAGE_OCR] Image OCR preprocessing failed for {page_url}: {e}"
+            )
             return self._stripDataUrlImageSources(html_content)
 
-    async def _findBackgroundImagesForOCR(self, soup: Any, client: Any, page_url: str) -> List[Dict[str, Any]]:
+    async def _findBackgroundImagesForOCR(
+        self, soup: Any, client: Any, page_url: str
+    ) -> List[Dict[str, Any]]:
         """Find background-image URLs and the elements where their OCR text belongs."""
         found: List[Dict[str, Any]] = []
         seen = set()
@@ -965,7 +1180,7 @@ class ProcessingService:
         def add(element: Any, src: str, base_url: str = page_url) -> None:
             if not src or self._isSkippableImageReference(src):
                 return
-            if not src.startswith('data:'):
+            if not src.startswith("data:"):
                 src = urljoin(base_url, src)
             key = (id(element), src)
             if key in seen:
@@ -984,7 +1199,11 @@ class ProcessingService:
         if client:
             stylesheet_urls = []
             for link in soup.find_all("link", href=True):
-                rel = " ".join(link.get("rel", [])).lower() if isinstance(link.get("rel"), list) else str(link.get("rel", "")).lower()
+                rel = (
+                    " ".join(link.get("rel", [])).lower()
+                    if isinstance(link.get("rel"), list)
+                    else str(link.get("rel", "")).lower()
+                )
                 if "stylesheet" in rel:
                     stylesheet_urls.append(urljoin(page_url, link["href"]))
 
@@ -992,14 +1211,24 @@ class ProcessingService:
                 try:
                     response = await client.get(css_url)
                     if response.status_code == 200:
-                        self._collectCssBackgroundMatches(soup, response.text, add, css_url)
+                        self._collectCssBackgroundMatches(
+                            soup, response.text, add, css_url
+                        )
                 except Exception as css_err:
-                    logger.warning(f"⚠️ [WEB_IMAGE_OCR] Failed to load stylesheet {css_url}: {css_err}")
+                    logger.warning(
+                        f"⚠️ [WEB_IMAGE_OCR] Failed to load stylesheet {css_url}: {css_err}"
+                    )
 
         return found
 
-    def _collectCssBackgroundMatches(self, soup: Any, css_text: str, add: Any, base_url: str) -> None:
-        for selector, body in re.findall(r"([^{}]+)\{([^{}]*url\([^{}]*\)[^{}]*)\}", css_text, flags=re.IGNORECASE | re.DOTALL):
+    def _collectCssBackgroundMatches(
+        self, soup: Any, css_text: str, add: Any, base_url: str
+    ) -> None:
+        for selector, body in re.findall(
+            r"([^{}]+)\{([^{}]*url\([^{}]*\)[^{}]*)\}",
+            css_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        ):
             image_urls = self._extractCssImageUrls(body)
             if not image_urls:
                 continue
@@ -1007,11 +1236,15 @@ class ProcessingService:
                 for src in image_urls:
                     add(element, src, base_url)
 
-    def _selectElementsForSimpleCssSelector(self, soup: Any, selector_text: str) -> List[Any]:
+    def _selectElementsForSimpleCssSelector(
+        self, soup: Any, selector_text: str
+    ) -> List[Any]:
         matches = []
         for selector in selector_text.split(","):
             selector = selector.strip()
-            if not selector or any(token in selector for token in (":", ">", "+", "~", "[", "*")):
+            if not selector or any(
+                token in selector for token in (":", ">", "+", "~", "[", "*")
+            ):
                 continue
             simple_selector = selector.split()[-1].strip()
             try:
@@ -1029,7 +1262,9 @@ class ProcessingService:
 
     def _extractCssImageUrls(self, css_text: str) -> List[str]:
         urls = []
-        for raw_url in re.findall(r"url\(\s*(['\"]?)(.*?)\1\s*\)", css_text, flags=re.IGNORECASE | re.DOTALL):
+        for raw_url in re.findall(
+            r"url\(\s*(['\"]?)(.*?)\1\s*\)", css_text, flags=re.IGNORECASE | re.DOTALL
+        ):
             url_value = raw_url[1].strip()
             if url_value:
                 urls.append(url_value)
@@ -1045,12 +1280,14 @@ class ProcessingService:
         )
 
     def _imageOCRCacheKey(self, src: str, page_url: str) -> str:
-        if src.startswith('data:'):
+        if src.startswith("data:"):
             return hashlib.sha256(src.encode("utf-8", errors="ignore")).hexdigest()
         return urljoin(page_url, src)
 
-    async def _loadImageBytesForOCR(self, client: Any, src: str, page_url: str) -> Tuple[Optional[bytes], str]:
-        if src.startswith('data:'):
+    async def _loadImageBytesForOCR(
+        self, client: Any, src: str, page_url: str
+    ) -> Tuple[Optional[bytes], str]:
+        if src.startswith("data:"):
             return self._decodeDataUrlImage(src)
 
         image_url = urljoin(page_url, src)
@@ -1058,15 +1295,25 @@ class ProcessingService:
         if response.status_code != 200:
             return None, "application/octet-stream"
 
-        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
-        mime_type = content_type or mimetypes.guess_type(urlparse(image_url).path)[0] or "application/octet-stream"
+        content_type = (
+            response.headers.get("content-type", "").split(";")[0].strip().lower()
+        )
+        mime_type = (
+            content_type
+            or mimetypes.guess_type(urlparse(image_url).path)[0]
+            or "application/octet-stream"
+        )
         if not mime_type.startswith("image/"):
             return None, mime_type
 
         return response.content, mime_type
 
     def _decodeDataUrlImage(self, src: str) -> Tuple[Optional[bytes], str]:
-        match = re.match(r"^data:(image/[^;,]+)(;base64)?,(.*)$", src, flags=re.IGNORECASE | re.DOTALL)
+        match = re.match(
+            r"^data:(image/[^;,]+)(;base64)?,(.*)$",
+            src,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
         if not match:
             return None, "application/octet-stream"
 
@@ -1077,6 +1324,7 @@ class ProcessingService:
             if is_base64:
                 return base64.b64decode(payload, validate=False), mime_type
             from urllib.parse import unquote_to_bytes
+
             return unquote_to_bytes(payload), mime_type
         except Exception:
             return None, mime_type
@@ -1091,12 +1339,14 @@ class ProcessingService:
         index: int,
     ) -> Optional[str]:
         ext = mimetypes.guess_extension(mime_type) or ".img"
-        image_hash = hashlib.md5(f"{page_url}:{index}:{image_url}".encode()).hexdigest()[:12]
+        image_hash = hashlib.md5(
+            f"{page_url}:{index}:{image_url}".encode()
+        ).hexdigest()[:12]
         filename = f"page_image_{image_hash}{ext}"
         upload_success, image_s3_key = await s3_file_storage.upload_file(
             file_data=image_bytes,
             original_filename=filename,
-            file_type="web-worker-temp"
+            file_type="web-worker-temp",
         )
         if not upload_success:
             raise Exception("failed to upload image for OCR")
@@ -1123,9 +1373,13 @@ class ProcessingService:
             try:
                 await s3_file_storage.delete_file(image_s3_key)
             except Exception as cleanup_err:
-                logger.warning(f"⚠️ [WEB_IMAGE_OCR] Failed to delete temp image: {cleanup_err}")
+                logger.warning(
+                    f"⚠️ [WEB_IMAGE_OCR] Failed to delete temp image: {cleanup_err}"
+                )
 
-    def _replaceImageTagWithText(self, soup: Any, img: Any, alt_text: Optional[str], ocr_text: Optional[str]) -> None:
+    def _replaceImageTagWithText(
+        self, soup: Any, img: Any, alt_text: Optional[str], ocr_text: Optional[str]
+    ) -> None:
         if not ocr_text or self._isNonContentOCRText(ocr_text):
             self._removeImageTagSilently(img)
             return
@@ -1138,7 +1392,9 @@ class ProcessingService:
         replacement.append(text_node)
         img.replace_with(replacement)
 
-    def _insertBackgroundImageOCRText(self, soup: Any, element: Any, ocr_text: Optional[str]) -> None:
+    def _insertBackgroundImageOCRText(
+        self, soup: Any, element: Any, ocr_text: Optional[str]
+    ) -> None:
         if not ocr_text or self._isNonContentOCRText(ocr_text):
             return
 
@@ -1157,7 +1413,8 @@ class ProcessingService:
         return (
             not normalized
             or normalized.startswith("skipped:")
-            or normalized in {
+            or normalized
+            in {
                 "image ocr text: no readable text extracted.",
                 "background image ocr text: no readable text extracted.",
                 "no readable text extracted.",
@@ -1168,11 +1425,11 @@ class ProcessingService:
         try:
             from bs4 import BeautifulSoup
 
-            soup = BeautifulSoup(html_content, 'lxml')
-            for img in soup.find_all('img'):
-                src = img.get('src', '')
-                if src.startswith('data:'):
-                    img.attrs.pop('src', None)
+            soup = BeautifulSoup(html_content, "lxml")
+            for img in soup.find_all("img"):
+                src = img.get("src", "")
+                if src.startswith("data:"):
+                    img.attrs.pop("src", None)
             for element in soup.find_all(style=True):
                 element["style"] = self._stripDataUrlsFromCss(element.get("style", ""))
             for style_tag in soup.find_all("style"):
@@ -1182,7 +1439,9 @@ class ProcessingService:
                 style_tag.string = cleaned_css
             return str(soup)
         except Exception:
-            return re.sub(r'\s+src=["\']data:[^"\']+["\']', '', html_content, flags=re.IGNORECASE)
+            return re.sub(
+                r'\s+src=["\']data:[^"\']+["\']', "", html_content, flags=re.IGNORECASE
+            )
 
     def _stripDataUrlsFromCss(self, css_text: str) -> str:
         return re.sub(
@@ -1225,8 +1484,31 @@ class ProcessingService:
         )
         return markdown_content
 
+    def _sanitizeMarkdownForSource(self, markdown_content: str, page_url: str) -> str:
+        if "wikipedia.org" not in (page_url or "").lower():
+            return markdown_content
+
+        first_h1_match = re.search(r"^#\s+.+$", markdown_content, flags=re.MULTILINE)
+        if first_h1_match:
+            markdown_content = markdown_content[first_h1_match.start() :]
+
+        markdown_content = re.sub(
+            r"\[([^\]]+)\]\(\s*<?(?:https?:)?//[a-z0-9.-]*wikipedia\.org/[^)]*>\s*(?:\"[^\"]*\")?\s*\)",
+            r"\1",
+            markdown_content,
+            flags=re.IGNORECASE,
+        )
+        markdown_content = re.sub(
+            r"\[\s*\]\(\s*<?(?:https?:)?//[a-z0-9.-]*wikipedia\.org/[^)]*>\s*(?:\"[^\"]*\")?\s*\)",
+            "",
+            markdown_content,
+            flags=re.IGNORECASE,
+        )
+
+        return markdown_content
+
     def _isTinyInlineAsset(self, src: str, alt_text: str) -> bool:
-        if not src.startswith('data:image/svg+xml'):
+        if not src.startswith("data:image/svg+xml"):
             return False
         return not alt_text.strip()
 
@@ -1237,7 +1519,9 @@ class ProcessingService:
         from core.config import settings
 
         if not settings.kreuzberg_enabled:
-            logger.info("📄 [ROUTING] Kreuzberg processing disabled, keeping existing files.")
+            logger.info(
+                "📄 [ROUTING] Kreuzberg processing disabled, keeping existing files."
+            )
             return page_markdown
 
         try:
@@ -1251,21 +1535,35 @@ class ProcessingService:
             logger.warning(f"⚠️ [KREUZBERG] Error: {e}")
             return page_markdown
 
-    async def _findDocumentLinksInHTML(self, html_content: str, page_url: str) -> List[Dict]:
+    async def _findDocumentLinksInHTML(
+        self, html_content: str, page_url: str
+    ) -> List[Dict]:
         """Find embedded files (PDF, DOCX, etc.) in HTML"""
         from bs4 import BeautifulSoup
 
-        soup = BeautifulSoup(html_content, 'lxml')
-        kreuzberg_supported = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls'}
+        soup = BeautifulSoup(html_content, "lxml")
+        kreuzberg_supported = {
+            ".pdf",
+            ".docx",
+            ".doc",
+            ".pptx",
+            ".ppt",
+            ".xlsx",
+            ".xls",
+        }
 
         file_links = []
-        for link in soup.find_all('a', href=True):
-            href = link['href']
-            if not href.startswith(('http://', 'https://')):
+        for link in soup.find_all("a", href=True):
+            href = link["href"]
+            if not href.startswith(("http://", "https://")):
                 href = urljoin(page_url, href)
 
-            if any(urlparse(href).path.lower().endswith(ext) for ext in kreuzberg_supported):
-                file_links.append({'url': href, 'text': link.get_text(strip=True) or 'Document'})
+            if any(
+                urlparse(href).path.lower().endswith(ext) for ext in kreuzberg_supported
+            ):
+                file_links.append(
+                    {"url": href, "text": link.get_text(strip=True) or "Document"}
+                )
 
         logger.info(f"📎 [KREUZBERG] Found {len(file_links)} embedded files")
         return file_links[:5]
@@ -1283,9 +1581,11 @@ class ProcessingService:
 
         return extracted_docs
 
-    async def _processEmbeddedDocument(self, client: Any, file_link: Dict) -> Optional[Dict]:
+    async def _processEmbeddedDocument(
+        self, client: Any, file_link: Dict
+    ) -> Optional[Dict]:
         """Process single file through kreuzberg"""
-        file_url = file_link['url']
+        file_url = file_link["url"]
 
         try:
             response = await client.get(file_url, timeout=30)
@@ -1297,26 +1597,30 @@ class ProcessingService:
                 logger.warning(f"⚠️ File too large: {file_url}")
                 return None
 
-            return await self._downloadAndKreuzbergProcess(response.content, file_url, file_link)
+            return await self._downloadAndKreuzbergProcess(
+                response.content, file_url, file_link
+            )
         except Exception as e:
             logger.warning(f"⚠️ Error processing {file_url}: {e}")
             return None
 
-    async def _downloadAndKreuzbergProcess(self, file_bytes: bytes, file_url: str, file_link: Dict) -> Optional[Dict]:
+    async def _downloadAndKreuzbergProcess(
+        self, file_bytes: bytes, file_url: str, file_link: Dict
+    ) -> Optional[Dict]:
         """Upload file to S3 and process through Kreuzberg"""
         filename = os.path.basename(urlparse(file_url).path)
         _, file_ext = os.path.splitext(filename.lower())
-        
+
         mime_types = {
-            '.pdf': 'application/pdf',
-            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            '.doc': 'application/msword',
-            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            '.ppt': 'application/vnd.ms-powerpoint',
-            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            '.xls': 'application/vnd.ms-excel',
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".doc": "application/msword",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".ppt": "application/vnd.ms-powerpoint",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls": "application/vnd.ms-excel",
         }
-        mime_type = mime_types.get(file_ext, 'application/octet-stream')
+        mime_type = mime_types.get(file_ext, "application/octet-stream")
 
         logger.info(f"📤 [KREUZBERG_EMBEDDED] Processing embedded document: {filename}")
 
@@ -1325,17 +1629,23 @@ class ProcessingService:
             success, s3_key = await s3_file_storage.upload_file(
                 file_data=file_bytes,
                 original_filename=filename,
-                file_type="web-worker-temp"
+                file_type="web-worker-temp",
             )
-            
+
             if not success:
-                logger.error(f"❌ [KREUZBERG_EMBEDDED] Failed to upload {filename} to S3")
+                logger.error(
+                    f"❌ [KREUZBERG_EMBEDDED] Failed to upload {filename} to S3"
+                )
                 return None
 
             # 2. Verify object exists before queueing extraction
-            verify_success, verify_result = s3_file_storage.generate_presigned_url(s3_key, verify_exists=True)
+            verify_success, verify_result = s3_file_storage.generate_presigned_url(
+                s3_key, verify_exists=True
+            )
             if not verify_success:
-                logger.error(f"❌ [KREUZBERG_EMBEDDED] Failed to verify temp S3 object for {filename}: {verify_result}")
+                logger.error(
+                    f"❌ [KREUZBERG_EMBEDDED] Failed to verify temp S3 object for {filename}: {verify_result}"
+                )
                 await s3_file_storage.delete_file(s3_key)
                 return None
 
@@ -1344,22 +1654,30 @@ class ProcessingService:
                 s3_key=s3_key,
                 original_filename=filename,
                 mime_type=mime_type,
-                worker_type="web"
+                worker_type="web",
             )
 
             # 4. Cleanup S3
             await s3_file_storage.delete_file(s3_key)
 
             if markdown_content:
-                logger.info(f"✅ [KREUZBERG_EMBEDDED] Extracted {len(markdown_content)} characters")
-                return {'title': file_link['text'], 'filename': filename, 'content': markdown_content}
+                logger.info(
+                    f"✅ [KREUZBERG_EMBEDDED] Extracted {len(markdown_content)} characters"
+                )
+                return {
+                    "title": file_link["text"],
+                    "filename": filename,
+                    "content": markdown_content,
+                }
 
             return None
         except Exception as e:
             logger.error(f"❌ [KREUZBERG_EMBEDDED] Error processing {filename}: {e}")
             return None
 
-    async def _appendDocumentsToMarkdown(self, page_markdown: str, extracted_docs: List[Dict]) -> str:
+    async def _appendDocumentsToMarkdown(
+        self, page_markdown: str, extracted_docs: List[Dict]
+    ) -> str:
         """Append extracted documents to page markdown"""
         if not extracted_docs:
             return page_markdown
@@ -1369,14 +1687,16 @@ class ProcessingService:
         for doc in extracted_docs:
             page_markdown += f"### {doc['title']}\n"
             page_markdown += f"*Source: {doc['filename']}*\n\n"
-            page_markdown += doc['content']
+            page_markdown += doc["content"]
             page_markdown += "\n\n"
 
         return page_markdown
 
     # ==================== ACCESS LAYER ====================
 
-    async def _resolveUserRoleID(self, user_email: str, user_role_id: Optional[str] = None) -> Optional[str]:
+    async def _resolveUserRoleID(
+        self, user_email: str, user_role_id: Optional[str] = None
+    ) -> Optional[str]:
         """Resolve user_role_id (allow NULL if not found)"""
         if user_role_id:
             logger.info(f"✅ Using provided user_role_id: {user_role_id}")
@@ -1398,131 +1718,156 @@ class ProcessingService:
     # ==================== DATABASE LAYER ====================
 
     async def _recordPageToDB(
-            self,
-            page_data: PageData,
-            upload_result: UploadResult,
-            job_context: JobContext,
-            crawl_config: CrawlConfig,
-            processed_content_s3_key: Optional[str] = None
-        ) -> Optional[str]:
-            """Record single page in database"""
-            storage_backend_state = 'completed' if getattr(upload_result, "confirmed", False) else 'pending'
-            metrics = calculate_metrics(page_data.markdown)
-            
-            if await self._isSinglePageMode(page_data.page_url, job_context.root_url, crawl_config):
-                logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
+        self,
+        page_data: PageData,
+        upload_result: UploadResult,
+        job_context: JobContext,
+        crawl_config: CrawlConfig,
+        processed_content_s3_key: Optional[str] = None,
+    ) -> Optional[str]:
+        """Record single page in database"""
+        storage_backend_state = (
+            "completed" if getattr(upload_result, "confirmed", False) else "pending"
+        )
+        metrics = calculate_metrics(page_data.markdown)
 
-                # Update the parent website record with the page data
-                # Mark as completed since single-page mode has no children
-                await self._updateWebsiteWithPageData(
-                    website_id=job_context.website_id,
-                    page_data=page_data,
-                    upload_result=upload_result,
-                    file_size=metrics.get('file_size_bytes', 0),
-                    char_count=metrics.get('char_count', 0),
-                    mark_completed=True,  # Single-page mode - mark as completed
-                    processed_content_s3_key=processed_content_s3_key,
-                    storage_backend_state=storage_backend_state
-                )
+        if await self._isSinglePageMode(
+            page_data.page_url, job_context.root_url, crawl_config
+        ):
+            logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
 
-                # Cache citation URL mappings in Redis for fast lookup during chat
-                try:
-                    from shared.redis_citation_cache import cache_single_url
-                    if upload_result.display_name and page_data.page_url:
-                        await cache_single_url(upload_result.display_name, page_data.page_url)
-                    if upload_result.document_name and page_data.page_url:
-                        await cache_single_url(upload_result.document_name, page_data.page_url)
-                except Exception as cache_err:
-                    logger.warning(f"⚠️ Citation cache update failed (non-blocking): {cache_err}")
-
-                return job_context.website_id
-
-            # Check if this is the root URL in multi-page mode
-            # If so, update the parent record instead of creating a child
-            # Normalize both URLs for comparison to handle trailing slashes
-            if self._normalize_url(page_data.page_url) == self._normalize_url(job_context.root_url):
-                logger.info(f"   ℹ️ Root URL in multi-page mode: updating parent record")
-                
-                # Update the parent website record with the root page data
-                # Do NOT mark as completed - children are still being processed
-                await self._updateWebsiteWithPageData(
-                    website_id=job_context.website_id,
-                    page_data=page_data,
-                    upload_result=upload_result,
-                    file_size=metrics.get('file_size_bytes', 0),
-                    char_count=metrics.get('char_count', 0),
-                    mark_completed=False,  # Multi-page mode - keep status as 'processing'
-                    processed_content_s3_key=processed_content_s3_key,
-                    storage_backend_state=storage_backend_state
-                )
-
-                # Cache citation URL mappings in Redis for fast lookup during chat
-                try:
-                    from shared.redis_citation_cache import cache_single_url
-                    if upload_result.display_name and page_data.page_url:
-                        await cache_single_url(upload_result.display_name, page_data.page_url)
-                    if upload_result.document_name and page_data.page_url:
-                        await cache_single_url(upload_result.document_name, page_data.page_url)
-                except Exception as cache_err:
-                    logger.warning(f"⚠️ Citation cache update failed (non-blocking): {cache_err}")
-
-                return job_context.website_id
-
-            # This is a child page - record it as such
-            child_page_id = await self.scraping_dao.record_child_page(
-                parent_id=job_context.website_id,
-                page_url=page_data.page_url,
-                storage_document_name=upload_result.document_name,
-                storage_document_uri=upload_result.storage_document_uri,
-                storage_metadata=upload_result.storage_metadata,
-                user_role_id=job_context.user_role_id,
-                file_size=metrics.get('file_size_bytes', 0),
-                char_count=metrics.get('char_count', 0),
-                title=page_data.title,
-                description=page_data.description,
-                crawl_session_id=page_data.session_id,
+            # Update the parent website record with the page data
+            # Mark as completed since single-page mode has no children
+            await self._updateWebsiteWithPageData(
+                website_id=job_context.website_id,
+                page_data=page_data,
+                upload_result=upload_result,
+                file_size=metrics.get("file_size_bytes", 0),
+                char_count=metrics.get("char_count", 0),
+                mark_completed=True,  # Single-page mode - mark as completed
                 processed_content_s3_key=processed_content_s3_key,
-                storage_backend_state=storage_backend_state
+                storage_backend_state=storage_backend_state,
             )
 
             # Cache citation URL mappings in Redis for fast lookup during chat
             try:
                 from shared.redis_citation_cache import cache_single_url
+
                 if upload_result.display_name and page_data.page_url:
-                    await cache_single_url(upload_result.display_name, page_data.page_url)
+                    await cache_single_url(
+                        upload_result.display_name, page_data.page_url
+                    )
                 if upload_result.document_name and page_data.page_url:
-                    await cache_single_url(upload_result.document_name, page_data.page_url)
+                    await cache_single_url(
+                        upload_result.document_name, page_data.page_url
+                    )
             except Exception as cache_err:
-                logger.warning(f"⚠️ Citation cache update failed (non-blocking): {cache_err}")
+                logger.warning(
+                    f"⚠️ Citation cache update failed (non-blocking): {cache_err}"
+                )
 
-            # Don't check parent completion here - it will be checked after ALL pages are crawled
-            # Checking here causes premature completion when not all pages have been discovered yet
+            return job_context.website_id
 
-            return child_page_id
+        # Check if this is the root URL in multi-page mode
+        # If so, update the parent record instead of creating a child
+        # Normalize both URLs for comparison to handle trailing slashes
+        if self._normalize_url(page_data.page_url) == self._normalize_url(
+            job_context.root_url
+        ):
+            logger.info(f"   ℹ️ Root URL in multi-page mode: updating parent record")
 
+            # Update the parent website record with the root page data
+            # Do NOT mark as completed - children are still being processed
+            await self._updateWebsiteWithPageData(
+                website_id=job_context.website_id,
+                page_data=page_data,
+                upload_result=upload_result,
+                file_size=metrics.get("file_size_bytes", 0),
+                char_count=metrics.get("char_count", 0),
+                mark_completed=False,  # Multi-page mode - keep status as 'processing'
+                processed_content_s3_key=processed_content_s3_key,
+                storage_backend_state=storage_backend_state,
+            )
 
-    async def _isSinglePageMode(self, page_url: str, root_url: str, crawl_config: CrawlConfig) -> bool:
-            """
-            Check if this is truly single-page mode.
+            # Cache citation URL mappings in Redis for fast lookup during chat
+            try:
+                from shared.redis_citation_cache import cache_single_url
 
-            Single-page mode means:
-            1. The page URL matches the root URL (it's the first/only page)
-            2. AND max_depth is 0 (no crawling of child pages)
+                if upload_result.display_name and page_data.page_url:
+                    await cache_single_url(
+                        upload_result.display_name, page_data.page_url
+                    )
+                if upload_result.document_name and page_data.page_url:
+                    await cache_single_url(
+                        upload_result.document_name, page_data.page_url
+                    )
+            except Exception as cache_err:
+                logger.warning(
+                    f"⚠️ Citation cache update failed (non-blocking): {cache_err}"
+                )
 
-            This prevents the first page of a multi-page crawl from being
-            incorrectly treated as single-page mode.
-            """
-            # Normalize URLs for comparison to handle trailing slashes
-            is_root_page = self._normalize_url(page_url) == self._normalize_url(root_url)
-            is_depth_zero = crawl_config.max_depth == 0
+            return job_context.website_id
 
-            result = is_root_page and is_depth_zero
+        # This is a child page - record it as such
+        child_page_id = await self.scraping_dao.record_child_page(
+            parent_id=job_context.website_id,
+            page_url=page_data.page_url,
+            storage_document_name=upload_result.document_name,
+            storage_document_uri=upload_result.storage_document_uri,
+            storage_metadata=upload_result.storage_metadata,
+            user_role_id=job_context.user_role_id,
+            file_size=metrics.get("file_size_bytes", 0),
+            char_count=metrics.get("char_count", 0),
+            title=page_data.title,
+            description=page_data.description,
+            crawl_session_id=page_data.session_id,
+            processed_content_s3_key=processed_content_s3_key,
+            storage_backend_state=storage_backend_state,
+        )
 
-            if is_root_page and not is_depth_zero:
-                logger.info(f"   ℹ️ Root page detected but max_depth={crawl_config.max_depth} - NOT single-page mode")
+        # Cache citation URL mappings in Redis for fast lookup during chat
+        try:
+            from shared.redis_citation_cache import cache_single_url
 
-            return result
+            if upload_result.display_name and page_data.page_url:
+                await cache_single_url(upload_result.display_name, page_data.page_url)
+            if upload_result.document_name and page_data.page_url:
+                await cache_single_url(upload_result.document_name, page_data.page_url)
+        except Exception as cache_err:
+            logger.warning(
+                f"⚠️ Citation cache update failed (non-blocking): {cache_err}"
+            )
 
+        # Don't check parent completion here - it will be checked after ALL pages are crawled
+        # Checking here causes premature completion when not all pages have been discovered yet
+
+        return child_page_id
+
+    async def _isSinglePageMode(
+        self, page_url: str, root_url: str, crawl_config: CrawlConfig
+    ) -> bool:
+        """
+        Check if this is truly single-page mode.
+
+        Single-page mode means:
+        1. The page URL matches the root URL (it's the first/only page)
+        2. AND max_depth is 0 (no crawling of child pages)
+
+        This prevents the first page of a multi-page crawl from being
+        incorrectly treated as single-page mode.
+        """
+        # Normalize URLs for comparison to handle trailing slashes
+        is_root_page = self._normalize_url(page_url) == self._normalize_url(root_url)
+        is_depth_zero = crawl_config.max_depth == 0
+
+        result = is_root_page and is_depth_zero
+
+        if is_root_page and not is_depth_zero:
+            logger.info(
+                f"   ℹ️ Root page detected but max_depth={crawl_config.max_depth} - NOT single-page mode"
+            )
+
+        return result
 
     async def _updateWebsiteWithPageData(
         self,
@@ -1533,7 +1878,7 @@ class ProcessingService:
         char_count: int,
         mark_completed: bool = True,
         processed_content_s3_key: Optional[str] = None,
-        storage_backend_state: str = 'completed'
+        storage_backend_state: str = "completed",
     ) -> bool:
         """Update parent website record with single page data"""
         logger.info(f"💾 [UPDATE_WEBSITE] Updating website {website_id} with page data")
@@ -1550,7 +1895,7 @@ class ProcessingService:
             storage_metadata=upload_result.storage_metadata,
             mark_completed=mark_completed,
             processed_content_s3_key=processed_content_s3_key,
-            storage_backend_state=storage_backend_state
+            storage_backend_state=storage_backend_state,
         )
 
     # ==================== UTILITIES ====================
@@ -1571,13 +1916,15 @@ class ProcessingService:
             from urllib.parse import urlparse, urlunparse
 
             parsed = urlparse(url)
-            normalized = urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
+            normalized = urlunparse(
+                (parsed.scheme, parsed.netloc, parsed.path, "", "", "")
+            )
 
-            if normalized.endswith('/') and not normalized.endswith('://'):
-                if parsed.path not in ('/', ''):
-                    normalized = normalized.rstrip('/')
-            elif not normalized.endswith('/') and not parsed.path:
-                normalized += '/'
+            if normalized.endswith("/") and not normalized.endswith("://"):
+                if parsed.path not in ("/", ""):
+                    normalized = normalized.rstrip("/")
+            elif not normalized.endswith("/") and not parsed.path:
+                normalized += "/"
 
             return normalized.lower()
         except:
