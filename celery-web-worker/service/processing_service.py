@@ -782,12 +782,6 @@ class ProcessingService:
                 or CRAWL4AI_DEFAULT_TIMEZONE_ID,
                 user_agent=options.get("crawler_user_agent")
                 or CRAWL4AI_DEFAULT_USER_AGENT,
-                only_main_content=bool(
-                    options.get(
-                        "crawler_only_main_content",
-                        _env_bool("CRAWL4AI_ONLY_MAIN_CONTENT", True),
-                    )
-                ),
             )
             attempts = max(1, CRAWL4AI_FETCH_RETRIES + 1)
 
