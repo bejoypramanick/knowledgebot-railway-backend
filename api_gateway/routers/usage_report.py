@@ -25,7 +25,9 @@ def _row_to_dict(row):
             d[k] = v.isoformat()
         elif isinstance(v, (dict, list)):
             continue  # Preserve JSONB structures
-        elif hasattr(v, '__str__') and not isinstance(v, (int, float, bool, str, type(None))):
+        elif hasattr(v, "__str__") and not isinstance(
+            v, (int, float, bool, str, type(None))
+        ):
             d[k] = str(v)
     return d
 
@@ -35,7 +37,11 @@ async def _fetch_all_data():
     since = datetime.utcnow() - timedelta(days=365)
 
     async with get_db_session() as db:
-        sessions = [_row_to_dict(r) for r in (await db.execute(text("""
+        sessions = [
+            _row_to_dict(r)
+            for r in (
+                await db.execute(
+                    text("""
             SELECT id, started_at, last_activity_at, message_count,
                    total_character_count, total_word_count, total_token_count,
                    total_message_token_count, total_prompt_token_count, total_completion_token_count,
@@ -43,25 +49,49 @@ async def _fetch_all_data():
                    total_tool_def_token_count, total_user_msg_token_count, total_bot_response_token_count,
                    archive_status, sentiment, duration_minutes, created_at
             FROM chat_sessions WHERE created_at >= :since ORDER BY created_at DESC
-        """), {"since": since})).fetchall()]
+        """),
+                    {"since": since},
+                )
+            ).fetchall()
+        ]
 
-        files = [_row_to_dict(r) for r in (await db.execute(text("""
+        files = [
+            _row_to_dict(r)
+            for r in (
+                await db.execute(
+                    text("""
             SELECT id, original_filename, display_name, file_extension, processing_status,
                    file_size, char_count,
                    filestore_character_count, filestore_word_count, filestore_token_count,
                    processed_by_extractor, created_at
             FROM file_uploads WHERE created_at >= :since ORDER BY created_at DESC
-        """), {"since": since})).fetchall()]
+        """),
+                    {"since": since},
+                )
+            ).fetchall()
+        ]
 
-        websites = [_row_to_dict(r) for r in (await db.execute(text("""
+        websites = [
+            _row_to_dict(r)
+            for r in (
+                await db.execute(
+                    text("""
             SELECT id, original_url, title, processing_status, pages_scraped,
                    file_size, char_count,
                    filestore_character_count, filestore_word_count, filestore_token_count,
                    parent_id, depth, created_at
             FROM scraped_websites WHERE created_at >= :since ORDER BY created_at DESC
-        """), {"since": since})).fetchall()]
+        """),
+                    {"since": since},
+                )
+            ).fetchall()
+        ]
 
-        chat_messages = [_row_to_dict(r) for r in (await db.execute(text("""
+        chat_messages = [
+            _row_to_dict(r)
+            for r in (
+                await db.execute(
+                    text("""
             SELECT cm.id, cm.session_id, cm.role, cm.content,
                    cm.character_count, cm.word_count, cm.token_count,
                    cm.message_token_count, cm.prompt_token_count, cm.completion_token_count,
@@ -75,34 +105,51 @@ async def _fetch_all_data():
             FROM chat_messages cm
             WHERE cm.created_at >= :since
             ORDER BY cm.created_at DESC
-        """), {"since": since})).fetchall()]
+        """),
+                    {"since": since},
+                )
+            ).fetchall()
+        ]
 
-        run_steps = [_row_to_dict(r) for r in (await db.execute(text("""
+        run_steps = [
+            _row_to_dict(r)
+            for r in (
+                await db.execute(
+                    text("""
             SELECT id, session_id, user_message_id, step_number, step_type, part_type,
                    tool_name, content_preview, content_full, char_count, word_count,
                    token_count, token_source, created_at
             FROM agent_run_steps
             WHERE created_at >= :since
             ORDER BY session_id, user_message_id, step_number
-        """), {"since": since})).fetchall()]
+        """),
+                    {"since": since},
+                )
+            ).fetchall()
+        ]
 
         token_usage_log = []
-        rows = (await db.execute(text("""
+        rows = (
+            await db.execute(
+                text("""
             SELECT id, session_id, message_id, provider, model,
                    prompt_tokens, completion_tokens, total_tokens,
                    api_call_type, request_metadata, created_at
             FROM token_usage_log
             WHERE created_at >= :since
             ORDER BY created_at DESC
-        """), {"since": since})).fetchall()
-        
+        """),
+                {"since": since},
+            )
+        ).fetchall()
+
         for r in rows:
             d = _row_to_dict(r)
-            meta = d.get('request_metadata')
+            meta = d.get("request_metadata")
             if meta and isinstance(meta, str):
                 try:
                     # Fallback if DB driver returned a string for JSONB
-                    d['request_metadata'] = json.loads(meta)
+                    d["request_metadata"] = json.loads(meta)
                     logger.debug(f"Parsed metadata string for row {d['id']}")
                 except:
                     pass
@@ -110,13 +157,18 @@ async def _fetch_all_data():
 
     logger.info(f"Report data fetched: {len(token_usage_log)} usage rows")
     if token_usage_log:
-        first_meta = token_usage_log[0].get('request_metadata')
-        logger.info(f"Sample metadata type: {type(first_meta)} value: {str(first_meta)[:100]}")
+        first_meta = token_usage_log[0].get("request_metadata")
+        logger.info(
+            f"Sample metadata type: {type(first_meta)} value: {str(first_meta)[:100]}"
+        )
 
     return {
-        "sessions": sessions, "files": files,
-        "websites": websites, "chat_messages": chat_messages,
-        "run_steps": run_steps, "token_usage_log": token_usage_log
+        "sessions": sessions,
+        "files": files,
+        "websites": websites,
+        "chat_messages": chat_messages,
+        "run_steps": run_steps,
+        "token_usage_log": token_usage_log,
     }
 
 
@@ -126,7 +178,8 @@ async def usage_report(request: Request):
     data = await _fetch_all_data()
     data_json = json.dumps(data, default=str)
 
-    html = """<!DOCTYPE html>
+    html = (
+        """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -272,7 +325,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     </div>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th>Size</th><th>Source</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th>Size</th><th>Char/Token Ratio</th><th>Source</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -281,7 +334,9 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <script>
 // === DATA ===
-const RAW = """ + data_json + """;
+const RAW = """
+        + data_json
+        + """;
 let currentDays = 30;
 
 // === HELPERS ===
@@ -635,11 +690,12 @@ function render() {
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
+      <td>${(() => { const t=r.total_tokens||r.prompt_tokens||0,c=payloadChars(meta)||0; return t>0 ? (c/t).toFixed(2) : '-'; })()}</td>
       <td class="mono source-cell">${meta.source_url || meta.url || '-'}</td>
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
-      <td colspan="9">
+      <td colspan="10">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
@@ -932,5 +988,6 @@ render();
 </script>
 </body>
 </html>"""
+    )
 
     return HTMLResponse(content=html)
