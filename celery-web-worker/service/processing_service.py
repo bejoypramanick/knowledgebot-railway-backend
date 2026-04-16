@@ -784,7 +784,7 @@ class ProcessingService:
                 or CRAWL4AI_DEFAULT_USER_AGENT,
                 excluded_tags=["nav", "footer", "header", "aside"],
                 exclude_external_links=True,
-                word_count_threshold=10,
+                exclude_social_media_links=True,
             )
             attempts = max(1, CRAWL4AI_FETCH_RETRIES + 1)
 
