@@ -1205,6 +1205,24 @@ class ProcessingService:
             markdown_content,
             flags=re.IGNORECASE | re.DOTALL,
         )
+        markdown_content = re.sub(
+            r"\[([^\]]+)\]\(\s*(?:#|/wiki/|/w/|//en\.wikipedia\.org/|https?://en\.wikipedia\.org/wiki/)[^)]*\)",
+            r"\1",
+            markdown_content,
+            flags=re.IGNORECASE,
+        )
+        markdown_content = re.sub(
+            r"\[\s*\]\(\s*(?:#|/wiki/|/w/|//en\.wikipedia\.org/|https?://en\.wikipedia\.org/wiki/)[^)]*\)",
+            "",
+            markdown_content,
+            flags=re.IGNORECASE,
+        )
+        markdown_content = re.sub(
+            r"\[\s*#\s*\]\(\s*#.*?\)",
+            "",
+            markdown_content,
+            flags=re.IGNORECASE,
+        )
         return markdown_content
 
     def _isTinyInlineAsset(self, src: str, alt_text: str) -> bool:
