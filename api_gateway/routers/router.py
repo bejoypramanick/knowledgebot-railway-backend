@@ -13,7 +13,10 @@ from urllib.parse import urlencode
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from ..core.firebase_auth import verify_firebase_token, get_user_by_uid as get_user_from_firebase
+from ..core.firebase_auth import (
+    verify_firebase_token,
+    get_user_by_uid as get_user_from_firebase,
+)
 from ..core.config import get_settings
 from ..core.session_store import get_session_store
 from ..services.session_service import get_session_service
@@ -53,7 +56,9 @@ def _remove_untrusted_identity_headers(headers: Dict[str, str]) -> None:
         headers.pop(header_name.lower(), None)
 
 
-def _sign_internal_headers(headers: Dict[str, str], method: str, path_or_url: str) -> Dict[str, str]:
+def _sign_internal_headers(
+    headers: Dict[str, str], method: str, path_or_url: str
+) -> Dict[str, str]:
     return add_internal_request_signature(
         headers=headers,
         method=method,
@@ -126,9 +131,13 @@ def _require_public_widget_context(
     request: Request,
     expected_scopes: Optional[tuple[str, ...]] = None,
 ) -> Dict[str, Any]:
-    widget_claims = _apply_public_widget_context(request, expected_scopes=expected_scopes)
+    widget_claims = _apply_public_widget_context(
+        request, expected_scopes=expected_scopes
+    )
     if not widget_claims:
-        raise HTTPException(status_code=403, detail="Valid widget access token is required")
+        raise HTTPException(
+            status_code=403, detail="Valid widget access token is required"
+        )
     return widget_claims
 
 
@@ -142,7 +151,7 @@ async def check_config_service_with_retry(
     Returns config dict or None if all attempts fail.
     """
     retry_delays = [0.5, 1.0]  # Quick retries for better UX
-    
+
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
@@ -155,33 +164,41 @@ async def check_config_service_with_retry(
                 response = await client.get(
                     f"{config_service_url}/api/v1/configuration/widgetConfig",
                     headers=signed_headers or None,
-                    timeout=3.0
+                    timeout=3.0,
                 )
-                
+
                 if response.status_code == 200:
                     payload = response.json()
-                    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+                    if isinstance(payload, dict) and isinstance(
+                        payload.get("data"), dict
+                    ):
                         return payload["data"]
                     return payload
-                    
+
         except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
             if attempt < max_retries - 1:
                 delay = retry_delays[attempt]
-                logger.warning(f"⚠️ Config service connection failed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s...")
+                logger.warning(
+                    f"⚠️ Config service connection failed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s..."
+                )
                 await asyncio.sleep(delay)
                 continue
             else:
-                logger.error(f"❌ Config service unavailable after {max_retries} attempts")
+                logger.error(
+                    f"❌ Config service unavailable after {max_retries} attempts"
+                )
                 return None
         except Exception as e:
             logger.error(f"❌ Unexpected error checking config service: {e}")
             return None
-    
+
     return None
+
 
 # =================================
 # WINDOW-LOAD CHAT VALIDATION ENDPOINT
 # =================================
+
 
 @router.get("/chatbot/validate-chat")
 @limiter.limit("100/minute")
@@ -224,7 +241,9 @@ async def validate_chat_window_load(request: Request):
         )
         tenant_id = widget_claims.get("tenant_id")
         tenant_slug = widget_claims.get("tenant_slug")
-        parent_origin = widget_claims.get("parent_origin") or extract_widget_parent_origin(request)
+        parent_origin = widget_claims.get(
+            "parent_origin"
+        ) or extract_widget_parent_origin(request)
         claimed_parent_origin = widget_claims.get("parent_origin")
         tenant_headers = {}
         if tenant_id:
@@ -245,7 +264,9 @@ async def validate_chat_window_load(request: Request):
                 "reason": "Embedding origin could not be determined. Set the iframe referrer policy to origin.",
             }
         if claimed_parent_origin and claimed_parent_origin != parent_origin:
-            logger.warning(f"[{correlation_id}] ❌ Widget parent origin mismatch for runtime token")
+            logger.warning(
+                f"[{correlation_id}] ❌ Widget parent origin mismatch for runtime token"
+            )
             return {
                 "ready": False,
                 "chat_enabled": False,
@@ -261,21 +282,33 @@ async def validate_chat_window_load(request: Request):
         allowed_origins = await get_allowed_widget_origins(tenant_id=tenant_cache_key)
 
         if chat_enabled is None or allowed_origins is None:
-            logger.info(f"[{correlation_id}] Cache MISS for widget access controls, fetching from config service...")
+            logger.info(
+                f"[{correlation_id}] Cache MISS for widget access controls, fetching from config service..."
+            )
             config_service_url = "http://configuration.railway.internal:8080"
-            config = await check_config_service_with_retry(config_service_url, headers=tenant_headers or None)
+            config = await check_config_service_with_retry(
+                config_service_url, headers=tenant_headers or None
+            )
 
             if config:
                 chat_enabled = config.get("display_chatbot", True)
-                allowed_origins = config.get("allowed_origins", []) if isinstance(config, dict) else []
+                allowed_origins = (
+                    config.get("allowed_origins", [])
+                    if isinstance(config, dict)
+                    else []
+                )
                 await set_display_chatbot(chat_enabled, tenant_id=tenant_cache_key)
-                await set_allowed_widget_origins(allowed_origins, tenant_id=tenant_cache_key)
+                await set_allowed_widget_origins(
+                    allowed_origins, tenant_id=tenant_cache_key
+                )
                 logger.info(
                     f"[{correlation_id}] ✅ Config service returned display_chatbot={chat_enabled} "
                     f"and {len(allowed_origins)} allowed origin(s), cached"
                 )
             else:
-                logger.warning(f"[{correlation_id}] ⚠️ Config service unavailable, denying widget bootstrap")
+                logger.warning(
+                    f"[{correlation_id}] ⚠️ Config service unavailable, denying widget bootstrap"
+                )
                 return {
                     "ready": False,
                     "chat_enabled": False,
@@ -298,11 +331,13 @@ async def validate_chat_window_load(request: Request):
                 "domain_authorized": True,
                 "session_id": None,
                 "widget_session_token": None,
-                "reason": "Chat is currently disabled"
+                "reason": "Chat is currently disabled",
             }
 
         if not allowed_origins:
-            logger.warning(f"[{correlation_id}] ❌ No allowed widget origins configured")
+            logger.warning(
+                f"[{correlation_id}] ❌ No allowed widget origins configured"
+            )
             return {
                 "ready": False,
                 "chat_enabled": True,
@@ -329,6 +364,7 @@ async def validate_chat_window_load(request: Request):
         # Step 3: Warm up downstream services (chatbot orchestration + configuration)
         # This ensures serverless containers are ready before the user sends their first message
         import httpx
+
         settings = get_settings()
 
         service_checks = {
@@ -343,24 +379,28 @@ async def validate_chat_window_load(request: Request):
                     if resp.status_code == 200:
                         logger.info(f"[{correlation_id}] ✅ {service_name} is healthy")
                     else:
-                        logger.error(f"[{correlation_id}] ❌ {service_name} health check failed: {resp.status_code}")
+                        logger.error(
+                            f"[{correlation_id}] ❌ {service_name} health check failed: {resp.status_code}"
+                        )
                         return {
                             "ready": False,
                             "chat_enabled": True,
                             "domain_authorized": True,
                             "session_id": None,
                             "widget_session_token": None,
-                            "reason": f"Service {service_name} is not ready (status {resp.status_code})"
+                            "reason": f"Service {service_name} is not ready (status {resp.status_code})",
                         }
                 except Exception as svc_err:
-                    logger.error(f"[{correlation_id}] ❌ {service_name} unreachable: {svc_err}")
+                    logger.error(
+                        f"[{correlation_id}] ❌ {service_name} unreachable: {svc_err}"
+                    )
                     return {
                         "ready": False,
                         "chat_enabled": True,
                         "domain_authorized": True,
                         "session_id": None,
                         "widget_session_token": None,
-                        "reason": f"Service {service_name} is not reachable"
+                        "reason": f"Service {service_name} is not reachable",
                     }
 
         # Step 4: Create session with PG18 database-generated UUIDv7 (via chatbot_orchestration service)
@@ -377,31 +417,37 @@ async def validate_chat_window_load(request: Request):
                 )
 
                 if session_response.status_code != 200:
-                    logger.error(f"[{correlation_id}] ❌ Session creation failed: {session_response.status_code}")
+                    logger.error(
+                        f"[{correlation_id}] ❌ Session creation failed: {session_response.status_code}"
+                    )
                     return {
                         "ready": False,
                         "chat_enabled": True,
                         "domain_authorized": True,
                         "session_id": None,
                         "widget_session_token": None,
-                        "reason": f"Failed to create session (status {session_response.status_code})"
+                        "reason": f"Failed to create session (status {session_response.status_code})",
                     }
 
                 session_data = session_response.json()
                 session_id = session_data.get("session_id")
 
                 if not session_id:
-                    logger.error(f"[{correlation_id}] ❌ Session creation returned no session_id")
+                    logger.error(
+                        f"[{correlation_id}] ❌ Session creation returned no session_id"
+                    )
                     return {
                         "ready": False,
                         "chat_enabled": True,
                         "domain_authorized": True,
                         "session_id": None,
                         "widget_session_token": None,
-                        "reason": "Failed to generate session ID"
+                        "reason": "Failed to generate session ID",
                     }
 
-                logger.info(f"[{correlation_id}] ✅ Session created with PG18 UUIDv7: {session_id}")
+                logger.info(
+                    f"[{correlation_id}] ✅ Session created with PG18 UUIDv7: {session_id}"
+                )
         except Exception as session_err:
             logger.error(f"[{correlation_id}] ❌ Session creation error: {session_err}")
             return {
@@ -410,7 +456,7 @@ async def validate_chat_window_load(request: Request):
                 "domain_authorized": True,
                 "session_id": None,
                 "widget_session_token": None,
-                "reason": f"Failed to create session: {str(session_err)}"
+                "reason": f"Failed to create session: {str(session_err)}",
             }
 
         widget_session_token = issue_widget_session_token(
@@ -425,7 +471,7 @@ async def validate_chat_window_load(request: Request):
             "domain_authorized": True,
             "session_id": session_id,
             "widget_session_token": widget_session_token,
-            "reason": None
+            "reason": None,
         }
 
     except Exception as e:
@@ -436,12 +482,14 @@ async def validate_chat_window_load(request: Request):
             "domain_authorized": False,
             "session_id": None,
             "widget_session_token": None,
-            "reason": f"Chat initialization failed: {str(e)}"
+            "reason": f"Chat initialization failed: {str(e)}",
         }
+
 
 # =================================
 # FIREBASE AUTHENTICATION ENDPOINTS
 # =================================
+
 
 @router.post("/auth/verify")
 @limiter.limit("100/minute")
@@ -451,27 +499,28 @@ async def verify_auth_token(request: Request):
         # Get token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-        
+            raise HTTPException(
+                status_code=401, detail="Missing or invalid authorization header"
+            )
+
         token = auth_header.split(" ")[1]
         user_data = verify_firebase_token(token)
-        
+
         if not user_data:
             raise HTTPException(status_code=401, detail="Invalid token")
-        
-        return {
-            "success": True,
-            "user": user_data
-        }
+
+        return {"success": True, "user": user_data}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error verifying token: {e}")
         raise HTTPException(status_code=500, detail=f"Error verifying token: {str(e)}")
 
+
 # =================================
 # SSE (Server-Sent Events) ENDPOINTS
 # =================================
+
 
 def _prepare_sse_proxy_headers(request: Request) -> dict:
     """Prepare headers for SSE proxy requests to internal services.
@@ -483,9 +532,18 @@ def _prepare_sse_proxy_headers(request: Request) -> dict:
     """
     headers = dict(request.headers)
     # Strip headers that break SSE proxying
-    for h in ["host", "cookie", "accept-encoding", "connection", "keep-alive",
-              "transfer-encoding", "upgrade", "sec-websocket-key",
-              "sec-websocket-version", "sec-websocket-extensions"]:
+    for h in [
+        "host",
+        "cookie",
+        "accept-encoding",
+        "connection",
+        "keep-alive",
+        "transfer-encoding",
+        "upgrade",
+        "sec-websocket-key",
+        "sec-websocket-version",
+        "sec-websocket-extensions",
+    ]:
         headers.pop(h, None)
     _remove_untrusted_identity_headers(headers)
     # Force identity encoding (no compression) for SSE
@@ -504,11 +562,11 @@ def _inject_identity_headers(request: Request, headers: Dict[str, str]) -> None:
     request_user_email = getattr(request.state, "user_email", None)
 
     # Forward auth context if available
-    if hasattr(request.state, 'user'):
-        headers['X-User-UID'] = request.state.user.get('uid') or ''
-        headers['X-User-Email'] = request.state.user.get('email') or ''
-        headers['X-User-Name'] = request.state.user.get('name') or ''
-        headers['X-User-Role'] = request.state.user.get('role') or ''
+    if hasattr(request.state, "user"):
+        headers["X-User-UID"] = request.state.user.get("uid") or ""
+        headers["X-User-Email"] = request.state.user.get("email") or ""
+        headers["X-User-Name"] = request.state.user.get("name") or ""
+        headers["X-User-Role"] = request.state.user.get("role") or ""
         request_user_email = request.state.user.get("email", "") or request_user_email
 
     if request_tenant_id:
@@ -536,8 +594,10 @@ async def proxy_admin_events_sse(request: Request):
 
         headers = _prepare_sse_proxy_headers(request)
         _sign_internal_headers(headers, method="GET", path_or_url=full_url)
-        if hasattr(request.state, 'user'):
-            logger.info(f"✅ Forwarding user headers for SSE: {request.state.user.get('email')}")
+        if hasattr(request.state, "user"):
+            logger.info(
+                f"✅ Forwarding user headers for SSE: {request.state.user.get('email')}"
+            )
         else:
             logger.warning("⚠️ No user found in request.state - authentication may fail")
 
@@ -548,8 +608,12 @@ async def proxy_admin_events_sse(request: Request):
             try:
                 logger.info(f"📡 Starting httpx stream for admin SSE")
                 async with httpx.AsyncClient(timeout=sse_timeout) as client:
-                    async with client.stream("GET", full_url, headers=headers) as response:
-                        logger.info(f"📡 httpx stream connected, status: {response.status_code}")
+                    async with client.stream(
+                        "GET", full_url, headers=headers
+                    ) as response:
+                        logger.info(
+                            f"📡 httpx stream connected, status: {response.status_code}"
+                        )
                         async for chunk in response.aiter_bytes():
                             yield chunk
                         logger.info(f"📡 httpx stream ended for admin SSE")
@@ -561,11 +625,16 @@ async def proxy_admin_events_sse(request: Request):
                 yield f"event: error\ndata: Backend connection timeout\n\n".encode()
             except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
                 # Client disconnected - this is expected and normal, log at debug level
-                logger.debug(f"🔌 Client disconnected from admin SSE stream: {type(e).__name__}")
+                logger.debug(
+                    f"🔌 Client disconnected from admin SSE stream: {type(e).__name__}"
+                )
             except Exception as e:
                 # Only log unexpected errors
                 error_msg = str(e)
-                if "peer closed connection" not in error_msg.lower() and "incomplete chunked read" not in error_msg.lower():
+                if (
+                    "peer closed connection" not in error_msg.lower()
+                    and "incomplete chunked read" not in error_msg.lower()
+                ):
                     logger.error(f"❌ Error in SSE stream: {e}")
                 else:
                     logger.debug(f"🔌 Client disconnection during SSE stream: {e}")
@@ -576,16 +645,19 @@ async def proxy_admin_events_sse(request: Request):
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
-            }
+                "X-Accel-Buffering": "no",
+            },
         )
 
     except Exception as e:
         logger.error(f"❌ Error setting up SSE proxy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/configuration/customer/events")
-async def proxy_customer_events_sse(request: Request, session_id: str = Query(..., description="Session UUID")):
+async def proxy_customer_events_sse(
+    request: Request, session_id: str = Query(..., description="Session UUID")
+):
     """
     Proxy SSE endpoint for customer events.
     SSE requires special handling - no timeout, streaming response.
@@ -596,7 +668,9 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
         config_service_url = settings.configuration_service_url
         full_url = f"{config_service_url}/api/v1/configuration/customer/events?session_id={session_id}"
 
-        logger.info(f"🔄 Proxying customer SSE stream to: {full_url} (session: {session_id})")
+        logger.info(
+            f"🔄 Proxying customer SSE stream to: {full_url} (session: {session_id})"
+        )
 
         headers = _prepare_sse_proxy_headers(request)
         _sign_internal_headers(headers, method="GET", path_or_url=full_url)
@@ -608,27 +682,42 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
             try:
                 logger.info(f"📡 Starting httpx stream for session {session_id}")
                 async with httpx.AsyncClient(timeout=sse_timeout) as client:
-                    async with client.stream("GET", full_url, headers=headers) as response:
-                        logger.info(f"📡 httpx stream connected, status: {response.status_code}")
+                    async with client.stream(
+                        "GET", full_url, headers=headers
+                    ) as response:
+                        logger.info(
+                            f"📡 httpx stream connected, status: {response.status_code}"
+                        )
                         async for chunk in response.aiter_bytes():
                             yield chunk
                         logger.info(f"📡 httpx stream ended for session {session_id}")
             except httpx.ConnectError as e:
-                logger.error(f"❌ Cannot connect to config service for customer SSE ({session_id}): {e}")
+                logger.error(
+                    f"❌ Cannot connect to config service for customer SSE ({session_id}): {e}"
+                )
                 yield f"event: error\ndata: Connection to backend failed\n\n".encode()
             except httpx.ConnectTimeout as e:
-                logger.error(f"❌ Connection timeout for customer SSE ({session_id}): {e}")
+                logger.error(
+                    f"❌ Connection timeout for customer SSE ({session_id}): {e}"
+                )
                 yield f"event: error\ndata: Backend connection timeout\n\n".encode()
             except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
                 # Client disconnected - this is expected and normal, log at debug level
-                logger.debug(f"🔌 Client disconnected from customer SSE stream (session {session_id}): {type(e).__name__}")
+                logger.debug(
+                    f"🔌 Client disconnected from customer SSE stream (session {session_id}): {type(e).__name__}"
+                )
             except Exception as e:
                 # Only log unexpected errors
                 error_msg = str(e)
-                if "peer closed connection" not in error_msg.lower() and "incomplete chunked read" not in error_msg.lower():
+                if (
+                    "peer closed connection" not in error_msg.lower()
+                    and "incomplete chunked read" not in error_msg.lower()
+                ):
                     logger.error(f"❌ Error in customer SSE stream: {e}")
                 else:
-                    logger.debug(f"🔌 Client disconnection during customer SSE stream (session {session_id}): {e}")
+                    logger.debug(
+                        f"🔌 Client disconnection during customer SSE stream (session {session_id}): {e}"
+                    )
 
         return StreamingResponse(
             event_stream(),
@@ -636,8 +725,8 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
-            }
+                "X-Accel-Buffering": "no",
+            },
         )
 
     except Exception as e:
@@ -649,20 +738,23 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
 # AGENT MESSAGE PROXY
 # =================================
 
+
 @router.post("/configuration/admin/chat-sessions/messages")
 async def proxy_agent_message(request: Request):
     """Proxy agent messages - converts session UUID to numeric ID before forwarding"""
     try:
         logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Proxy endpoint called")
-        logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Request headers: {dict(request.headers)}")
-        
+        logger.info(
+            f"🔍 [AGENT_MESSAGE_PROXY] Request headers: {dict(request.headers)}"
+        )
+
         settings = get_settings()
         config_service_url = settings.configuration_service_url  # Lowercase!
-        
+
         # Get request body
         body = await request.json()
         logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Request body: {body}")
-        
+
         session_id = body.get("session_id")
 
         if not session_id:
@@ -670,7 +762,9 @@ async def proxy_agent_message(request: Request):
             raise HTTPException(status_code=400, detail="session_id is required")
 
         # PG18: session_id IS the UUIDv7 PK — no conversion needed
-        logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Received agent message for session: {session_id}")
+        logger.info(
+            f"🔍 [AGENT_MESSAGE_PROXY] Received agent message for session: {session_id}"
+        )
 
         # CRITICAL: Set agent_id from authenticated user (NOT from body)
         # Read from request.state (set by SessionAuthMiddleware after Firebase verification)
@@ -678,9 +772,13 @@ async def proxy_agent_message(request: Request):
         user_email = getattr(request.state, "user_email", "")
         if user_email:
             body["agent_id"] = user_email
-            logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Set agent_id from authenticated user: {user_email}")
+            logger.info(
+                f"🔍 [AGENT_MESSAGE_PROXY] Set agent_id from authenticated user: {user_email}"
+            )
         else:
-            logger.warning(f"⚠️ [AGENT_MESSAGE_PROXY] No authenticated user email found in request state")
+            logger.warning(
+                f"⚠️ [AGENT_MESSAGE_PROXY] No authenticated user email found in request state"
+            )
 
         # Forward to configuration service with authenticated user info
         forward_headers = {
@@ -702,19 +800,27 @@ async def proxy_agent_message(request: Request):
                 json=body,
                 headers=forward_headers,
             )
-            
-            logger.info(f"✅ [AGENT_MESSAGE_PROXY] Forwarded message to configuration service, status: {response.status_code}")
-            
+
+            logger.info(
+                f"✅ [AGENT_MESSAGE_PROXY] Forwarded message to configuration service, status: {response.status_code}"
+            )
+
             if response.status_code != 200:
-                logger.error(f"❌ [AGENT_MESSAGE_PROXY] Configuration service returned error: {response.text}")
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-            
+                logger.error(
+                    f"❌ [AGENT_MESSAGE_PROXY] Configuration service returned error: {response.text}"
+                )
+                raise HTTPException(
+                    status_code=response.status_code, detail=response.text
+                )
+
             return response.json()
-            
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [AGENT_MESSAGE_PROXY] Error proxying agent message: {e}", exc_info=True)
+        logger.error(
+            f"❌ [AGENT_MESSAGE_PROXY] Error proxying agent message: {e}", exc_info=True
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -725,15 +831,13 @@ async def get_user_by_uid(uid: str):
         user_data = get_user_from_firebase(uid)
         if not user_data:
             raise HTTPException(status_code=404, detail=f"User not found: {uid}")
-        return {
-            "success": True,
-            "user": user_data
-        }
+        return {"success": True, "user": user_data}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting user by UID {uid}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting user: {str(e)}")
+
 
 @router.post("/auth/login")
 async def login_user(request: Request):
@@ -742,24 +846,23 @@ async def login_user(request: Request):
         # Get token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-        
+            raise HTTPException(
+                status_code=401, detail="Missing or invalid authorization header"
+            )
+
         token = auth_header.split(" ")[1]
         user_data = verify_firebase_token(token)
-        
+
         if not user_data:
             raise HTTPException(status_code=401, detail="Invalid token")
-        
-        return {
-            "success": True,
-            "user": user_data,
-            "message": "Login successful"
-        }
+
+        return {"success": True, "user": user_data, "message": "Login successful"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error during login: {e}")
         raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
+
 
 @router.post("/users/switch-role")
 async def switch_user_role(request: Request):
@@ -779,7 +882,9 @@ async def switch_user_role(request: Request):
         # Validate role is one of the allowed values
         valid_roles = ["admin", "agent", "customer"]  # Backend API expects these
         if new_role not in valid_roles:
-            raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {valid_roles}")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid role. Must be one of: {valid_roles}"
+            )
 
         logger.info(f"🔄 Switching user {uid} to role: {new_role}")
 
@@ -805,9 +910,13 @@ async def switch_user_role(request: Request):
 
                 if not current_roles:
                     logger.warning(f"⚠️ User {uid} has no current roles")
-                    raise HTTPException(status_code=404, detail="User has no current roles")
+                    raise HTTPException(
+                        status_code=404, detail="User has no current roles"
+                    )
 
-                logger.info(f"📋 User {uid} current roles: {[r['role_name'] for r in current_roles]}")
+                logger.info(
+                    f"📋 User {uid} current roles: {[r['role_name'] for r in current_roles]}"
+                )
 
                 # Step 2: Remove all current roles
                 for current_role in current_roles:
@@ -818,10 +927,10 @@ async def switch_user_role(request: Request):
                           AND role_id = :role_id
                           AND tenant_id = current_tenant_id_optional()
                     """)
-                    await session.execute(remove_query, {
-                        "user_id": user_id,
-                        "role_id": current_role['role_id']
-                    })
+                    await session.execute(
+                        remove_query,
+                        {"user_id": user_id, "role_id": current_role["role_id"]},
+                    )
                     logger.info(f"✂️ Removed role: {current_role['role_name']}")
 
                 # Step 3: Get the ID of the new role
@@ -833,9 +942,11 @@ async def switch_user_role(request: Request):
 
                 if not new_role_row:
                     logger.error(f"❌ Role '{new_role}' not found in database")
-                    raise HTTPException(status_code=400, detail=f"Role '{new_role}' not found")
+                    raise HTTPException(
+                        status_code=400, detail=f"Role '{new_role}' not found"
+                    )
 
-                new_role_id = new_role_row['id']
+                new_role_id = new_role_row["id"]
 
                 # Step 4: Add new role
                 add_query = text("""
@@ -844,10 +955,9 @@ async def switch_user_role(request: Request):
                     ON CONFLICT (user_id, role_id, tenant_id) DO UPDATE
                     SET is_active = true, updated_at = NOW()
                 """)
-                await session.execute(add_query, {
-                    "user_id": user_id,
-                    "role_id": new_role_id
-                })
+                await session.execute(
+                    add_query, {"user_id": user_id, "role_id": new_role_id}
+                )
                 logger.info(f"➕ Added new role: {new_role}")
 
                 # Commit all changes
@@ -859,14 +969,16 @@ async def switch_user_role(request: Request):
                 "success": True,
                 "message": f"Role switched to {new_role}",
                 "uid": uid,
-                "role": new_role
+                "role": new_role,
             }
 
         except HTTPException:
             raise
         except Exception as db_error:
             logger.error(f"❌ Error updating database: {db_error}")
-            raise HTTPException(status_code=500, detail=f"Error switching role: {str(db_error)}")
+            raise HTTPException(
+                status_code=500, detail=f"Error switching role: {str(db_error)}"
+            )
 
     except HTTPException:
         raise
@@ -874,9 +986,11 @@ async def switch_user_role(request: Request):
         logger.error(f"Error switching user role: {e}")
         raise HTTPException(status_code=500, detail=f"Error switching role: {str(e)}")
 
+
 # =================================
 # PUBLIC CHAT ENDPOINTS (No Authentication Required)
 # =================================
+
 
 @router.post("/chatbot/chat/stream")
 @limiter.limit("50/minute")
@@ -886,7 +1000,9 @@ async def public_chat_stream(request: Request):
         import httpx
         from ..core.config import get_settings
 
-        is_authenticated_session = hasattr(request.state, "user") or _apply_authenticated_session_context(request)
+        is_authenticated_session = hasattr(
+            request.state, "user"
+        ) or _apply_authenticated_session_context(request)
         if not is_authenticated_session:
             _require_public_widget_context(
                 request,
@@ -915,8 +1031,13 @@ async def public_chat_stream(request: Request):
         chatbot_service_url = settings.chatbot_orchestration_url
 
         # Correlation ID for end-to-end tracing across gateway -> chatbot service
-        from shared.correlation_id import get_correlation_id, add_correlation_id_headers, set_correlation_id
+        from shared.correlation_id import (
+            get_correlation_id,
+            add_correlation_id_headers,
+            set_correlation_id,
+        )
         from shared.otel_logger import set_request_id
+
         correlation_id = request.headers.get("X-Correlation-ID") or get_correlation_id()
         set_correlation_id(correlation_id)
         set_request_id(correlation_id)
@@ -944,27 +1065,37 @@ async def public_chat_stream(request: Request):
 
         async def stream_response():
             try:
-                async with httpx.AsyncClient(timeout=sse_timeout, follow_redirects=False) as client:
+                async with httpx.AsyncClient(
+                    timeout=sse_timeout, follow_redirects=False
+                ) as client:
                     async with client.stream(
                         method=request.method,
                         url=stream_url,
                         headers=headers,
                         content=body_bytes,
                     ) as response:
-                        logger.info(f"✅ [{correlation_id}] Chat stream connected: {response.status_code}")
+                        logger.info(
+                            f"✅ [{correlation_id}] Chat stream connected: {response.status_code}"
+                        )
                         async for chunk in response.aiter_bytes():
                             yield chunk
             except httpx.ConnectError as e:
-                logger.error(f"❌ [{correlation_id}] Cannot connect to chatbot service: {e}")
-                yield f"data: {{\"type\":\"error\",\"content\":\"Connection to backend failed\"}}\n\n".encode()
+                logger.error(
+                    f"❌ [{correlation_id}] Cannot connect to chatbot service: {e}"
+                )
+                yield f'data: {{"type":"error","content":"Connection to backend failed"}}\n\n'.encode()
             except httpx.ConnectTimeout as e:
-                logger.error(f"❌ [{correlation_id}] Connection timeout to chatbot service: {e}")
-                yield f"data: {{\"type\":\"error\",\"content\":\"Backend connection timeout\"}}\n\n".encode()
+                logger.error(
+                    f"❌ [{correlation_id}] Connection timeout to chatbot service: {e}"
+                )
+                yield f'data: {{"type":"error","content":"Backend connection timeout"}}\n\n'.encode()
             except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
-                logger.debug(f"🔌 [{correlation_id}] Client disconnected from chat stream: {type(e).__name__}")
+                logger.debug(
+                    f"🔌 [{correlation_id}] Client disconnected from chat stream: {type(e).__name__}"
+                )
             except Exception as e:
                 logger.error(f"❌ [{correlation_id}] Chat stream error: {e}")
-                yield f"data: {{\"type\":\"error\",\"content\":\"Stream error\"}}\n\n".encode()
+                yield f'data: {{"type":"error","content":"Stream error"}}\n\n'.encode()
 
         return StreamingResponse(
             stream_response(),
@@ -978,10 +1109,10 @@ async def public_chat_stream(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 # =================================
 # PROFILING PROXY ENDPOINTS (Admin only - auth required)
 # =================================
+
 
 @router.get("/chatbot/profiling/{path:path}")
 async def proxy_profiling(request: Request, path: str):
@@ -1000,11 +1131,17 @@ async def proxy_profiling(request: Request, path: str):
             content_type = resp.headers.get("content-type", "")
             # Pass through HTML/text responses as-is (for the dashboard)
             if "text/html" in content_type:
-                return Response(content=resp.content, status_code=resp.status_code,
-                                media_type="text/html")
+                return Response(
+                    content=resp.content,
+                    status_code=resp.status_code,
+                    media_type="text/html",
+                )
             if "text/plain" in content_type:
-                return Response(content=resp.content, status_code=resp.status_code,
-                                media_type="text/plain")
+                return Response(
+                    content=resp.content,
+                    status_code=resp.status_code,
+                    media_type="text/plain",
+                )
             return JSONResponse(content=resp.json(), status_code=resp.status_code)
     except Exception as e:
         logger.error(f"Profiling proxy error: {e}")
@@ -1014,6 +1151,7 @@ async def proxy_profiling(request: Request, path: str):
 # =================================
 # PUBLIC WIDGET CONFIGURATION ENDPOINT (No Authentication Required)
 # =================================
+
 
 @router.get("/configuration/widgetConfig")
 async def get_widget_config(request: Request):
@@ -1041,10 +1179,16 @@ async def get_widget_config(request: Request):
 
             if response.status_code == 200:
                 config_data = response.json()
-                logger.info(f"✓ Widget config loaded: display_name={config_data.get('display_name')}, has_icon={bool(config_data.get('chat_icon_url'))}")
-                logger.info(f"📋 Suggested messages in response: {len(config_data.get('suggested_messages', []))}")
-                if config_data.get('suggested_messages'):
-                    for i, msg in enumerate(config_data.get('suggested_messages', []), 1):
+                logger.info(
+                    f"✓ Widget config loaded: display_name={config_data.get('display_name')}, has_icon={bool(config_data.get('chat_icon_url'))}"
+                )
+                logger.info(
+                    f"📋 Suggested messages in response: {len(config_data.get('suggested_messages', []))}"
+                )
+                if config_data.get("suggested_messages"):
+                    for i, msg in enumerate(
+                        config_data.get("suggested_messages", []), 1
+                    ):
                         logger.info(f"   [{i}] {msg}")
                 # Explicitly set CORS headers for public endpoint
                 return JSONResponse(
@@ -1054,20 +1198,28 @@ async def get_widget_config(request: Request):
                         "Access-Control-Allow-Origin": "*",
                         "Access-Control-Allow-Methods": "GET, OPTIONS",
                         "Access-Control-Allow-Headers": "*",
-                    }
+                    },
                 )
             else:
-                logger.error(f"❌ Config service returned {response.status_code}: {response.text[:200]}")
-                raise HTTPException(status_code=response.status_code, detail="Failed to load widget configuration")
+                logger.error(
+                    f"❌ Config service returned {response.status_code}: {response.text[:200]}"
+                )
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail="Failed to load widget configuration",
+                )
 
     except Exception as e:
         logger.error(f"❌ Error proxying widget config: {e}")
-        raise HTTPException(status_code=500, detail=f"Error loading widget configuration: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error loading widget configuration: {str(e)}"
+        )
 
 
 # =================================
 # ADMIN WIDGET CONFIGURATION ENDPOINT (Authentication Required)
 # =================================
+
 
 @router.get("/configuration/admin/widgetConfig")
 async def get_admin_widget_config(request: Request):
@@ -1092,13 +1244,19 @@ async def get_admin_widget_config(request: Request):
 
             if response.status_code == 200:
                 config_data = response.json()
-                logger.info(f"✓ Admin widget config loaded: display_name={config_data.get('display_name')}")
-                logger.info(f"📋 Suggested messages in response: {len(config_data.get('suggested_messages', []))}")
-                if config_data.get('suggested_messages'):
-                    for i, msg in enumerate(config_data.get('suggested_messages', []), 1):
+                logger.info(
+                    f"✓ Admin widget config loaded: display_name={config_data.get('display_name')}"
+                )
+                logger.info(
+                    f"📋 Suggested messages in response: {len(config_data.get('suggested_messages', []))}"
+                )
+                if config_data.get("suggested_messages"):
+                    for i, msg in enumerate(
+                        config_data.get("suggested_messages", []), 1
+                    ):
                         logger.info(f"   [{i}] {msg}")
                 # Return with specific origin and credentials allowed
-                origin = request.headers.get('origin', '*')
+                origin = request.headers.get("origin", "*")
                 return JSONResponse(
                     content=config_data,
                     status_code=200,
@@ -1107,15 +1265,22 @@ async def get_admin_widget_config(request: Request):
                         "Access-Control-Allow-Methods": "GET, OPTIONS",
                         "Access-Control-Allow-Headers": "*",
                         "Access-Control-Allow-Credentials": "true",
-                    }
+                    },
                 )
             else:
-                logger.error(f"❌ Config service returned {response.status_code}: {response.text[:200]}")
-                raise HTTPException(status_code=response.status_code, detail="Failed to load widget configuration")
+                logger.error(
+                    f"❌ Config service returned {response.status_code}: {response.text[:200]}"
+                )
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail="Failed to load widget configuration",
+                )
 
     except Exception as e:
         logger.error(f"❌ Error proxying admin widget config: {e}")
-        raise HTTPException(status_code=500, detail=f"Error loading widget configuration: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error loading widget configuration: {str(e)}"
+        )
 
 
 @router.post("/configuration/admin/widgetConfig")
@@ -1134,23 +1299,23 @@ async def save_admin_widget_config(request: Request):
         body = await request.body()
         content_type = request.headers.get("content-type", "application/json")
 
-        logger.info(f"🔄 Proxying admin widget config save request to: {full_url} (content-type: {content_type[:50]})")
+        logger.info(
+            f"🔄 Proxying admin widget config save request to: {full_url} (content-type: {content_type[:50]})"
+        )
         forward_headers: Dict[str, str] = {"Content-Type": content_type}
         _inject_identity_headers(request, forward_headers)
         _sign_internal_headers(forward_headers, method="POST", path_or_url=full_url)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                full_url,
-                content=body,
-                headers=forward_headers
+                full_url, content=body, headers=forward_headers
             )
 
             if response.status_code in [200, 201]:
                 config_data = response.json()
                 logger.info(f"✓ Admin widget config saved")
                 # Return with specific origin and credentials allowed
-                origin = request.headers.get('origin', '*')
+                origin = request.headers.get("origin", "*")
                 return JSONResponse(
                     content=config_data,
                     status_code=response.status_code,
@@ -1159,21 +1324,28 @@ async def save_admin_widget_config(request: Request):
                         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                         "Access-Control-Allow-Headers": "*",
                         "Access-Control-Allow-Credentials": "true",
-                    }
+                    },
                 )
             else:
-                logger.error(f"❌ Config service returned {response.status_code}: {response.text[:200]}")
-                raise HTTPException(status_code=response.status_code, detail="Failed to save widget configuration")
+                logger.error(
+                    f"❌ Config service returned {response.status_code}: {response.text[:200]}"
+                )
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail="Failed to save widget configuration",
+                )
 
     except Exception as e:
         logger.error(f"❌ Error proxying admin widget config save: {e}")
-        raise HTTPException(status_code=500, detail=f"Error saving widget configuration: {str(e)}")
-
+        raise HTTPException(
+            status_code=500, detail=f"Error saving widget configuration: {str(e)}"
+        )
 
 
 # =================================
 # PUBLIC WIDGET ENDPOINT (No Authentication Required)
 # =================================
+
 
 @router.get("/widget")
 async def public_widget(request: Request):
@@ -1187,7 +1359,7 @@ async def public_widget(request: Request):
         primary_color = request.query_params.get("primaryColor", "#3b82f6")
         display_name = request.query_params.get("displayName", "AI Assistant")
         widget_token = extract_widget_access_token(request)
-        
+
         # Generate HTML page with embedded chat widget
         html_content = f"""
 <!DOCTYPE html>
@@ -1239,38 +1411,48 @@ async def public_widget(request: Request):
 </body>
 </html>
         """
-        
+
         from fastapi.responses import HTMLResponse
+
         return HTMLResponse(content=html_content)
-        
+
     except Exception as e:
         logger.error(f"Error in public widget: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # =================================
 # GENERIC SERVICE PROXY HANDLER (catches ALL requests)
 # =================================
 
-@router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+
+@router.api_route(
+    "/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+)
 async def generic_proxy_handler(request: Request, path: str):
     """Generic proxy handler that routes ALL requests to appropriate services"""
     # Correlation ID for end-to-end tracing across gateway -> internal services.
-    from shared.correlation_id import get_correlation_id, set_correlation_id, add_correlation_id_headers
+    from shared.correlation_id import (
+        get_correlation_id,
+        set_correlation_id,
+        add_correlation_id_headers,
+    )
     from shared.otel_logger import set_request_id
+
     correlation_id = request.headers.get("X-Correlation-ID") or get_correlation_id()
     set_correlation_id(correlation_id)
     set_request_id(correlation_id)
     # Request/response are already logged by middleware; keep proxy handler logs minimal.
     logger.debug(f"[proxy] {request.method} {request.url.path}")
-    
+
     try:
         import httpx
         from ..core.config import get_settings
-        
+
         # Skip auth endpoints - handle them specifically
         if path.startswith("auth/"):
             return await handle_auth_endpoints(request, path)
-        
+
         # Determine service based on URL path
         service_url = None
 
@@ -1285,7 +1467,11 @@ async def generic_proxy_handler(request: Request, path: str):
             clean_path = path
 
         # Remove gateway/ prefix for backend service routing
-        backend_path = clean_path.replace("gateway/", "", 1) if clean_path.startswith("gateway/") else clean_path
+        backend_path = (
+            clean_path.replace("gateway/", "", 1)
+            if clean_path.startswith("gateway/")
+            else clean_path
+        )
 
         # Determine service routing
         # Backend services register routers with /api/v1/{service_name} prefix
@@ -1306,7 +1492,13 @@ async def generic_proxy_handler(request: Request, path: str):
         elif backend_path.startswith("webcrawl"):
             service_url = get_settings().knowledgebase_ingestion_url
             logger.debug("Routing webcrawl to knowledgebase_ingestion service")
-        elif backend_path.startswith("admin/") or backend_path.startswith("users/") or backend_path.startswith("widget/") or backend_path.startswith("feedback") or backend_path.startswith("messages/"):
+        elif (
+            backend_path.startswith("admin/")
+            or backend_path.startswith("users/")
+            or backend_path.startswith("widget/")
+            or backend_path.startswith("feedback")
+            or backend_path.startswith("messages/")
+        ):
             # These are all configuration service endpoints but without the service prefix
             # Need to add "configuration/" prefix for proper routing
             service_url = get_settings().configuration_service_url
@@ -1315,8 +1507,7 @@ async def generic_proxy_handler(request: Request, path: str):
         else:
             logger.error(f"❌ Unknown path: {backend_path}")
             return JSONResponse(
-                status_code=404,
-                content={"error": f"Unknown path: {backend_path}"}
+                status_code=404, content={"error": f"Unknown path: {backend_path}"}
             )
 
         # Construct full URL for internal service communication
@@ -1333,24 +1524,46 @@ async def generic_proxy_handler(request: Request, path: str):
         headers = add_correlation_id_headers(headers, correlation_id)
         _inject_identity_headers(request, headers)
         _sign_internal_headers(headers, method=request.method, path_or_url=upstream_url)
-        
+
+        # Forward session cookie to internal services for session validation
+        settings = get_settings()
+        session_cookie = request.cookies.get(settings.session_cookie_name)
+        if session_cookie:
+            headers["Cookie"] = f"{settings.session_cookie_name}={session_cookie}"
+            logger.debug(f"🍪 Forwarding session cookie to internal service")
+
         # Make HTTP request to service
         # Use longer timeout for batch operations (file uploads/deletes) and complex queries
         # NOTE: webcrawl uses async Celery, returns immediately with task ID (no long timeout needed)
         request_timeout = 30.0
-        if "chatAgentConfig" in backend_path or "configuration/chatAgentConfig" in backend_path:
+        if (
+            "chatAgentConfig" in backend_path
+            or "configuration/chatAgentConfig" in backend_path
+        ):
             request_timeout = 60.0  # Configuration aggregates multiple DB queries
-            logger.info(f"⏱️  Using extended timeout {request_timeout}s for chatAgentConfig (multiple parallel queries)")
-        elif "batch" in backend_path or "batchupload" in backend_path or "delete/batch" in backend_path:
+            logger.info(
+                f"⏱️  Using extended timeout {request_timeout}s for chatAgentConfig (multiple parallel queries)"
+            )
+        elif (
+            "batch" in backend_path
+            or "batchupload" in backend_path
+            or "delete/batch" in backend_path
+        ):
             request_timeout = 300.0  # 5 minutes for batch operations
-            logger.info(f"⏱️  Using extended timeout {request_timeout}s for batch operation")
+            logger.info(
+                f"⏱️  Using extended timeout {request_timeout}s for batch operation"
+            )
         # webcrawl/async returns immediately (task dispatched to Celery), no extended timeout needed
         # if backend_path.startswith("webcrawl"):
         #     request_timeout = 600.0  # Was for sync scraping - NO LONGER NEEDED
         #     logger.info(f"⏱️  Using extended timeout {request_timeout}s for web crawling")
 
-        async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=False) as client:
-            logger.info(f"🔍 About to make HTTP request to: {upstream_url} (timeout={request_timeout}s)")
+        async with httpx.AsyncClient(
+            timeout=request_timeout, follow_redirects=False
+        ) as client:
+            logger.info(
+                f"🔍 About to make HTTP request to: {upstream_url} (timeout={request_timeout}s)"
+            )
 
             # For SSE and other streaming responses, we need special handling
             # Check content-type to decide how to handle the response
@@ -1361,14 +1574,15 @@ async def generic_proxy_handler(request: Request, path: str):
             # Internal services ONLY accept numeric session_id (never UUID)
             # EXCEPTION: set-current endpoints intentionally accept UUIDs
             should_ensure_session_id = (
-                request_body and
-                request.method in ["POST", "PUT", "PATCH"] and
-                "set-current" not in full_url
+                request_body
+                and request.method in ["POST", "PUT", "PATCH"]
+                and "set-current" not in full_url
             )
 
             if should_ensure_session_id:
                 try:
                     import json
+
                     body_data = json.loads(request_body)
 
                     # Check if request has session_id
@@ -1376,12 +1590,19 @@ async def generic_proxy_handler(request: Request, path: str):
                         client_session_id = body_data["session_id"]
 
                         # PG18: session_id IS the UUIDv7 PK — pass through directly, no resolution needed
-                        logger.debug(f"PG18: Passing session_id through: {client_session_id}")
+                        logger.debug(
+                            f"PG18: Passing session_id through: {client_session_id}"
+                        )
                     else:
                         # No session_id in body - try to inject from cookie if available
-                        if hasattr(request.state, "session_id") and request.state.session_id:
+                        if (
+                            hasattr(request.state, "session_id")
+                            and request.state.session_id
+                        ):
                             body_data["session_id"] = request.state.session_id
-                            logger.info(f"✅ Injected session_id from cookie into body: {request.state.session_id}")
+                            logger.info(
+                                f"✅ Injected session_id from cookie into body: {request.state.session_id}"
+                            )
 
                     request_body = json.dumps(body_data).encode()
 
@@ -1402,27 +1623,31 @@ async def generic_proxy_handler(request: Request, path: str):
                 url=full_url,
                 headers=headers,
                 content=request_body,
-                params=request.query_params
+                params=request.query_params,
             )
-            logger.info(f"✅ Received response from {upstream_url} (Status: {response.status_code})")
+            logger.info(
+                f"✅ Received response from {upstream_url} (Status: {response.status_code})"
+            )
 
             # Create proper FastAPI Response from httpx response
             from fastapi.responses import StreamingResponse, Response
 
             # Check if response contains a session UUID that needs to be set in httpOnly cookie
-            session_uuid_from_response = response.headers.get("X-Session-UUID") or response.headers.get("x-session-uuid")
+            session_uuid_from_response = response.headers.get(
+                "X-Session-UUID"
+            ) or response.headers.get("x-session-uuid")
 
             # Copy headers from httpx response to FastAPI response
             # CRITICAL: Filter out headers that might contain internal URLs
             response_headers = {}
             blocked_headers = [
-                'content-length',
-                'transfer-encoding',
-                'location',  # Prevent internal redirects from leaking
-                'content-location',  # Prevent internal URLs in content location
-                'host',  # Don't expose internal host
-                'server',  # Don't expose server details
-                'x-session-uuid',  # Remove internal header from response
+                "content-length",
+                "transfer-encoding",
+                "location",  # Prevent internal redirects from leaking
+                "content-location",  # Prevent internal URLs in content location
+                "host",  # Don't expose internal host
+                "server",  # Don't expose server details
+                "x-session-uuid",  # Remove internal header from response
             ]
             for key, value in response.headers.items():
                 # Skip headers that might contain internal URLs or cause issues
@@ -1433,26 +1658,30 @@ async def generic_proxy_handler(request: Request, path: str):
             response_obj = Response(
                 content=response.content,
                 status_code=response.status_code,
-                headers=response_headers
+                headers=response_headers,
             )
 
             # CRITICAL: Handle Set-Cookie headers separately (can have multiple)
             # httpx response.headers.get_list() returns all values for a header
-            set_cookie_headers = response.headers.get_list('set-cookie')
+            set_cookie_headers = response.headers.get_list("set-cookie")
             for cookie_header in set_cookie_headers:
-                logger.info(f"🍪 Forwarding Set-Cookie header from backend: {cookie_header[:50]}...")
-                response_obj.headers.append('set-cookie', cookie_header)
+                logger.info(
+                    f"🍪 Forwarding Set-Cookie header from backend: {cookie_header[:50]}..."
+                )
+                response_obj.headers.append("set-cookie", cookie_header)
 
             # If response contains session UUID, set httpOnly cookie
             if session_uuid_from_response:
-                logger.info(f"🍪 Setting httpOnly cookie for session UUID: {session_uuid_from_response}")
+                logger.info(
+                    f"🍪 Setting httpOnly cookie for session UUID: {session_uuid_from_response}"
+                )
                 response_obj.set_cookie(
                     key="chatbot_session_id",
                     value=session_uuid_from_response,
                     httponly=True,
                     secure=True,
                     samesite="Strict",
-                    max_age=60 * 60 * 24  # 24 hours
+                    max_age=60 * 60 * 24,  # 24 hours
                 )
 
             return response_obj
@@ -1460,33 +1689,51 @@ async def generic_proxy_handler(request: Request, path: str):
         logger.error(f"❌ Connection failed to {full_url}: {e}")
         logger.error(f"❌ Service URL: {service_url}")
         logger.error(f"❌ This might mean the service is down or not accessible")
-        logger.warning(f"⚠️  Attempting retry for service wake-up (Railway sleep/wake cycle)...")
-        
+        logger.warning(
+            f"⚠️  Attempting retry for service wake-up (Railway sleep/wake cycle)..."
+        )
+
         # Retry logic for Railway services that might be sleeping
         retry_delays = [1.0, 2.0, 3.0]  # Exponential backoff for service wake-up
         for attempt, delay in enumerate(retry_delays, 1):
             try:
-                logger.info(f"🔄 Retry attempt {attempt}/{len(retry_delays)} after {delay}s delay...")
+                logger.info(
+                    f"🔄 Retry attempt {attempt}/{len(retry_delays)} after {delay}s delay..."
+                )
                 await asyncio.sleep(delay)
-                
-                async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=False) as retry_client:
+
+                async with httpx.AsyncClient(
+                    timeout=request_timeout, follow_redirects=False
+                ) as retry_client:
                     retry_response = await retry_client.request(
                         method=request.method,
                         url=full_url,
                         headers=headers,
-                        content=body if request.method in ["POST", "PUT", "PATCH"] else None,
-                        params=dict(request.query_params) if request.query_params else None,
+                        content=body
+                        if request.method in ["POST", "PUT", "PATCH"]
+                        else None,
+                        params=dict(request.query_params)
+                        if request.query_params
+                        else None,
                     )
-                    logger.info(f"✅ Retry successful! Status: {retry_response.status_code}")
-                    
+                    logger.info(
+                        f"✅ Retry successful! Status: {retry_response.status_code}"
+                    )
+
                     # Handle streaming responses
-                    if "text/event-stream" in retry_response.headers.get("content-type", ""):
+                    if "text/event-stream" in retry_response.headers.get(
+                        "content-type", ""
+                    ):
+
                         async def retry_stream():
                             async with retry_response:
                                 async for chunk in retry_response.aiter_bytes():
                                     yield chunk
-                        return StreamingResponse(retry_stream(), media_type="text/event-stream")
-                    
+
+                        return StreamingResponse(
+                            retry_stream(), media_type="text/event-stream"
+                        )
+
                     return Response(
                         content=retry_response.content,
                         status_code=retry_response.status_code,
@@ -1494,44 +1741,71 @@ async def generic_proxy_handler(request: Request, path: str):
                     )
             except (httpx.ConnectError, httpx.TimeoutException) as retry_error:
                 if attempt < len(retry_delays):
-                    logger.warning(f"⚠️  Retry {attempt} failed: {retry_error}, will retry again...")
+                    logger.warning(
+                        f"⚠️  Retry {attempt} failed: {retry_error}, will retry again..."
+                    )
                     continue
                 else:
-                    logger.error(f"❌ All retry attempts failed. Service is not responding.")
-                    raise HTTPException(status_code=503, detail=f"Service unavailable after retries: {service_url}")
-        
-        raise HTTPException(status_code=503, detail=f"Service unavailable: {service_url}")
+                    logger.error(
+                        f"❌ All retry attempts failed. Service is not responding."
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Service unavailable after retries: {service_url}",
+                    )
+
+        raise HTTPException(
+            status_code=503, detail=f"Service unavailable: {service_url}"
+        )
     except httpx.TimeoutException as e:
         logger.error(f"❌ Request timeout to {full_url}: {e}")
         logger.error(f"❌ Service URL: {service_url}")
-        logger.error(f"❌ This could mean: service is slow, processing large files, or service is overloaded")
+        logger.error(
+            f"❌ This could mean: service is slow, processing large files, or service is overloaded"
+        )
         logger.warning(f"⚠️  Attempting retry for slow service wake-up...")
-        
+
         # Retry logic for slow services (might be waking up)
         retry_delays = [2.0, 4.0, 6.0]  # Longer delays for timeout scenarios
         for attempt, delay in enumerate(retry_delays, 1):
             try:
-                logger.info(f"🔄 Timeout retry attempt {attempt}/{len(retry_delays)} after {delay}s delay...")
+                logger.info(
+                    f"🔄 Timeout retry attempt {attempt}/{len(retry_delays)} after {delay}s delay..."
+                )
                 await asyncio.sleep(delay)
-                
-                async with httpx.AsyncClient(timeout=request_timeout * 1.5, follow_redirects=False) as retry_client:
+
+                async with httpx.AsyncClient(
+                    timeout=request_timeout * 1.5, follow_redirects=False
+                ) as retry_client:
                     retry_response = await retry_client.request(
                         method=request.method,
                         url=full_url,
                         headers=headers,
-                        content=body if request.method in ["POST", "PUT", "PATCH"] else None,
-                        params=dict(request.query_params) if request.query_params else None,
+                        content=body
+                        if request.method in ["POST", "PUT", "PATCH"]
+                        else None,
+                        params=dict(request.query_params)
+                        if request.query_params
+                        else None,
                     )
-                    logger.info(f"✅ Timeout retry successful! Status: {retry_response.status_code}")
-                    
+                    logger.info(
+                        f"✅ Timeout retry successful! Status: {retry_response.status_code}"
+                    )
+
                     # Handle streaming responses
-                    if "text/event-stream" in retry_response.headers.get("content-type", ""):
+                    if "text/event-stream" in retry_response.headers.get(
+                        "content-type", ""
+                    ):
+
                         async def retry_stream():
                             async with retry_response:
                                 async for chunk in retry_response.aiter_bytes():
                                     yield chunk
-                        return StreamingResponse(retry_stream(), media_type="text/event-stream")
-                    
+
+                        return StreamingResponse(
+                            retry_stream(), media_type="text/event-stream"
+                        )
+
                     return Response(
                         content=retry_response.content,
                         status_code=retry_response.status_code,
@@ -1539,12 +1813,19 @@ async def generic_proxy_handler(request: Request, path: str):
                     )
             except (httpx.ConnectError, httpx.TimeoutException) as retry_error:
                 if attempt < len(retry_delays):
-                    logger.warning(f"⚠️  Timeout retry {attempt} failed: {retry_error}, will retry again...")
+                    logger.warning(
+                        f"⚠️  Timeout retry {attempt} failed: {retry_error}, will retry again..."
+                    )
                     continue
                 else:
-                    logger.error(f"❌ All timeout retry attempts failed. Service is not responding.")
-                    raise HTTPException(status_code=504, detail=f"Service timeout after retries: {service_url}")
-        
+                    logger.error(
+                        f"❌ All timeout retry attempts failed. Service is not responding."
+                    )
+                    raise HTTPException(
+                        status_code=504,
+                        detail=f"Service timeout after retries: {service_url}",
+                    )
+
         error_detail = f"Service timeout: {service_url}"
         if "batch" in backend_path:
             error_detail += " (batch operation took too long - check service logs)"
@@ -1558,15 +1839,18 @@ async def generic_proxy_handler(request: Request, path: str):
         logger.error(f"❌ Full traceback: {type(e).__name__}: {error_msg}")
         raise HTTPException(status_code=500, detail=f"Proxy error: {error_msg}")
 
+
 # Health check endpoint
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "api_gateway"}
 
+
 # =================================
 # AUTH ENDPOINTS (only these are specific)
 # =================================
+
 
 async def handle_auth_endpoints(request: Request, path: str):
     """Handle authentication endpoints specifically"""
@@ -1574,28 +1858,24 @@ async def handle_auth_endpoints(request: Request, path: str):
         # Get token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-        
+            raise HTTPException(
+                status_code=401, detail="Missing or invalid authorization header"
+            )
+
         token = auth_header.split(" ")[1]
         user_data = verify_firebase_token(token)
-        
+
         if not user_data:
             raise HTTPException(status_code=401, detail="Invalid token")
-        
-        return {
-            "success": True,
-            "user": user_data
-        }
+
+        return {"success": True, "user": user_data}
     elif path.startswith("auth/user/") and request.method == "GET":
         uid = path.split("/")[-1]
         try:
             user_data = get_user_from_firebase(uid)
             if not user_data:
                 raise HTTPException(status_code=404, detail=f"User not found: {uid}")
-            return {
-                "success": True,
-                "user": user_data
-            }
+            return {"success": True, "user": user_data}
         except HTTPException:
             raise
         except Exception as e:
@@ -1604,9 +1884,11 @@ async def handle_auth_endpoints(request: Request, path: str):
     else:
         raise HTTPException(status_code=404, detail=f"Auth endpoint not found: {path}")
 
+
 # =================================
 # DEBUG ENDPOINTS
 # =================================
+
 
 @router.get("/debug/auth-headers")
 async def debug_auth_headers(request: Request):
@@ -1616,10 +1898,11 @@ async def debug_auth_headers(request: Request):
         "x_user_uid": request.headers.get("x-user-uid", "NOT PRESENT"),
         "x_user_email": request.headers.get("x-user-email", "NOT PRESENT"),
         "x_user_name": request.headers.get("x-user-name", "NOT PRESENT"),
-        "has_request_state_user": hasattr(request.state, 'user'),
-        "request_state_user": str(getattr(request.state, 'user', 'NOT PRESENT')),
-        "all_headers": dict(request.headers)
+        "has_request_state_user": hasattr(request.state, "user"),
+        "request_state_user": str(getattr(request.state, "user", "NOT PRESENT")),
+        "all_headers": dict(request.headers),
     }
+
 
 # =================================
 # END OF ROUTER - Only generic proxy and auth handling
