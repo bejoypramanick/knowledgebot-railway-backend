@@ -478,6 +478,8 @@ class ProcessingService:
                 char_count=metrics.get("char_count", 0),
                 processing_time_seconds=processing_time,
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"   ❌ Pipeline error: {e}")
             return None
