@@ -53,28 +53,33 @@ def process_file_upload_task(
     logger.info("🚀 [CELERY_TASK_START] File processing task started")
     logger.info("=" * 80)
     logger.info(f"📋 [TASK_ID] Celery Task ID: {task_id}")
-    logger.info(f"🔄 [RETRY_INFO] Retry Count: {retry_count}, Max Retries: {self.max_retries}")
+    logger.info(
+        f"🔄 [RETRY_INFO] Retry Count: {retry_count}, Max Retries: {self.max_retries}"
+    )
     logger.info(f"📄 [FILE_PARAMS] File ID: {file_id}")
     logger.info(f"👤 [USER_INFO] Email: {user_email}")
 
     try:
         logger.info("🔍 [PROCESSING] Loading processing functions...")
-        
+
         # Ensure celery-file-worker directory is in Python path (do this right before import)
         worker_dir = os.path.dirname(__file__)
         if worker_dir not in sys.path:
             sys.path.insert(0, worker_dir)
             logger.info(f"   Added to sys.path: {worker_dir}")
-        
+
         logger.info(f"🔍 [DEBUG] sys.path (first 5): {sys.path[:5]}")
         logger.info(f"🔍 [DEBUG] Current dir: {os.getcwd()}")
         logger.info(f"🔍 [DEBUG] Worker dir: {worker_dir}")
-        
+
         from service.processing_service import process_file_content
+
         logger.info("✅ [PROCESSING] process_file_content loaded successfully")
 
-        logger.info(f"⚙️  [PROCESSING] Calling process_file_content() with file_id {file_id}")
-        
+        logger.info(
+            f"⚙️  [PROCESSING] Calling process_file_content() with file_id {file_id}"
+        )
+
         # Get or create event loop for this worker process
         try:
             loop = asyncio.get_event_loop()
@@ -84,7 +89,7 @@ def process_file_upload_task(
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        
+
         # Run the async function
         with tenant_context(
             tenant_id=tenant_id,
@@ -94,21 +99,21 @@ def process_file_upload_task(
         ):
             result = loop.run_until_complete(
                 process_file_content(
-                    file_id=file_id,
-                    user_email=user_email,
-                    celery_task_id=task_id
+                    file_id=file_id, user_email=user_email, celery_task_id=task_id
                 )
             )
 
         logger.info("=" * 80)
         logger.info("✅ [CELERY_TASK_COMPLETE] File processing completed successfully")
         logger.info("=" * 80)
-        
+
         # Safely handle result - it might be None if exception occurred
         if result:
             logger.info(f"📊 [RESULT] File ID: {result.get('file_id')}")
             logger.info(f"📊 [RESULT] Status: {result.get('status')}")
-            logger.info(f"📊 [RESULT] Processing Time: {result.get('processing_time_seconds')}s")
+            logger.info(
+                f"📊 [RESULT] Processing Time: {result.get('processing_time_seconds')}s"
+            )
             logger.info(f"📊 [RESULT] Success: {result.get('success')}")
         else:
             logger.warning("⚠️ [RESULT] Result is None - processing may have failed")
@@ -122,10 +127,11 @@ def process_file_upload_task(
         logger.error(f"📄 [FILE] File ID: {file_id}")
         logger.error(f"⏱️  [TIMEOUT] Task was killed due to timeout")
         logger.error(f"💡 [HINT] File may be too large or extractor queue is backed up")
-        
+
         # Mark file as failed in database
         try:
             from dao.fileupload_dao import FileUploadDAO
+
             dao = FileUploadDAO()
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -136,15 +142,19 @@ def process_file_upload_task(
                 user_email=user_email,
             ):
                 loop.run_until_complete(
-                    dao.update_file_status(file_id, "failed", "Processing timeout (35 minutes)")
+                    dao.update_file_status(
+                        file_id, "failed", "Processing timeout (35 minutes)"
+                    )
                 )
-            logger.info(f"✅ [DB_UPDATE] Marked file {file_id} as failed due to timeout")
+            logger.info(
+                f"✅ [DB_UPDATE] Marked file {file_id} as failed due to timeout"
+            )
         except Exception as db_err:
             logger.error(f"❌ [DB_UPDATE] Failed to update file status: {db_err}")
-        
+
         return {
             "success": False,
-            "error": "Processing timeout (35 minutes) - file may be too large or extractor queue is backed up"
+            "error": "Processing timeout (35 minutes) - file may be too large or extractor queue is backed up",
         }
 
     except Exception as e:
@@ -159,12 +169,17 @@ def process_file_upload_task(
         logger.error("=" * 80)
         logger.error(f"📄 [FILE] File ID: {file_id}")
         logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
-        logger.error(f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}")
-        logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)")
+        logger.error(
+            f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}"
+        )
+        logger.error(
+            f"⏱️  [BACKOFF] Next retry in: {60 * (2**retry_count)}s (exponential backoff)"
+        )
 
         if is_quota_error:
             try:
                 from dao.fileupload_dao import FileUploadDAO
+
                 dao = FileUploadDAO()
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -175,26 +190,93 @@ def process_file_upload_task(
                     user_email=user_email,
                 ):
                     loop.run_until_complete(
-                        dao.update_file_status(file_id, "failed", e.detail.get("message"))
+                        dao.update_file_status(
+                            file_id, "failed", e.detail.get("message")
+                        )
                     )
             except Exception as db_err:
-                logger.error(f"❌ [DB_UPDATE] Failed to mark quota-blocked file as failed: {db_err}")
+                logger.error(
+                    f"❌ [DB_UPDATE] Failed to mark quota-blocked file as failed: {db_err}"
+                )
+
+            # Broadcast outside the main try block so it doesn't get swallowed
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                with tenant_context(
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
+                    user_role_id=user_role_id,
+                    user_email=user_email,
+                ):
+                    loop.run_until_complete(
+                        _broadcast_kb_quota_error(
+                            tenant_id=tenant_id,
+                            file_id=file_id,
+                            error_message=e.detail.get("message"),
+                        )
+                    )
+            except Exception as broadcast_err:
+                logger.error(
+                    f"❌ [BROADCAST] Failed to broadcast quota error: {broadcast_err}"
+                )
+
             return {"success": False, "error": e.detail.get("message")}
 
         # Retry with exponential backoff (60s, then 120s)
         try:
-            countdown = 60 * (2 ** self.request.retries)
+            countdown = 60 * (2**self.request.retries)
             logger.info(f"🔁 [RETRY] Retrying task {task_id} in {countdown}s...")
             raise self.retry(exc=e, countdown=countdown)
         except Exception as retry_exc:
             logger.error("=" * 80)
-            logger.error(f"❌ [MAX_RETRIES_EXCEEDED] Failed to process file ID: {file_id}")
+            logger.error(
+                f"❌ [MAX_RETRIES_EXCEEDED] Failed to process file ID: {file_id}"
+            )
             logger.error("=" * 80)
             logger.error(f"📄 [FILE] File ID: {file_id}")
             logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
-            logger.error(f"🔄 [RETRY_INFO] Max retries exceeded after {self.max_retries} attempts")
+            logger.error(
+                f"🔄 [RETRY_INFO] Max retries exceeded after {self.max_retries} attempts"
+            )
 
-            return {
-                "success": False,
-                "error": f"Processing failed after {self.max_retries} retries: {str(e)}"
-            }
+
+return {
+    "success": False,
+    "error": f"Processing failed after {self.max_retries} retries: {str(e)}",
+}
+
+
+async def _broadcast_kb_quota_error(tenant_id: str, file_id: str, error_message: str):
+    """
+    Broadcast KB quota error to admin SSE stream for real-time notification.
+    """
+    try:
+        from shared.redis_pubsub_manager import (
+            broadcast_event_to_all_agents,
+            get_broadcast_channel_name,
+        )
+        from datetime import datetime, timezone
+
+        channel_name = get_broadcast_channel_name(tenant_id=tenant_id)
+
+        event_data = {
+            "event_type": "kb_quota_exceeded",
+            "tenant_id": tenant_id,
+            "file_id": file_id,
+            "error_message": error_message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        logger.info(f"📢 [BROADCAST] About to broadcast to channel: {channel_name}")
+        logger.info(f"📢 [BROADCAST] Event data: {event_data}")
+
+        await broadcast_event_to_all_agents(event_data, tenant_id=tenant_id)
+
+        logger.info(
+            f"📢 [BROADCAST] SUCCESS - KB quota error broadcast to tenant {tenant_id}: {error_message[:100]}"
+        )
+    except Exception as broadcast_err:
+        logger.error(
+            f"❌ [BROADCAST] Failed to broadcast KB quota error: {broadcast_err}"
+        )
