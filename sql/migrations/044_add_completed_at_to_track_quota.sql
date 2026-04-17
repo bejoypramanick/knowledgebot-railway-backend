@@ -25,9 +25,3 @@ SET completed_at = updated_at
 WHERE processing_status = 'completed'
   AND parent_id IS NULL
   AND completed_at IS NULL;
-
--- Make completed_at NOT NULL for completed records (optional, enforces data integrity)
--- ALTER TABLE public.file_uploads ALTER COLUMN completed_at SET NOT NULL WHERE processing_status = 'completed';
--- ALTER TABLE public.scraped_websites ALTER COLUMN completed_at SET NOT NULL WHERE processing_status = 'completed' AND parent_id IS NULL;
-
-RAISE NOTICE 'Migration 044 completed: added completed_at columns for quota tracking';
