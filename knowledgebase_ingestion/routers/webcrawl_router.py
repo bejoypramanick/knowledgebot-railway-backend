@@ -2,6 +2,7 @@
 Web Crawl Router
 Handles all website scraping related endpoints
 """
+
 import os
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -11,9 +12,16 @@ from uuid import UUID
 from knowledgebase_ingestion.utils.auth import extract_user_from_request
 from knowledgebase_ingestion.utils.logging import get_otel_logger
 from knowledgebase_ingestion.service.webcrawl_service import (
-    get_webcrawl_dao, get_pending_websites, get_website_by_id,
-    cancel_websites, update_website_status, queue_website_for_scraping,
-    delete_website, validate_scraping_request, get_task_status, check_redis_queue
+    get_webcrawl_dao,
+    get_pending_websites,
+    get_website_by_id,
+    cancel_websites,
+    update_website_status,
+    queue_website_for_scraping,
+    delete_website,
+    validate_scraping_request,
+    get_task_status,
+    check_redis_queue,
 )
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import web_celery
@@ -35,19 +43,19 @@ async def _invalidate_kb_cache():
     """Invalidate all KB file cache keys in Redis DB7."""
     try:
         from shared.redis_ui_cache import cache_invalidate_pattern, KB_FILES_KEY_PREFIX
-        
+
         # Aggressive multi-pattern invalidation to catch all tenant/global variants
         patterns = [
-            f"{KB_FILES_KEY_PREFIX}*",       # Standard: ui_cache:kb_files:*
-            f"*{KB_FILES_KEY_PREFIX}*",      # Prefixed: *ui_cache:kb_files:*
-            "*kb_files*"                     # Broad: *kb_files*
+            f"{KB_FILES_KEY_PREFIX}*",  # Standard: ui_cache:kb_files:*
+            f"*{KB_FILES_KEY_PREFIX}*",  # Prefixed: *ui_cache:kb_files:*
+            "*kb_files*",  # Broad: *kb_files*
         ]
-        
+
         total_deleted = 0
         for pattern in patterns:
             count = await cache_invalidate_pattern(pattern)
             total_deleted += count
-            
+
         logger.info(f"🗑️ [CACHE_INVALIDATE] Purged {total_deleted} KB cache keys")
     except Exception as e:
         logger.warning(f"⚠️ Failed to invalidate KB caches: {e}")
@@ -61,13 +69,14 @@ router = APIRouter(tags=["web-crawl"])
 # WEBSITE STATUS ENDPOINTS
 # =================================
 
+
 @router.get("/status")
 async def get_web_processing_status(request: Request = None):
     """Get processing status for all pending/processing websites"""
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+
         # Get all websites with their current status
         websites = await get_pending_websites()
 
@@ -75,16 +84,20 @@ async def get_web_processing_status(request: Request = None):
             "success": True,
             "websites": [
                 {
-                    "id": str(w['id']),
+                    "id": str(w["id"]),
                     "type": "website",
-                    "name": w['original_url'],
-                    "processing_status": w['processing_status'],
-                    "error_message": w['error_message'],
-                    "created_at": w['created_at'].isoformat() if w['created_at'] else None,
-                    "updated_at": w['updated_at'].isoformat() if w['updated_at'] else None
+                    "name": w["original_url"],
+                    "processing_status": w["processing_status"],
+                    "error_message": w["error_message"],
+                    "created_at": w["created_at"].isoformat()
+                    if w["created_at"]
+                    else None,
+                    "updated_at": w["updated_at"].isoformat()
+                    if w["updated_at"]
+                    else None,
                 }
                 for w in websites
-            ]
+            ],
         }
     except Exception as e:
         logger.error(f"Error getting website processing status: {e}")
@@ -99,19 +112,23 @@ async def get_web_item_processing_status(item_id: str, request: Request = None):
 
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+
         # Get website record
         website_record = await get_website_by_id(item_id)
         if website_record:
             return {
                 "success": True,
                 "type": "website",
-                "id": str(website_record['id']),
-                "name": website_record['original_url'],
-                "processing_status": website_record['processing_status'],
-                "error_message": website_record['error_message'],
-                "created_at": website_record['created_at'].isoformat() if website_record['created_at'] else None,
-                "updated_at": website_record['updated_at'].isoformat() if website_record['updated_at'] else None
+                "id": str(website_record["id"]),
+                "name": website_record["original_url"],
+                "processing_status": website_record["processing_status"],
+                "error_message": website_record["error_message"],
+                "created_at": website_record["created_at"].isoformat()
+                if website_record["created_at"]
+                else None,
+                "updated_at": website_record["updated_at"].isoformat()
+                if website_record["updated_at"]
+                else None,
             }
 
         raise HTTPException(status_code=404, detail=f"Website {item_id} not found")
@@ -127,6 +144,7 @@ async def get_web_item_processing_status(item_id: str, request: Request = None):
 # TASK CANCELLATION ENDPOINTS
 # =================================
 
+
 @router.post("/cancel/{item_id}")
 async def cancel_web_task(item_id: str, request: Request = None):
     """
@@ -136,7 +154,7 @@ async def cancel_web_task(item_id: str, request: Request = None):
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+
         # Revoke queued Celery task (stops it before it starts)
         web_celery.control.revoke(item_id, terminate=False)
         logger.info(f"✅ Revoked Celery task {item_id} from queue")
@@ -152,17 +170,25 @@ async def cancel_web_task(item_id: str, request: Request = None):
             websites_cancelled = await cancel_websites()
 
             if websites_cancelled > 0:
-                logger.info(f"✅ Marked {websites_cancelled} website tasks as cancelled in database")
+                logger.info(
+                    f"✅ Marked {websites_cancelled} website tasks as cancelled in database"
+                )
             else:
-                logger.warning(f"⚠️ Website task {item_id} not found or already completed")
+                logger.warning(
+                    f"⚠️ Website task {item_id} not found or already completed"
+                )
         else:
-            logger.error(f"❌ Failed to set cancellation flag for website task {item_id}")
+            logger.error(
+                f"❌ Failed to set cancellation flag for website task {item_id}"
+            )
 
         await _invalidate_kb_cache()
         return {
             "success": success,
-            "message": "Website task cancellation requested" if success else "Failed to cancel website task",
-            "item_id": item_id
+            "message": "Website task cancellation requested"
+            if success
+            else "Failed to cancel website task",
+            "item_id": item_id,
         }
 
     except Exception as e:
@@ -179,7 +205,7 @@ async def cancel_all_web_tasks(request: Request = None):
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+
         # Purge all queued Celery tasks (prevents pending tasks from being picked up)
         web_celery.control.purge()
         logger.info("✅ Purged Celery web_crawling queue")
@@ -193,13 +219,15 @@ async def cancel_all_web_tasks(request: Request = None):
         websites_cancelled = await cancel_websites()
 
         if websites_cancelled > 0:
-            logger.info(f"✅ Marked {websites_cancelled} website tasks as cancelled in database")
+            logger.info(
+                f"✅ Marked {websites_cancelled} website tasks as cancelled in database"
+            )
 
         await _invalidate_kb_cache()
         return {
             "success": True,
             "message": f"Cancelled {websites_cancelled} website tasks",
-            "cancelled_count": websites_cancelled
+            "cancelled_count": websites_cancelled,
         }
 
     except Exception as e:
@@ -211,8 +239,11 @@ async def cancel_all_web_tasks(request: Request = None):
 # DELETE ENDPOINTS
 # =================================
 
+
 @router.delete("/web/{website_id}")
-async def delete_web_item_endpoint(website_id: str, request: Request = None, hard_delete: bool = False):
+async def delete_web_item_endpoint(
+    website_id: str, request: Request = None, hard_delete: bool = False
+):
     """
     Delete a website/page with COMPLETE cleanup of all data points.
 
@@ -238,26 +269,34 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
-        logger.info(f"🗑️  [WEBSITE_DELETE_REQUEST] Deleting website {website_id} (hard_delete={hard_delete})")
-        logger.info(f"   Requested by: user_hash={hash_pii(user_email)} user_id={user_id}")
+        logger.info(
+            f"🗑️  [WEBSITE_DELETE_REQUEST] Deleting website {website_id} (hard_delete={hard_delete})"
+        )
+        logger.info(
+            f"   Requested by: user_hash={hash_pii(user_email)} user_id={user_id}"
+        )
 
         from knowledgebase_ingestion.service.comprehensive_deletion_service import (
             comprehensive_deletion_service,
-            ItemType
+            ItemType,
         )
 
         # Delete website with complete cleanup (auto-detects WEBSITE/WEBPAGE/SITEMAP)
         result = await comprehensive_deletion_service.delete_item(
-            item_id=website_id,
-            item_type=ItemType.WEBSITE,
-            hard_delete=hard_delete
+            item_id=website_id, item_type=ItemType.WEBSITE, hard_delete=hard_delete
         )
 
-        if result.get('success'):
-            logger.info(f"✅ [WEBSITE_DELETE_SUCCESS] Website {website_id} deleted completely")
+        if result.get("success"):
+            logger.info(
+                f"✅ [WEBSITE_DELETE_SUCCESS] Website {website_id} deleted completely"
+            )
             return result
         else:
-            error_msg = result.get('errors')[0].get('error') if result.get('errors') else 'Deletion failed'
+            error_msg = (
+                result.get("errors")[0].get("error")
+                if result.get("errors")
+                else "Deletion failed"
+            )
             logger.error(f"❌ [WEBSITE_DELETE_FAILED] {error_msg}")
             raise HTTPException(status_code=500, detail=error_msg)
 
@@ -265,7 +304,10 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
         raise
     except Exception as e:
         import traceback
-        logger.error(f"❌ [WEBSITE_DELETE_ERROR] Error deleting website {website_id}: {e}")
+
+        logger.error(
+            f"❌ [WEBSITE_DELETE_ERROR] Error deleting website {website_id}: {e}"
+        )
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -273,6 +315,7 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
 # =================================
 # WEBSITE SCRAPING ENDPOINTS
 # =================================
+
 
 @router.post("/webcrawl/async")
 async def scrape_website_async_endpoint(request: Request = None):
@@ -284,10 +327,13 @@ async def scrape_website_async_endpoint(request: Request = None):
         user_email, user_id = extract_user_from_request(request)
         tenant_id = getattr(request.state, "tenant_id", None)
         tenant_slug = getattr(request.state, "tenant_slug", None)
-        logger.info(f"🔐 [AUTH] User: user_hash={hash_pii(user_email)} user_id={user_id}")
-        
+        logger.info(
+            f"🔐 [AUTH] User: user_hash={hash_pii(user_email)} user_id={user_id}"
+        )
+
         # Look up user_role_id from database using email
         from knowledgebase_ingestion.utils.auth import get_user_role_id_from_email
+
         user_role_id = await get_user_role_id_from_email(user_email)
         logger.info(f"🔐 [AUTH] User Role ID (from DB): {user_role_id}")
 
@@ -296,48 +342,59 @@ async def scrape_website_async_endpoint(request: Request = None):
 
         # Validate request
         validation_result = await validate_scraping_request(request_data)
-        if not validation_result['valid']:
-            raise HTTPException(status_code=400, detail=validation_result['error'])
+        if not validation_result["valid"]:
+            raise HTTPException(status_code=400, detail=validation_result["error"])
 
         if tenant_id:
-            estimated_bytes = max(int(validation_result.get('max_pages', 100)), 1) * 64 * 1024
-            await kb_quota_service.ensure_upload_within_quota(tenant_id, estimated_bytes)
+            estimated_bytes = min(
+                max(int(validation_result.get("max_pages", 1)), 1) * 64 * 1024,
+                10 * 1024 * 1024,
+            )
+            await kb_quota_service.ensure_upload_within_quota(
+                tenant_id, estimated_bytes
+            )
 
         # Queue website for scraping with all validated params
         result = await queue_website_for_scraping(
-            url=validation_result['url'],
+            url=validation_result["url"],
             user_role_id=user_role_id,  # Use user_role_id from database, not user_id from header
-            max_depth=validation_result.get('max_depth', 2),
-            max_pages=validation_result.get('max_pages', 100),
-            max_concurrent=validation_result.get('max_concurrent', 10),
-            delay_between_requests=validation_result.get('delay_between_requests', 0.0),
-            replace_existing=validation_result.get('replace_existing', False),
+            max_depth=validation_result.get("max_depth", 2),
+            max_pages=validation_result.get("max_pages", 100),
+            max_concurrent=validation_result.get("max_concurrent", 10),
+            delay_between_requests=validation_result.get("delay_between_requests", 0.0),
+            replace_existing=validation_result.get("replace_existing", False),
             tenant_id=tenant_id,
             tenant_slug=tenant_slug,
             user_email=user_email,
-            crawler_options=validation_result.get('crawler_options') or {},
+            crawler_options=validation_result.get("crawler_options") or {},
         )
-        
-        if result.get('success'):
+
+        if result.get("success"):
             logger.info(f"✅ Website scraping queued: {result.get('task_id')}")
             await _invalidate_kb_cache()
             return result
         else:
             # Check if this is a duplicate error (409 Conflict) vs other errors (500)
-            if 'already being crawled' in result.get('error', '').lower() or 'duplicate' in result.get('error', '').lower():
+            if (
+                "already being crawled" in result.get("error", "").lower()
+                or "duplicate" in result.get("error", "").lower()
+            ):
                 logger.warning(f"⚠️  Duplicate website detected: {result.get('error')}")
                 raise HTTPException(
                     status_code=409,
                     detail={
                         "success": False,
-                        "error": result.get('error'),
-                        "duplicate_website_id": str(result.get('duplicate_website_id')),
-                        "reason": "website_duplicate"
-                    }
+                        "error": result.get("error"),
+                        "duplicate_website_id": str(result.get("duplicate_website_id")),
+                        "reason": "website_duplicate",
+                    },
                 )
             else:
-                raise HTTPException(status_code=500, detail=result.get('error', 'Failed to queue scraping'))
-                
+                raise HTTPException(
+                    status_code=500,
+                    detail=result.get("error", "Failed to queue scraping"),
+                )
+
     except HTTPException:
         raise
     except Exception as e:
@@ -349,16 +406,14 @@ async def scrape_website_async_endpoint(request: Request = None):
 # DEBUG/MONITORING ENDPOINTS
 # =================================
 
+
 @router.get("/debug/task-status/{task_id}")
 async def debug_task_status(task_id: str, request: Request = None):
     """DEBUG: Check status of a Celery task"""
     try:
         extract_user_from_request(request)  # Verify auth
         status = await get_task_status(task_id)
-        return {
-            "success": True,
-            "task_status": status
-        }
+        return {"success": True, "task_status": status}
     except Exception as e:
         logger.error(f"Error getting task status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -370,10 +425,7 @@ async def debug_redis_queue(request: Request = None):
     try:
         extract_user_from_request(request)  # Verify auth
         queue_info = await check_redis_queue()
-        return {
-            "success": True,
-            "redis_queue_info": queue_info
-        }
+        return {"success": True, "redis_queue_info": queue_info}
     except Exception as e:
         logger.error(f"Error checking Redis queue: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -392,7 +444,7 @@ async def debug_celery_test(request: Request = None):
         # Try to dispatch a test task
         logger.info("📤 [CELERY_TEST] Dispatching test debug_task...")
         try:
-            result = web_celery.send_task('celery_app.debug_task', queue='web_crawling')
+            result = web_celery.send_task("celery_app.debug_task", queue="web_crawling")
             logger.info(f"✅ [CELERY_TEST] Task dispatched successfully!")
             logger.info(f"   Task ID: {result.id}")
             logger.info(f"   Result type: {type(result)}")
@@ -401,14 +453,20 @@ async def debug_celery_test(request: Request = None):
                 "success": True,
                 "message": "Celery dispatcher test successful",
                 "task_id": result.id,
-                "broker_url": os.getenv('REDIS_URL', 'Not set').split('@')[-1] if os.getenv('REDIS_URL') else 'Not set',
+                "broker_url": os.getenv("REDIS_URL", "Not set").split("@")[-1]
+                if os.getenv("REDIS_URL")
+                else "Not set",
             }
         except Exception as celery_err:
-            logger.error(f"❌ [CELERY_TEST] Celery dispatch failed: {celery_err}", exc_info=True)
+            logger.error(
+                f"❌ [CELERY_TEST] Celery dispatch failed: {celery_err}", exc_info=True
+            )
             return {
                 "success": False,
                 "error": str(celery_err),
-                "broker_url": os.getenv('REDIS_URL', 'Not set').split('@')[-1] if os.getenv('REDIS_URL') else 'Not set',
+                "broker_url": os.getenv("REDIS_URL", "Not set").split("@")[-1]
+                if os.getenv("REDIS_URL")
+                else "Not set",
             }
     except Exception as e:
         logger.error(f"Error in Celery test: {e}", exc_info=True)
@@ -419,11 +477,12 @@ async def debug_celery_test(request: Request = None):
 # HEALTH ENDPOINTS
 # =================================
 
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
         "service": "web-crawl",
-        "timestamp": "2025-01-19T00:00:00Z"
+        "timestamp": "2025-01-19T00:00:00Z",
     }
