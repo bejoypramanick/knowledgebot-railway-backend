@@ -345,14 +345,8 @@ async def scrape_website_async_endpoint(request: Request = None):
         if not validation_result["valid"]:
             raise HTTPException(status_code=400, detail=validation_result["error"])
 
-        if tenant_id:
-            estimated_bytes = min(
-                max(int(validation_result.get("max_pages", 1)), 1) * 64 * 1024,
-                10 * 1024 * 1024,
-            )
-            await kb_quota_service.ensure_upload_within_quota(
-                tenant_id, estimated_bytes
-            )
+        # Note: Quota check happens AFTER scraping in processing_service._enforce_quota_for_page()
+        # because actual markdown file size is only known after scraping completes.
 
         # Queue website for scraping with all validated params
         result = await queue_website_for_scraping(
