@@ -20,6 +20,8 @@ from shared.file_metrics import calculate_metrics
 from shared.html_cleaner import clean_html_preserving_images
 from shared.kreuzberg_integration import process_with_kreuzberg
 from shared.s3_file_storage import s3_file_storage
+from shared.kb_quota_service import kb_quota_service
+from shared.tenant_context import get_current_tenant_id
 
 from models.value_objects import (
     CrawlConfig,
@@ -95,6 +97,7 @@ class ProcessingService:
         from dao.scraping_dao import ScrapingDAO
 
         self.scraping_dao = ScrapingDAO()
+        self._quota_usage_cache: Dict[str, int] = {}
 
     # ==================== MAIN ORCHESTRATOR ====================
 
@@ -170,6 +173,7 @@ class ProcessingService:
                 store_name="pgvector",
                 user_role_id=resolved_user_role_id,
             )
+            self._quota_usage_cache[job_context.website_id] = 0
 
             # ========== PHASE 2: STREAM PAGES ==========
             # Process pages one-at-a-time using async generator.
@@ -238,6 +242,7 @@ class ProcessingService:
             logger.info(
                 f"✅ [COMPLETE] Website {request.website_id} processed: {pages_uploaded} pages in {processing_time:.1f}s"
             )
+            self._quota_usage_cache.pop(request.website_id, None)
 
             return result.to_dict()
 
@@ -259,6 +264,7 @@ class ProcessingService:
                 error=str(e),
             )
             logger.error(f"❌ Processing error: {e}")
+            self._quota_usage_cache.pop(request.website_id, None)
             return result.to_dict()
 
     async def _crawlWebsitePages(
@@ -1727,6 +1733,10 @@ class ProcessingService:
             "completed" if getattr(upload_result, "confirmed", False) else "pending"
         )
         metrics = calculate_metrics(page_data.markdown)
+        await self._enforce_quota_for_page(
+            website_id=job_context.website_id,
+            page_bytes=metrics.get("file_size_bytes", 0),
+        )
 
         if await self._isSinglePageMode(
             page_data.page_url, job_context.root_url, crawl_config
@@ -1894,6 +1904,21 @@ class ProcessingService:
             processed_content_s3_key=processed_content_s3_key,
             storage_backend_state=storage_backend_state,
         )
+
+    async def _enforce_quota_for_page(self, website_id: str, page_bytes: int) -> None:
+        tenant_id = get_current_tenant_id()
+        if not tenant_id:
+            return
+
+        summary = await kb_quota_service.get_tenant_quota_summary(tenant_id)
+        processed_for_job = self._quota_usage_cache.get(website_id, 0)
+        final_total_bytes = summary["used_bytes"] + processed_for_job + max(page_bytes, 0)
+        await kb_quota_service.fail_if_tenant_quota_breached_after_processing(
+            tenant_id,
+            final_total_bytes,
+            "This website scrape",
+        )
+        self._quota_usage_cache[website_id] = processed_for_job + max(page_bytes, 0)
 
     # ==================== UTILITIES ====================
 

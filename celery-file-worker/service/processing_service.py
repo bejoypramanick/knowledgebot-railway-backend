@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 
 from shared.otel_logger import get_otel_logger
+from shared.kb_quota_service import kb_quota_service
+from shared.tenant_context import get_current_tenant_id
 from core.config import settings
 from shared.kreuzberg_integration import (
     process_with_kreuzberg,
@@ -376,6 +378,15 @@ async def process_file_content(
                 # Use the new DAO to update file record with ALL processing data
                 from dao.fileupload_dao import FileUploadDAO
                 dao = FileUploadDAO()
+
+                current_tenant_id = get_current_tenant_id()
+                if current_tenant_id:
+                    summary = await kb_quota_service.get_tenant_quota_summary(current_tenant_id)
+                    await kb_quota_service.fail_if_tenant_quota_breached_after_processing(
+                        current_tenant_id,
+                        summary["used_bytes"] + file_size,
+                        "This file upload",
+                    )
                 
                 # First update status to processing
                 await dao.update_file_status(file_id, 'processing')

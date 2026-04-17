@@ -8,6 +8,7 @@ import sys
 import asyncio
 from typing import Dict, Any
 from celery.exceptions import SoftTimeLimitExceeded
+from fastapi import HTTPException
 
 from celery_app import celery_app
 from shared.otel_logger import get_otel_logger, set_task_id
@@ -147,6 +148,12 @@ def process_file_upload_task(
         }
 
     except Exception as e:
+        is_quota_error = (
+            isinstance(e, HTTPException)
+            and e.status_code == 409
+            and isinstance(e.detail, dict)
+            and e.detail.get("code") == "kb_quota_exceeded"
+        )
         logger.error("=" * 80)
         logger.error(f"❌ [CELERY_TASK_ERROR] Error in file processing task {task_id}")
         logger.error("=" * 80)
@@ -154,6 +161,25 @@ def process_file_upload_task(
         logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
         logger.error(f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}")
         logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)")
+
+        if is_quota_error:
+            try:
+                from dao.fileupload_dao import FileUploadDAO
+                dao = FileUploadDAO()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                with tenant_context(
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant_slug,
+                    user_role_id=user_role_id,
+                    user_email=user_email,
+                ):
+                    loop.run_until_complete(
+                        dao.update_file_status(file_id, "failed", e.detail.get("message"))
+                    )
+            except Exception as db_err:
+                logger.error(f"❌ [DB_UPDATE] Failed to mark quota-blocked file as failed: {db_err}")
+            return {"success": False, "error": e.detail.get("message")}
 
         # Retry with exponential backoff (60s, then 120s)
         try:

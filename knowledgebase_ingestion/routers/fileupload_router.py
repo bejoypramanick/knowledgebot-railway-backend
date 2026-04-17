@@ -21,6 +21,7 @@ from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery
 from shared.log_sanitizer import hash_pii
 from shared.s3_file_storage import s3_file_storage
+from shared.kb_quota_service import kb_quota_service
 
 logger = get_otel_logger("fileupload_router", "knowledgebase-ingestion")
 
@@ -587,6 +588,8 @@ async def upload_file_async(
         logger.info(f"✔️  [VALIDATION] Validating file: {file.filename}")
         file_size_initial = await get_file_size(file)
         logger.info(f"   File Size: {file_size_initial} bytes")
+        if tenant_id:
+            await kb_quota_service.ensure_upload_within_quota(tenant_id, file_size_initial)
 
         validation_result = await validate_file_upload(file, file_size_initial, replace_existing)
         if not validation_result['valid']:

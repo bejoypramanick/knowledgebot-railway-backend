@@ -22,6 +22,7 @@ from ..service.notifications_service import NotificationsService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
 from ..service.token_usage_service import TokenUsageService
+from shared.kb_quota_service import kb_quota_service
 from ..schemas.models import (
     ChatbotConfigRequest,
     AdminManagementRequest,
@@ -116,6 +117,13 @@ async def get_current_user(request: Request):
     logger.error("🔍 No user found in request.state or headers!")
     logger.error(f"🔍 Available headers: {list(request.headers.keys())}")
     raise HTTPException(status_code=401, detail="User not found in request state or headers")
+
+
+async def require_superadmin(user: dict) -> None:
+    current_user_email = user.get("email")
+    current_user_role = await auth_service.get_user_role(current_user_email)
+    if "superadmin" not in current_user_role.get("roles", []):
+        raise HTTPException(status_code=403, detail="Superadmin access required")
 
 # Initialize services and DAOs
 config_service = ConfigurationService()
@@ -2401,6 +2409,47 @@ async def update_user_profile(profile_data: Dict[str, Any], user: dict = Depends
     except Exception as e:
         logger.error(f"Error updating user profile: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/superadmin/kb-usage")
+async def get_superadmin_kb_usage(user: dict = Depends(get_current_user)):
+    await require_superadmin(user)
+    data = await kb_quota_service.list_all_tenant_quota_summaries()
+    return {"success": True, "data": data}
+
+
+@router.get("/knowledgebase/quota")
+async def get_current_tenant_kb_quota(user: dict = Depends(get_current_user)):
+    _ = user
+    data = await kb_quota_service.get_current_tenant_quota_summary()
+    return {"success": True, "data": data}
+
+
+@router.put("/superadmin/kb-usage/{tenant_id}")
+async def update_superadmin_kb_limit(
+    tenant_id: str,
+    body: Dict[str, Any],
+    user: dict = Depends(get_current_user)
+):
+    await require_superadmin(user)
+    quota_limit_kb = int(body.get("quota_limit_kb") or 0)
+    data = await kb_quota_service.set_tenant_quota_limit(tenant_id, quota_limit_kb)
+    return {"success": True, "data": data}
+
+
+@router.post("/superadmin/kb-usage/{tenant_id}/reset")
+async def manual_reset_superadmin_kb_limit(
+    tenant_id: str,
+    body: Dict[str, Any],
+    user: dict = Depends(get_current_user)
+):
+    await require_superadmin(user)
+    quota_limit_kb = body.get("quota_limit_kb")
+    data = await kb_quota_service.manual_reset_tenant_quota(
+        tenant_id,
+        int(quota_limit_kb) if quota_limit_kb is not None else None,
+    )
+    return {"success": True, "data": data}
 
 @router.get("/users")
 async def get_all_users(user: dict = Depends(get_current_user)):

@@ -18,6 +18,7 @@ from knowledgebase_ingestion.service.webcrawl_service import (
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import web_celery
 from shared.log_sanitizer import hash_pii
+from shared.kb_quota_service import kb_quota_service
 
 logger = get_otel_logger("webcrawl_router", "knowledgebase-ingestion")
 
@@ -297,6 +298,10 @@ async def scrape_website_async_endpoint(request: Request = None):
         validation_result = await validate_scraping_request(request_data)
         if not validation_result['valid']:
             raise HTTPException(status_code=400, detail=validation_result['error'])
+
+        if tenant_id:
+            estimated_bytes = max(int(validation_result.get('max_pages', 100)), 1) * 64 * 1024
+            await kb_quota_service.ensure_upload_within_quota(tenant_id, estimated_bytes)
 
         # Queue website for scraping with all validated params
         result = await queue_website_for_scraping(

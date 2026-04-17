@@ -5,6 +5,7 @@ Handles async website scraping and crawling with database status tracking
 
 import asyncio
 from typing import Dict, Any
+from fastapi import HTTPException
 
 from celery_app import celery_app
 from shared.otel_logger import get_otel_logger, set_task_id
@@ -120,6 +121,12 @@ def scrape_website_task(
         logger.info(f"⏰ [TIMESTAMP] Task completed at: {__import__('datetime').datetime.utcnow().isoformat()}")
 
     except Exception as e:
+        is_quota_error = (
+            isinstance(e, HTTPException)
+            and e.status_code == 409
+            and isinstance(e.detail, dict)
+            and e.detail.get("code") == "kb_quota_exceeded"
+        )
         import traceback
         logger.error("=" * 80)
         logger.error(f"❌ [CELERY_TASK_ERROR] ERROR in website scraping task {task_id}")
@@ -133,6 +140,36 @@ def scrape_website_task(
         logger.error(traceback.format_exc())
         logger.error(f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}")
         logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)")
+
+        if is_quota_error:
+            try:
+                logger.info("💾 [DB_UPDATE] Marking website as failed due to KB quota breach...")
+                from dao.scraping_dao import ScrapingDAO
+                dao = ScrapingDAO()
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                with tenant_context(
+                    tenant_id=options.get("tenant_id"),
+                    tenant_slug=options.get("tenant_slug"),
+                    user_role_id=options.get("user_role_id"),
+                    user_email=options.get("user_email"),
+                ):
+                    loop.run_until_complete(
+                        dao.update_website_status(
+                            website_id,
+                            "failed",
+                            e.detail.get("message"),
+                        )
+                    )
+            except Exception as dao_err:
+                logger.error(f"❌ [DB_UPDATE] Failed to mark quota-blocked website as failed: {dao_err}")
+            return {"success": False, "error": e.detail.get("message")}
 
         # Retry with exponential backoff (60s, then 120s)
         try:

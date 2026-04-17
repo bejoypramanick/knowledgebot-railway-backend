@@ -9,6 +9,7 @@ from sqlalchemy import text
 from shared.redis_tenant_auth_cache import invalidate_role_directory, invalidate_user_auth_cache
 from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
+from shared.kb_quota_service import DEFAULT_MONTHLY_LIMIT_KB
 
 logger = get_otel_logger("auth_dao", "configuration")
 
@@ -406,6 +407,50 @@ class AuthDAO:
                         "token_used": int(float(str(row.get("token_used") or 0))),
                         "is_active": str(row.get("is_active") or "true").strip().lower() in {"1", "true", "t", "yes", "y"},
                     })
+
+                await session.execute(text("""
+                    INSERT INTO tenant_kb_quota_config (
+                        tenant_id, quota_limit_kb, created_at, updated_at
+                    )
+                    VALUES (
+                        :tenant_id, :quota_limit_kb, NOW(), NOW()
+                    )
+                    ON CONFLICT (tenant_id)
+                    DO UPDATE SET
+                        quota_limit_kb = EXCLUDED.quota_limit_kb,
+                        updated_at = EXCLUDED.updated_at
+                """), {
+                    "tenant_id": tenant_id,
+                    "quota_limit_kb": DEFAULT_MONTHLY_LIMIT_KB,
+                })
+
+                await session.execute(text("""
+                    INSERT INTO tenant_kb_quota_monthly_usage (
+                        tenant_id,
+                        cycle_start_at,
+                        cycle_end_at,
+                        quota_limit_kb,
+                        reset_usage_at,
+                        manual_reset_count,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        :tenant_id,
+                        NOW(),
+                        NOW() + INTERVAL '1 month',
+                        :quota_limit_kb,
+                        NOW(),
+                        0,
+                        NOW(),
+                        NOW()
+                    )
+                    ON CONFLICT (tenant_id, cycle_start_at)
+                    DO NOTHING
+                """), {
+                    "tenant_id": tenant_id,
+                    "quota_limit_kb": DEFAULT_MONTHLY_LIMIT_KB,
+                })
                 
                 await session.commit()
                 logger.info(
