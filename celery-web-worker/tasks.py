@@ -160,6 +160,7 @@ def scrape_website_task(self, website_id: str, url: str, options: Dict[str, Any]
         )
 
         if is_quota_error:
+            # Mark website as failed in database
             try:
                 logger.info(
                     "💾 [DB_UPDATE] Marking website as failed due to KB quota breach..."
@@ -188,37 +189,35 @@ def scrape_website_task(self, website_id: str, url: str, options: Dict[str, Any]
                             e.detail.get("message"),
                         )
                     )
-
-                    quota_message = e.detail.get(
-                        "message", "Knowledge base quota exceeded"
-                    )
-
-                    # Broadcast outside the main try block so it doesn't get swallowed
-                    try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        with tenant_context(
-                            tenant_id=options.get("tenant_id"),
-                            tenant_slug=options.get("tenant_slug"),
-                            user_role_id=options.get("user_role_id"),
-                            user_email=options.get("user_email"),
-                        ):
-                            loop.run_until_complete(
-                                _broadcast_kb_quota_error(
-                                    tenant_id=options.get("tenant_id"),
-                                    website_id=website_id,
-                                    url=options.get("url"),
-                                    error_message=quota_message,
-                                )
-                            )
-                    except Exception as broadcast_err:
-                        logger.error(
-                            f"❌ [BROADCAST] Failed to broadcast quota error: {broadcast_err}"
-                        )
             except Exception as dao_err:
                 logger.error(
                     f"❌ [DB_UPDATE] Failed to mark quota-blocked website as failed: {dao_err}"
                 )
+
+            # Broadcast quota error (outside the main try block so it doesn't get swallowed)
+            quota_message = e.detail.get("message", "Knowledge base quota exceeded")
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                with tenant_context(
+                    tenant_id=options.get("tenant_id"),
+                    tenant_slug=options.get("tenant_slug"),
+                    user_role_id=options.get("user_role_id"),
+                    user_email=options.get("user_email"),
+                ):
+                    loop.run_until_complete(
+                        _broadcast_kb_quota_error(
+                            tenant_id=options.get("tenant_id"),
+                            website_id=website_id,
+                            url=options.get("url"),
+                            error_message=quota_message,
+                        )
+                    )
+            except Exception as broadcast_err:
+                logger.error(
+                    f"❌ [BROADCAST] Failed to broadcast quota error: {broadcast_err}"
+                )
+
             return {"success": False, "error": e.detail.get("message")}
 
         # Retry with exponential backoff (60s, then 120s)
