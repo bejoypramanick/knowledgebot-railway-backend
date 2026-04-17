@@ -163,16 +163,21 @@ class KBQuotaService:
             new_limit_kb or override["quota_limit_kb"] or DEFAULT_MONTHLY_LIMIT_KB
         )
 
+        new_cycle_start = now
+        new_cycle_end = self._add_one_month(now)
+
         query = text(
             """
             UPDATE tenant_kb_quota_monthly_usage
             SET quota_limit_kb = :quota_limit_kb,
+                cycle_start_at = :cycle_start_at,
+                cycle_end_at = :cycle_end_at,
                 reset_usage_at = NOW(),
                 manual_reset_count = COALESCE(manual_reset_count, 0) + 1,
                 last_manual_reset_at = NOW(),
                 updated_at = NOW()
             WHERE tenant_id = :tenant_id
-              AND cycle_start_at = :cycle_start_at
+              AND cycle_start_at = :old_cycle_start_at
             """
         )
         async with get_db_session() as session:
@@ -180,7 +185,9 @@ class KBQuotaService:
                 query,
                 {
                     "tenant_id": tenant_id,
-                    "cycle_start_at": window.cycle_start_at,
+                    "old_cycle_start_at": window.cycle_start_at,
+                    "cycle_start_at": new_cycle_start,
+                    "cycle_end_at": new_cycle_end,
                     "quota_limit_kb": limit_kb,
                 },
             )
