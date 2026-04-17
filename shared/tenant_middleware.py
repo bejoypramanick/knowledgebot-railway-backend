@@ -1,6 +1,7 @@
 """
 Tenant-aware request middleware for internal services.
 """
+
 from __future__ import annotations
 
 from fastapi import Request
@@ -35,7 +36,14 @@ def _supports_public_widget_access(request: Request) -> bool:
 
 def _widget_access_scopes_for_request(request: Request) -> tuple[str, ...]:
     path = request.url.path
-    if path.startswith(("/api/v1/configuration/widgetConfig", "/api/v1/chatbot/chat/stream", "/api/v1/chatbot/chat/session", "/api/v1/knowledgebase/files")):
+    if path.startswith(
+        (
+            "/api/v1/configuration/widgetConfig",
+            "/api/v1/chatbot/chat/stream",
+            "/api/v1/chatbot/chat/session",
+            "/api/v1/knowledgebase/files",
+        )
+    ):
         return (WIDGET_SESSION_TOKEN_SCOPE,)
     return (
         LEGACY_WIDGET_TOKEN_SCOPE,
@@ -60,6 +68,9 @@ async def tenant_context_middleware(request: Request, call_next):
     tenant_slug = getattr(request.state, "tenant_slug", None)
     user_role_id = getattr(request.state, "user_role_id", None)
     user_email = getattr(request.state, "user_email", None)
+    is_platform_admin = (
+        request.headers.get("X-User-Is-Platform-Admin", "").lower() == "true"
+    )
 
     if internal_request_verified:
         tenant_id = request.headers.get("X-Tenant-ID") or tenant_id
@@ -87,6 +98,7 @@ async def tenant_context_middleware(request: Request, call_next):
         tenant_slug=tenant_slug,
         user_role_id=user_role_id,
         user_email=user_email,
+        is_platform_admin=is_platform_admin,
     )
     try:
         response = await call_next(request)

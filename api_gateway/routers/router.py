@@ -577,6 +577,9 @@ def _inject_identity_headers(request: Request, headers: Dict[str, str]) -> None:
         headers["X-User-Role-ID"] = request_user_role_id
     if request_user_email:
         headers["X-User-Email"] = request_user_email
+    is_platform_admin = getattr(request.state, "is_platform_admin", False)
+    if is_platform_admin:
+        headers["X-User-Is-Platform-Admin"] = "true"
 
 
 @router.get("/configuration/admin/events")
