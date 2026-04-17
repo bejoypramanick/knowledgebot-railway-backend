@@ -29,23 +29,37 @@ class KBQuotaService:
     async def get_current_tenant_quota_summary(self) -> Dict[str, Any]:
         tenant_id = get_current_tenant_id()
         if not tenant_id:
-            raise HTTPException(status_code=400, detail="Active tenant context is required")
+            raise HTTPException(
+                status_code=400, detail="Active tenant context is required"
+            )
         return await self.get_tenant_quota_summary(tenant_id)
 
     async def get_tenant_quota_summary(self, tenant_id: str) -> Dict[str, Any]:
+        logger.info(f"🔍 [KB_QUOTA] Getting quota summary for tenant_id={tenant_id}")
+
         tenant = await self._get_tenant_row(tenant_id)
+        logger.info(f"🔍 [KB_QUOTA] Tenant row: {tenant}")
         if not tenant:
+            logger.error(f"❌ [KB_QUOTA] Tenant not found: {tenant_id}")
             raise HTTPException(status_code=404, detail="Tenant not found")
 
         now = datetime.now(timezone.utc)
         window = self._build_quota_window(tenant_id, tenant["created_at"], now)
+        logger.info(
+            f"🔍 [KB_QUOTA] Quota window: cycle_start={window.cycle_start_at}, cycle_end={window.cycle_end_at}"
+        )
+
         override = await self._get_or_create_monthly_override(tenant_id, window)
+        logger.info(f"🔍 [KB_QUOTA] Override config: {override}")
+
         usage_bytes = await self._get_usage_bytes_for_window(tenant_id, window)
+        logger.info(f"🔍 [KB_QUOTA] Usage bytes: {usage_bytes}")
+
         limit_kb = int(override["quota_limit_kb"] or DEFAULT_MONTHLY_LIMIT_KB)
         limit_bytes = limit_kb * 1024
         remaining_bytes = max(limit_bytes - usage_bytes, 0)
 
-        return {
+        summary = {
             "tenant_id": tenant_id,
             "tenant_slug": tenant["slug"],
             "tenant_name": tenant["name"],
@@ -55,14 +69,22 @@ class KBQuotaService:
             "used_kb": round(usage_bytes / 1024, 2),
             "remaining_bytes": remaining_bytes,
             "remaining_kb": round(remaining_bytes / 1024, 2),
-            "usage_percent": round((usage_bytes / limit_bytes) * 100, 2) if limit_bytes > 0 else 0,
+            "usage_percent": round((usage_bytes / limit_bytes) * 100, 2)
+            if limit_bytes > 0
+            else 0,
             "cycle_start_at": window.cycle_start_at.isoformat(),
             "cycle_end_at": window.cycle_end_at.isoformat(),
-            "tenant_created_at": tenant["created_at"].isoformat() if tenant["created_at"] else None,
+            "tenant_created_at": tenant["created_at"].isoformat()
+            if tenant["created_at"]
+            else None,
             "manual_reset_count": int(override["manual_reset_count"] or 0),
-            "last_manual_reset_at": override["last_manual_reset_at"].isoformat() if override.get("last_manual_reset_at") else None,
+            "last_manual_reset_at": override["last_manual_reset_at"].isoformat()
+            if override.get("last_manual_reset_at")
+            else None,
             "is_limit_reached": usage_bytes >= limit_bytes,
         }
+        logger.info(f"✅ [KB_QUOTA] Summary: {summary}")
+        return summary
 
     async def list_all_tenant_quota_summaries(self) -> List[Dict[str, Any]]:
         query = text(
@@ -76,17 +98,39 @@ class KBQuotaService:
         async with get_db_session() as session:
             rows = (await session.execute(query)).mappings().all()
 
+        logger.info(f"🔍 [KB_QUOTA] Raw tenant rows from DB: {len(rows)} tenants found")
+        for row in rows:
+            logger.info(
+                f"   - tenant: id={row['id']}, slug={row['slug']}, name={row['name']}"
+            )
+
         summaries: List[Dict[str, Any]] = []
         for row in rows:
             try:
-                summaries.append(await self.get_tenant_quota_summary(str(row["id"])))
+                tenant_id = str(row["id"])
+                logger.info(
+                    f"🔍 [KB_QUOTA] Fetching quota summary for tenant: {tenant_id}"
+                )
+                summary = await self.get_tenant_quota_summary(tenant_id)
+                summaries.append(summary)
+                logger.info(
+                    f"✅ [KB_QUOTA] Got summary for {tenant_id}: used_kb={summary.get('used_kb')}, limit_kb={summary.get('quota_limit_kb')}"
+                )
             except Exception as exc:
-                logger.warning(f"Skipping tenant quota summary for {row['id']}: {exc}")
+                logger.warning(
+                    f"⚠️ [KB_QUOTA] Skipping tenant quota summary for {row['id']}: {exc}"
+                )
+
+        logger.info(f"📊 [KB_QUOTA] Returning {len(summaries)} tenant summaries")
         return summaries
 
-    async def set_tenant_quota_limit(self, tenant_id: str, quota_limit_kb: int) -> Dict[str, Any]:
+    async def set_tenant_quota_limit(
+        self, tenant_id: str, quota_limit_kb: int
+    ) -> Dict[str, Any]:
         if quota_limit_kb <= 0:
-            raise HTTPException(status_code=400, detail="Quota limit must be greater than 0 KB")
+            raise HTTPException(
+                status_code=400, detail="Quota limit must be greater than 0 KB"
+            )
 
         query = text(
             """
@@ -98,12 +142,16 @@ class KBQuotaService:
             """
         )
         async with get_db_session() as session:
-            await session.execute(query, {"tenant_id": tenant_id, "quota_limit_kb": quota_limit_kb})
+            await session.execute(
+                query, {"tenant_id": tenant_id, "quota_limit_kb": quota_limit_kb}
+            )
             await session.commit()
 
         return await self.get_tenant_quota_summary(tenant_id)
 
-    async def manual_reset_tenant_quota(self, tenant_id: str, new_limit_kb: Optional[int] = None) -> Dict[str, Any]:
+    async def manual_reset_tenant_quota(
+        self, tenant_id: str, new_limit_kb: Optional[int] = None
+    ) -> Dict[str, Any]:
         tenant = await self._get_tenant_row(tenant_id)
         if not tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
@@ -111,7 +159,9 @@ class KBQuotaService:
         now = datetime.now(timezone.utc)
         window = self._build_quota_window(tenant_id, tenant["created_at"], now)
         override = await self._get_or_create_monthly_override(tenant_id, window)
-        limit_kb = int(new_limit_kb or override["quota_limit_kb"] or DEFAULT_MONTHLY_LIMIT_KB)
+        limit_kb = int(
+            new_limit_kb or override["quota_limit_kb"] or DEFAULT_MONTHLY_LIMIT_KB
+        )
 
         query = text(
             """
@@ -138,7 +188,9 @@ class KBQuotaService:
 
         return await self.get_tenant_quota_summary(tenant_id)
 
-    async def ensure_upload_within_quota(self, tenant_id: str, requested_bytes: int) -> Dict[str, Any]:
+    async def ensure_upload_within_quota(
+        self, tenant_id: str, requested_bytes: int
+    ) -> Dict[str, Any]:
         summary = await self.get_tenant_quota_summary(tenant_id)
         if summary["used_bytes"] + requested_bytes > summary["quota_limit_bytes"]:
             self._raise_quota_exceeded(summary, requested_bytes)
@@ -162,7 +214,9 @@ class KBQuotaService:
                 },
             )
 
-    def _raise_quota_exceeded(self, summary: Dict[str, Any], requested_bytes: int) -> None:
+    def _raise_quota_exceeded(
+        self, summary: Dict[str, Any], requested_bytes: int
+    ) -> None:
         raise HTTPException(
             status_code=409,
             detail={
@@ -182,7 +236,11 @@ class KBQuotaService:
             """
         )
         async with get_db_session() as session:
-            row = (await session.execute(query, {"tenant_id": tenant_id})).mappings().first()
+            row = (
+                (await session.execute(query, {"tenant_id": tenant_id}))
+                .mappings()
+                .first()
+            )
             return dict(row) if row else None
 
     def _build_quota_window(
@@ -215,7 +273,10 @@ class KBQuotaService:
             except ValueError:
                 day -= 1
                 if day <= 0:
-                    return (value.replace(year=year, month=month, day=1) + timedelta(days=31)).replace(day=1)
+                    return (
+                        value.replace(year=year, month=month, day=1)
+                        + timedelta(days=31)
+                    ).replace(day=1)
 
     async def _get_or_create_monthly_override(
         self,
@@ -267,7 +328,9 @@ class KBQuotaService:
             await session.commit()
         return dict(row)
 
-    async def _get_usage_bytes_for_window(self, tenant_id: str, window: TenantQuotaWindow) -> int:
+    async def _get_usage_bytes_for_window(
+        self, tenant_id: str, window: TenantQuotaWindow
+    ) -> int:
         query = text(
             """
             WITH usage_window AS (
