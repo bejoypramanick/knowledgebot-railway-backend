@@ -240,11 +240,10 @@ def process_file_upload_task(
                 f"🔄 [RETRY_INFO] Max retries exceeded after {self.max_retries} attempts"
             )
 
-
-return {
-    "success": False,
-    "error": f"Processing failed after {self.max_retries} retries: {str(e)}",
-}
+            return {
+                "success": False,
+                "error": f"Processing failed after {self.max_retries} retries: {str(e)}",
+            }
 
 
 async def _broadcast_kb_quota_error(tenant_id: str, file_id: str, error_message: str):
