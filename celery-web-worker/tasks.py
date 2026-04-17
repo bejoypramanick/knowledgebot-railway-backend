@@ -24,12 +24,7 @@ def _redact_crawler_options(options: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @celery_app.task(bind=True, max_retries=2)
-def scrape_website_task(
-    self,
-    website_id: str,
-    url: str,
-    options: Dict[str, Any]
-):
+def scrape_website_task(self, website_id: str, url: str, options: Dict[str, Any]):
     """
     Celery task for async website scraping.
     Retries up to 2 times on failure with exponential backoff (60s, 120s).
@@ -43,14 +38,20 @@ def scrape_website_task(
     logger.info("=" * 80)
     logger.info("🚀 [CELERY_TASK_RECEIVED] Website scraping task RECEIVED by worker")
     logger.info("=" * 80)
-    logger.info(f"⏰ [TIMESTAMP] Task received at: {__import__('datetime').datetime.utcnow().isoformat()}")
+    logger.info(
+        f"⏰ [TIMESTAMP] Task received at: {__import__('datetime').datetime.utcnow().isoformat()}"
+    )
     logger.info(f"📋 [TASK_ID] Celery Task ID: {task_id}")
     logger.info(f"👷 [WORKER_INFO] Worker name: {self.request.hostname}")
-    logger.info(f"🔄 [RETRY_INFO] Retry Count: {retry_count}, Max Retries: {self.max_retries}")
+    logger.info(
+        f"🔄 [RETRY_INFO] Retry Count: {retry_count}, Max Retries: {self.max_retries}"
+    )
     logger.info(f"🌐 [WEBSITE_PARAMS] Website ID: {website_id}")
     logger.info(f"🌐 [WEBSITE_PARAMS] URL: {url}")
     logger.info(f"🌐 [WEBSITE_PARAMS] Options: {_redact_crawler_options(options)}")
-    logger.info(f"📊 [REQUEST_INFO] Host={self.request.hostname}, retries={retry_count}, delivery={self.request.delivery_info}")
+    logger.info(
+        f"📊 [REQUEST_INFO] Host={self.request.hostname}, retries={retry_count}, delivery={self.request.delivery_info}"
+    )
 
     try:
         logger.info("=" * 80)
@@ -62,22 +63,30 @@ def scrape_website_task(
             # Ensure celery-web-worker directory is in Python path
             import sys
             import os
+
             worker_dir = os.path.dirname(__file__)
             if worker_dir not in sys.path:
                 sys.path.insert(0, worker_dir)
                 logger.info(f"   Added to sys.path: {worker_dir}")
 
             from service.website_service import WebsiteService
-            logger.info("✅ [SERVICE_LOAD_SUCCESS] WebsiteService imported successfully")
+
+            logger.info(
+                "✅ [SERVICE_LOAD_SUCCESS] WebsiteService imported successfully"
+            )
         except Exception as import_err:
-            logger.error(f"❌ [SERVICE_LOAD_ERROR] Failed to import WebsiteService: {import_err}")
+            logger.error(
+                f"❌ [SERVICE_LOAD_ERROR] Failed to import WebsiteService: {import_err}"
+            )
             logger.error(f"   Error type: {type(import_err).__name__}")
             logger.error(f"   Python path: {sys.path}")
             raise
 
         logger.info("🔧 [SERVICE_INIT] Instantiating WebsiteService...")
         website_service = WebsiteService()
-        logger.info("✅ [SERVICE_INIT_SUCCESS] WebsiteService instantiated successfully")
+        logger.info(
+            "✅ [SERVICE_INIT_SUCCESS] WebsiteService instantiated successfully"
+        )
 
         logger.info("⚙️  [PROCESS_CALL] About to call process_website_async()...")
         logger.info(f"   Parameters:")
@@ -95,7 +104,7 @@ def scrape_website_task(
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        
+
         # Run the async function
         with tenant_context(
             tenant_id=options.get("tenant_id"),
@@ -108,7 +117,7 @@ def scrape_website_task(
                     website_id=website_id,
                     url=url,
                     options=options,
-                    celery_task_id=task_id
+                    celery_task_id=task_id,
                 )
             )
 
@@ -118,7 +127,9 @@ def scrape_website_task(
         logger.info(f"🌐 [RESULT] Website ID: {website_id}")
         logger.info(f"🌐 [RESULT] URL: {url}")
         logger.info(f"📋 [RESULT] Task ID: {task_id}")
-        logger.info(f"⏰ [TIMESTAMP] Task completed at: {__import__('datetime').datetime.utcnow().isoformat()}")
+        logger.info(
+            f"⏰ [TIMESTAMP] Task completed at: {__import__('datetime').datetime.utcnow().isoformat()}"
+        )
 
     except Exception as e:
         is_quota_error = (
@@ -128,23 +139,33 @@ def scrape_website_task(
             and e.detail.get("code") == "kb_quota_exceeded"
         )
         import traceback
+
         logger.error("=" * 80)
         logger.error(f"❌ [CELERY_TASK_ERROR] ERROR in website scraping task {task_id}")
         logger.error("=" * 80)
-        logger.error(f"⏰ [TIMESTAMP] Error occurred at: {__import__('datetime').datetime.utcnow().isoformat()}")
+        logger.error(
+            f"⏰ [TIMESTAMP] Error occurred at: {__import__('datetime').datetime.utcnow().isoformat()}"
+        )
         logger.error(f"🌐 [WEBSITE] Website ID: {website_id}")
         logger.error(f"🌐 [WEBSITE] URL: {url}")
         logger.error(f"🚨 [ERROR_TYPE] {type(e).__name__}")
         logger.error(f"🚨 [ERROR_MESSAGE] {str(e)}")
         logger.error(f"🚨 [ERROR_DETAILS] Full traceback:")
         logger.error(traceback.format_exc())
-        logger.error(f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}")
-        logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)")
+        logger.error(
+            f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}"
+        )
+        logger.error(
+            f"⏱️  [BACKOFF] Next retry in: {60 * (2**retry_count)}s (exponential backoff)"
+        )
 
         if is_quota_error:
             try:
-                logger.info("💾 [DB_UPDATE] Marking website as failed due to KB quota breach...")
+                logger.info(
+                    "💾 [DB_UPDATE] Marking website as failed due to KB quota breach..."
+                )
                 from dao.scraping_dao import ScrapingDAO
+
                 dao = ScrapingDAO()
                 try:
                     loop = asyncio.get_event_loop()
@@ -167,30 +188,51 @@ def scrape_website_task(
                             e.detail.get("message"),
                         )
                     )
+
+                    quota_message = e.detail.get(
+                        "message", "Knowledge base quota exceeded"
+                    )
+                    loop.run_until_complete(
+                        _broadcast_kb_quota_error(
+                            tenant_id=options.get("tenant_id"),
+                            website_id=website_id,
+                            url=options.get("url"),
+                            error_message=quota_message,
+                        )
+                    )
             except Exception as dao_err:
-                logger.error(f"❌ [DB_UPDATE] Failed to mark quota-blocked website as failed: {dao_err}")
+                logger.error(
+                    f"❌ [DB_UPDATE] Failed to mark quota-blocked website as failed: {dao_err}"
+                )
             return {"success": False, "error": e.detail.get("message")}
 
         # Retry with exponential backoff (60s, then 120s)
         try:
-            countdown = 60 * (2 ** self.request.retries)
+            countdown = 60 * (2**self.request.retries)
             logger.info(f"🔁 [RETRY] Retrying task {task_id} in {countdown}s...")
             raise self.retry(exc=e, countdown=countdown)
         except Exception:
             logger.error("=" * 80)
-            logger.error(f"❌ [MAX_RETRIES_EXCEEDED] Failed to scrape website ID {website_id}")
+            logger.error(
+                f"❌ [MAX_RETRIES_EXCEEDED] Failed to scrape website ID {website_id}"
+            )
             logger.error("=" * 80)
             logger.error(f"🌐 [WEBSITE] Website ID: {website_id}")
             logger.error(f"🌐 [WEBSITE] URL: {url}")
             logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
-            logger.error(f"🔄 [RETRY_INFO] Max retries exceeded after {self.max_retries} attempts")
+            logger.error(
+                f"🔄 [RETRY_INFO] Max retries exceeded after {self.max_retries} attempts"
+            )
 
             # Update status to failed after max retries
             try:
-                logger.info("💾 [DB_UPDATE] Updating website status to failed in database...")
+                logger.info(
+                    "💾 [DB_UPDATE] Updating website status to failed in database..."
+                )
                 from dao.scraping_dao import ScrapingDAO
+
                 dao = ScrapingDAO()
-                
+
                 # Get or create event loop for this worker process
                 try:
                     loop = asyncio.get_event_loop()
@@ -200,7 +242,7 @@ def scrape_website_task(
                 except RuntimeError:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                
+
                 # Run the async function
                 with tenant_context(
                     tenant_id=options.get("tenant_id"),
@@ -212,9 +254,44 @@ def scrape_website_task(
                         dao.update_website_status(
                             website_id,
                             "failed",
-                            f"Processing failed after {self.max_retries} retries: {str(e)}"
+                            f"Processing failed after {self.max_retries} retries: {str(e)}",
                         )
                     )
-                logger.info(f"✅ [DB_UPDATE] Website status updated to failed for ID {website_id}")
+                logger.info(
+                    f"✅ [DB_UPDATE] Website status updated to failed for ID {website_id}"
+                )
             except Exception as dao_err:
-                logger.error(f"❌ [DB_UPDATE] Failed to update website status to failed: {dao_err}")
+                logger.error(
+                    f"❌ [DB_UPDATE] Failed to update website status to failed: {dao_err}"
+                )
+
+
+async def _broadcast_kb_quota_error(
+    tenant_id: str, website_id: str, url: str, error_message: str
+):
+    """
+    Broadcast KB quota error to admin SSE stream for real-time notification.
+    """
+    try:
+        from shared.redis_pubsub_manager import broadcast_event_to_all_agents
+        import json
+        from datetime import datetime, timezone
+
+        event_data = {
+            "event_type": "kb_quota_exceeded",
+            "tenant_id": tenant_id,
+            "website_id": website_id,
+            "url": url,
+            "error_message": error_message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        channel_name = f"agent:events:tenant:{tenant_id}:broadcast"
+        await broadcast_event_to_all_agents(event_data, channel_name)
+        logger.info(
+            f"📢 [BROADCAST] KB quota error broadcast to tenant {tenant_id}: {error_message[:100]}"
+        )
+    except Exception as broadcast_err:
+        logger.error(
+            f"❌ [BROADCAST] Failed to broadcast KB quota error: {broadcast_err}"
+        )
