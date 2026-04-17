@@ -2,6 +2,7 @@
 WidgetConfig Data Access Object for Configuration Service
 Handles database operations for widget configuration
 """
+
 from typing import Dict, List, Any, Optional, Tuple
 import json
 
@@ -12,6 +13,7 @@ from shared.otel_logger import get_otel_logger
 from configuration.core.railway_storage import railway_storage
 
 logger = get_otel_logger("widget_dao", "configuration")
+
 
 class WidgetConfigDAO:
     def __init__(self):
@@ -25,7 +27,9 @@ class WidgetConfigDAO:
         if not tenant_id:
             # Fallback to default tenant to allow service-level operations (like warming global cache)
             # without a request context.
-            logger.info("ℹ️ No active tenant context found; falling back to DEFAULT_TENANT_ID")
+            logger.info(
+                "ℹ️ No active tenant context found; falling back to DEFAULT_TENANT_ID"
+            )
             return DEFAULT_TENANT_ID
         return tenant_id
 
@@ -59,6 +63,7 @@ class WidgetConfigDAO:
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
         """Get main widget configuration with self-healing row creation."""
         from shared.tenant_context import get_current_tenant_slug
+
         tenant_id = self._require_active_tenant_id()
         tenant_slug = get_current_tenant_slug()
 
@@ -79,24 +84,27 @@ class WidgetConfigDAO:
         try:
             logger.log_db_operation(select_query, params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     result = await session.execute(text(select_query), params)
                     row = result.mappings().first()
-                    
+
                     if row:
                         logger.log_db_query(select_query, params, row)
                         return dict(row)
 
-                    if tenant_slug == "system":
+                    if tenant_slug == "system" or tenant_id.startswith("00000000"):
                         logger.info(
-                            f"ℹ️ No widget configuration found for system tenant {tenant_id}. "
+                            f"ℹ️ No widget configuration found for system/default tenant {tenant_id}. "
                             "Returning in-memory defaults without self-healing insert."
                         )
                         return self._system_tenant_widget_defaults()
-                    
+
                     # SELF-HEALING: No row found for this tenant, seed a default one
-                    logger.warning(f"⚠️ No widget configuration found for tenant {tenant_id}. Seeding default row...")
+                    logger.warning(
+                        f"⚠️ No widget configuration found for tenant {tenant_id}. Seeding default row..."
+                    )
                     seed_query = """
                         INSERT INTO widget_configuration (tenant_id, is_singleton)
                         VALUES (CAST(:tenant_id AS UUID), true)
@@ -113,14 +121,16 @@ class WidgetConfigDAO:
                     """
                     seed_result = await session.execute(text(seed_query), params)
                     await session.commit()
-                    
+
                     # If ON CONFLICT DO NOTHING happened, fetch again
                     row = seed_result.mappings().first()
                     if not row:
                         result = await session.execute(text(select_query), params)
                         row = result.mappings().first()
-                    
-                    logger.info(f"✅ Default widget configuration seeded successfully for tenant {tenant_id}")
+
+                    logger.info(
+                        f"✅ Default widget configuration seeded successfully for tenant {tenant_id}"
+                    )
                     return dict(row) if row else None
 
         except Exception as e:
@@ -196,7 +206,11 @@ class WidgetConfigDAO:
                 if field_name in config_data:
                     value = config_data[field_name]
                     columns.append(field_name)
-                    if field_name in ("profile_position", "chat_icon_position", "allowed_origins"):
+                    if field_name in (
+                        "profile_position",
+                        "chat_icon_position",
+                        "allowed_origins",
+                    ):
                         params[field_name] = json.dumps(value)
                     else:
                         params[field_name] = value
@@ -213,19 +227,22 @@ class WidgetConfigDAO:
             placeholders.append(":tenant_id")
 
             query = f"""
-                INSERT INTO widget_configuration ({', '.join(columns)})
-                VALUES ({', '.join(placeholders)})
+                INSERT INTO widget_configuration ({", ".join(columns)})
+                VALUES ({", ".join(placeholders)})
                 ON CONFLICT (tenant_id, is_singleton) WHERE is_singleton = true
-                DO UPDATE SET {', '.join(update_clauses)}
+                DO UPDATE SET {", ".join(update_clauses)}
             """
 
             logger.log_db_operation(query, params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     await session.execute(text(query), params)
                     await session.commit()
-                    logger.info(f"✅ Widget config UPSERT successful: {len(columns)-3} field(s) updated")
+                    logger.info(
+                        f"✅ Widget config UPSERT successful: {len(columns) - 3} field(s) updated"
+                    )
         except Exception as e:
             logger.log_db_query("update_widget_config", config_data, error=e)
             logger.error(f"❌ Error in update_widget_config: {e}")
@@ -234,7 +251,9 @@ class WidgetConfigDAO:
     async def update_suggested_messages(self, messages: List[str]):
         """Update suggested messages."""
         try:
-            logger.info(f"📋 [DAO] update_suggested_messages called with {len(messages)} messages: {messages}")
+            logger.info(
+                f"📋 [DAO] update_suggested_messages called with {len(messages)} messages: {messages}"
+            )
             async with get_db_session() as session:
                 # Get the widget config ID for THIS tenant
                 tenant_id = self._require_active_tenant_id()
@@ -246,7 +265,9 @@ class WidgetConfigDAO:
                 logger.log_db_query(config_id_query, params, config_id_row)
 
                 if not config_id_row:
-                    logger.error("❌ [DAO] No widget_configuration row found! Cannot insert suggested messages.")
+                    logger.error(
+                        "❌ [DAO] No widget_configuration row found! Cannot insert suggested messages."
+                    )
                     raise ValueError("No widget configuration found")
 
                 widget_config_id = config_id_row[0]
@@ -257,7 +278,9 @@ class WidgetConfigDAO:
                 delete_params = {"widget_config_id": widget_config_id}
                 logger.log_db_operation(delete_query, delete_params)
                 await session.execute(text(delete_query), delete_params)
-                logger.info(f"🗑️ [DAO] Deleted existing suggested messages for widget_config_id={widget_config_id}")
+                logger.info(
+                    f"🗑️ [DAO] Deleted existing suggested messages for widget_config_id={widget_config_id}"
+                )
 
                 # Insert new messages
                 insert_query = """
@@ -265,29 +288,42 @@ class WidgetConfigDAO:
                     VALUES (:widget_config_id, :message_text, :display_order, true, NOW(), NOW())
                 """
                 for i, message in enumerate(messages):
-                    insert_params = {"widget_config_id": widget_config_id, "message_text": message, "display_order": i}
+                    insert_params = {
+                        "widget_config_id": widget_config_id,
+                        "message_text": message,
+                        "display_order": i,
+                    }
                     await session.execute(text(insert_query), insert_params)
                     logger.info(f"✅ [DAO] Inserted message [{i}]")
 
                 await session.commit()
-                logger.info(f"✅ [DAO] Committed {len(messages)} suggested messages successfully")
+                logger.info(
+                    f"✅ [DAO] Committed {len(messages)} suggested messages successfully"
+                )
         except Exception as e:
             logger.error(f"❌ [DAO] Error updating suggested messages: {e}")
             import traceback
+
             logger.error(f"❌ [DAO] Traceback: {traceback.format_exc()}")
             raise
 
-    async def update_widget_image(self, image_type: str, image_data: bytes, filename: str) -> Tuple[str, str]:
+    async def update_widget_image(
+        self, image_type: str, image_data: bytes, filename: str
+    ) -> Tuple[str, str]:
         """
         Update widget image by uploading to Railway storage and updating database with URL.
         """
         try:
             # Determine content type from filename or default to JPEG
-            content_type = 'image/jpeg'
-            if filename.lower().endswith('.png'): content_type = 'image/png'
-            elif filename.lower().endswith('.gif'): content_type = 'image/gif'
-            elif filename.lower().endswith('.webp'): content_type = 'image/webp'
-            elif filename.lower().endswith('.svg'): content_type = 'image/svg+xml'
+            content_type = "image/jpeg"
+            if filename.lower().endswith(".png"):
+                content_type = "image/png"
+            elif filename.lower().endswith(".gif"):
+                content_type = "image/gif"
+            elif filename.lower().endswith(".webp"):
+                content_type = "image/webp"
+            elif filename.lower().endswith(".svg"):
+                content_type = "image/svg+xml"
 
             # Upload to Railway storage with consistent naming
             storage_url, storage_filename = await railway_storage.upload_image(
@@ -297,7 +333,7 @@ class WidgetConfigDAO:
             column_mapping = {
                 "profile": ("profile_picture_url", "profile_picture_filename"),
                 "chatIcon": ("chat_icon_url", "chat_icon_filename"),
-                "headerIcon": ("profile_picture_url", "profile_picture_filename")
+                "headerIcon": ("profile_picture_url", "profile_picture_filename"),
             }
 
             if image_type not in column_mapping:
@@ -314,9 +350,9 @@ class WidgetConfigDAO:
                 WHERE is_singleton = true AND tenant_id = CAST(:tenant_id AS UUID)
             """
             params = {
-                "storage_url": storage_url, 
+                "storage_url": storage_url,
                 "storage_filename": storage_filename,
-                "tenant_id": tenant_id
+                "tenant_id": tenant_id,
             }
 
             logger.log_db_operation(query, params)
@@ -346,8 +382,10 @@ class WidgetConfigDAO:
                 row = result.fetchone()
                 if row:
                     return {
-                        "profile_picture_filename": row._mapping.get("profile_picture_filename"),
-                        "chat_icon_filename": row._mapping.get("chat_icon_filename")
+                        "profile_picture_filename": row._mapping.get(
+                            "profile_picture_filename"
+                        ),
+                        "chat_icon_filename": row._mapping.get("chat_icon_filename"),
                     }
                 return {"profile_picture_filename": None, "chat_icon_filename": None}
         except Exception as e:
@@ -360,13 +398,17 @@ class WidgetConfigDAO:
         try:
             logger.log_db_operation(query)
             logger.info("=" * 100)
-            logger.info("🗑️ CLEARING ALL SUGGESTED MESSAGES FROM widget_suggested_messages TABLE")
+            logger.info(
+                "🗑️ CLEARING ALL SUGGESTED MESSAGES FROM widget_suggested_messages TABLE"
+            )
             logger.info("=" * 100)
             logger.info(f"Query: {query}")
             async with get_db_session() as session:
                 result = await session.execute(text(query))
                 await session.commit()
-                logger.info(f"✅ Deleted {result.rowcount} rows from widget_suggested_messages")
+                logger.info(
+                    f"✅ Deleted {result.rowcount} rows from widget_suggested_messages"
+                )
                 logger.log_db_query(query, None, None)
                 logger.info("=" * 100)
         except Exception as e:
@@ -383,7 +425,11 @@ class WidgetConfigDAO:
             INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
             VALUES ((SELECT id FROM widget_configuration WHERE is_singleton = true AND tenant_id = CAST(:tenant_id AS UUID)), :message_text, :display_order, true, NOW(), NOW())
         """
-        params = {"message_text": message, "display_order": index, "tenant_id": tenant_id}
+        params = {
+            "message_text": message,
+            "display_order": index,
+            "tenant_id": tenant_id,
+        }
         try:
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
@@ -394,7 +440,9 @@ class WidgetConfigDAO:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def save_widget_config(self, config_data: Optional[Dict[str, Any]] = None) -> bool:
+    async def save_widget_config(
+        self, config_data: Optional[Dict[str, Any]] = None
+    ) -> bool:
         """
         DAO method that persists widget configuration.
 
@@ -414,7 +462,9 @@ class WidgetConfigDAO:
 
             # If there are config fields to update, call update method
             if widget_config:
-                logger.info(f"📝 [DAO] Updating widget config with {len(widget_config)} fields")
+                logger.info(
+                    f"📝 [DAO] Updating widget config with {len(widget_config)} fields"
+                )
                 await self.update_widget_config(widget_config)
 
             logger.info(f"✅ [DAO] Widget config persisted successfully")
