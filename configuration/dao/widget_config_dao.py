@@ -21,16 +21,15 @@ class WidgetConfigDAO:
 
     @staticmethod
     def _require_active_tenant_id() -> str:
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
+        from shared.tenant_context import get_current_tenant_id
+        from fastapi import HTTPException
 
         tenant_id = get_current_tenant_id()
         if not tenant_id:
-            # Fallback to default tenant to allow service-level operations (like warming global cache)
-            # without a request context.
-            logger.info(
-                "ℹ️ No active tenant context found; falling back to DEFAULT_TENANT_ID"
+            raise HTTPException(
+                status_code=400,
+                detail="Active tenant context is required. Please ensure you are authenticated and have an active tenant.",
             )
-            return DEFAULT_TENANT_ID
         return tenant_id
 
     @staticmethod
@@ -94,9 +93,9 @@ class WidgetConfigDAO:
                         logger.log_db_query(select_query, params, row)
                         return dict(row)
 
-                    if tenant_slug == "system" or tenant_id.startswith("00000000"):
+                    if tenant_slug == "system":
                         logger.info(
-                            f"ℹ️ No widget configuration found for system/default tenant {tenant_id}. "
+                            f"ℹ️ No widget configuration found for system tenant {tenant_id}. "
                             "Returning in-memory defaults without self-healing insert."
                         )
                         return self._system_tenant_widget_defaults()
@@ -109,7 +108,7 @@ class WidgetConfigDAO:
                         INSERT INTO widget_configuration (tenant_id, is_singleton)
                         VALUES (CAST(:tenant_id AS UUID), true)
                         ON CONFLICT DO NOTHING
-                        RETURNING 
+                        RETURNING
                             display_name, initial_message, auto_show_duration,
                             keep_showing_suggested, theme, primary_color,
                             use_primary_for_header, chat_bubble_color, align_bubble,

@@ -2,6 +2,7 @@
 ChatAgentConfig Data Access Object for Configuration Service
 Handles database operations for admin and agent configuration management
 """
+
 from typing import Dict, List, Any, Optional
 
 from sqlalchemy import text
@@ -16,9 +17,22 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("chatbot_dao", "configuration")
 
+
 class ChatAgentConfigDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
+
+    def _require_active_tenant_id(self) -> str:
+        from shared.tenant_context import get_current_tenant_id
+        from fastapi import HTTPException
+
+        tenant_id = get_current_tenant_id()
+        if not tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Active tenant context is required. Please ensure you are authenticated and have an active tenant.",
+            )
+        return tenant_id
 
     async def _get_user_email_by_id(self, user_id: str) -> Optional[str]:
         query = text("SELECT email FROM users WHERE id = CAST(:user_id AS UUID)")
@@ -30,9 +44,10 @@ class ChatAgentConfigDAO:
 
     async def get_security_settings(self) -> List[Dict[str, Any]]:
         """Get security settings."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
-        
+        pass
+
+        tenant_id = self._require_active_tenant_id()
+
         query = text("""
             SELECT setting_name, setting_value, setting_type, description
             FROM security_settings
@@ -43,6 +58,7 @@ class ChatAgentConfigDAO:
         try:
             logger.log_db_operation(str(query), params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     result = await session.execute(query, params)
@@ -53,13 +69,16 @@ class ChatAgentConfigDAO:
             logger.log_db_query(str(query), None, error=e)
             raise
 
-    async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'string'):
+    async def upsert_security_setting(
+        self, name: str, value: str, setting_type: str = "string"
+    ):
         """
         Upsert security setting using PG17+ MERGE with RETURNING.
         Includes tenant_id scoping for multi-tenancy.
         """
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        pass
+
+        tenant_id = self._require_active_tenant_id()
 
         query = text("""
             MERGE INTO security_settings AS target
@@ -78,19 +97,22 @@ class ChatAgentConfigDAO:
             RETURNING merge_action() AS action, target.setting_name
         """)
         params = {
-            'tenant_id': tenant_id,
-            'name': name, 
-            'value': value, 
-            'setting_type': setting_type
+            "tenant_id": tenant_id,
+            "name": name,
+            "value": value,
+            "setting_type": setting_type,
         }
         try:
             logger.log_db_operation(str(query), params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     result = await session.execute(query, params)
                     row = result.fetchone()
-                    logger.log_db_query(str(query), params, f"MERGE {row.action if row else 'UNKNOWN'}")
+                    logger.log_db_query(
+                        str(query), params, f"MERGE {row.action if row else 'UNKNOWN'}"
+                    )
                     await session.commit()
         except Exception as e:
             logger.log_db_query(str(query), params, error=e)
@@ -98,8 +120,9 @@ class ChatAgentConfigDAO:
 
     async def get_human_agents(self) -> List[Dict[str, Any]]:
         """Get all human agents with id and email."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        pass
+
+        tenant_id = self._require_active_tenant_id()
 
         query = text("""
             SELECT DISTINCT u.id, u.email
@@ -115,12 +138,23 @@ class ChatAgentConfigDAO:
         try:
             logger.log_db_operation(str(query), params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     results = await session.execute(query, params)
                     rows = results.fetchall()
                     logger.log_db_query(str(query), params, rows)
-                    agents = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
+                    agents = (
+                        [
+                            {
+                                "id": str(row._mapping["id"]),
+                                "email": row._mapping["email"],
+                            }
+                            for row in rows
+                        ]
+                        if rows
+                        else []
+                    )
                     await set_cached_role_directory("human_agent", agents)
                     return agents
         except Exception as e:
@@ -129,8 +163,9 @@ class ChatAgentConfigDAO:
 
     async def get_admins(self) -> List[Dict[str, Any]]:
         """Get all admins with id and email."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        pass
+
+        tenant_id = self._require_active_tenant_id()
 
         query = text("""
             SELECT DISTINCT u.id, u.email
@@ -146,12 +181,23 @@ class ChatAgentConfigDAO:
         try:
             logger.log_db_operation(str(query), params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     results = await session.execute(query, params)
                     rows = results.fetchall()
                     logger.log_db_query(str(query), params, rows)
-                    admins = [{"id": str(row._mapping["id"]), "email": row._mapping["email"]} for row in rows] if rows else []
+                    admins = (
+                        [
+                            {
+                                "id": str(row._mapping["id"]),
+                                "email": row._mapping["email"],
+                            }
+                            for row in rows
+                        ]
+                        if rows
+                        else []
+                    )
                     await set_cached_role_directory("admin", admins)
                     return admins
         except Exception as e:
@@ -160,8 +206,9 @@ class ChatAgentConfigDAO:
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get all LLM providers."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        pass
+
+        tenant_id = self._require_active_tenant_id()
 
         query = text("""
             SELECT id, provider_name, token_limit, token_used, is_active, created_at, updated_at
@@ -173,6 +220,7 @@ class ChatAgentConfigDAO:
         try:
             logger.log_db_operation(str(query), params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     result = await session.execute(query, params)
@@ -185,8 +233,9 @@ class ChatAgentConfigDAO:
 
     async def get_all_personas(self) -> List[Dict[str, Any]]:
         """Get all personas from database"""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        pass
+
+        tenant_id = self._require_active_tenant_id()
 
         query = text("""
             SELECT id, persona_name, system_prompt,
@@ -199,6 +248,7 @@ class ChatAgentConfigDAO:
         try:
             logger.log_db_operation(str(query), params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     rows = await session.execute(query, params)
@@ -211,8 +261,9 @@ class ChatAgentConfigDAO:
 
     async def get_active_persona(self) -> Optional[Dict[str, Any]]:
         """Get active chatbot persona from database."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        pass
+
+        tenant_id = self._require_active_tenant_id()
 
         query = text("""
             SELECT id, persona_name, persona_description, system_prompt,
@@ -226,6 +277,7 @@ class ChatAgentConfigDAO:
         try:
             logger.log_db_operation(str(query), params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     result = await session.execute(query, params)
@@ -236,16 +288,23 @@ class ChatAgentConfigDAO:
             logger.log_db_query(str(query), None, error=e)
             raise
 
-    async def update_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
+    async def update_persona(
+        self, persona_name: str, system_prompt: str, is_active: bool = True
+    ):
         """Upsert persona configuration (MERGE for PG17+)."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        pass
+
+        tenant_id = self._require_active_tenant_id()
 
         try:
             async with get_db_session() as session:
                 if is_active:
-                    deactivate_query = text("UPDATE persona_configurations SET is_active = false WHERE tenant_id = CAST(:tenant_id AS UUID)")
-                    logger.log_db_operation(str(deactivate_query), {"tenant_id": tenant_id})
+                    deactivate_query = text(
+                        "UPDATE persona_configurations SET is_active = false WHERE tenant_id = CAST(:tenant_id AS UUID)"
+                    )
+                    logger.log_db_operation(
+                        str(deactivate_query), {"tenant_id": tenant_id}
+                    )
                     await session.execute(deactivate_query, {"tenant_id": tenant_id})
 
                 query = text("""
@@ -264,18 +323,27 @@ class ChatAgentConfigDAO:
                         VALUES (source.tenant_id, source.persona_name, source.system_prompt, source.is_active, NOW(), NOW())
                 """)
                 params = {
-                    'system_prompt': system_prompt,
-                    'is_active': is_active,
-                    'persona_name': persona_name,
-                    'tenant_id': tenant_id
+                    "system_prompt": system_prompt,
+                    "is_active": is_active,
+                    "persona_name": persona_name,
+                    "tenant_id": tenant_id,
                 }
                 logger.log_db_operation(str(query), params)
                 from shared.tenant_context import tenant_context
+
                 with tenant_context(tenant_id=tenant_id):
                     await session.execute(query, params)
                     await session.commit()
         except Exception as e:
-            logger.log_db_query("update_persona", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
+            logger.log_db_query(
+                "update_persona",
+                {
+                    "persona_name": persona_name,
+                    "system_prompt": system_prompt,
+                    "is_active": is_active,
+                },
+                error=e,
+            )
             raise
 
     async def upsert_persona_configuration(
@@ -286,8 +354,9 @@ class ChatAgentConfigDAO:
         is_active: bool = False,
     ) -> None:
         """Upsert persona configuration with optional description for tenant seeding."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        pass
+
+        tenant_id = self._require_active_tenant_id()
 
         try:
             async with get_db_session() as session:
@@ -341,6 +410,7 @@ class ChatAgentConfigDAO:
                     "is_active": is_active,
                 }
                 from shared.tenant_context import tenant_context
+
                 with tenant_context(tenant_id=tenant_id):
                     await session.execute(query, params)
                     await session.commit()
@@ -380,7 +450,9 @@ class ChatAgentConfigDAO:
                     logger.log_db_query(str(create_query), {"email": email}, user_row)
 
                 # Get role_id for human_agent
-                role_query = text("SELECT id FROM roles WHERE role_name = 'human_agent'")
+                role_query = text(
+                    "SELECT id FROM roles WHERE role_name = 'human_agent'"
+                )
                 logger.log_db_operation(str(role_query))
                 result = await session.execute(role_query)
                 role_row = result.fetchone()
@@ -459,7 +531,9 @@ class ChatAgentConfigDAO:
                         await invalidate_user_auth_cache(email)
                 return result.rowcount > 0
         except Exception as e:
-            logger.log_db_query("remove_human_agent_by_id", {"user_id": user_id}, error=e)
+            logger.log_db_query(
+                "remove_human_agent_by_id", {"user_id": user_id}, error=e
+            )
             raise
 
     async def add_admin(self, email: str) -> bool:
@@ -588,7 +662,9 @@ class ChatAgentConfigDAO:
                 logger.info(f"➖ Removing admin: {email}")
                 await self.remove_admin(email)
 
-            logger.info(f"✅ Admin sync completed: added {len(to_add)}, removed {len(to_remove)}")
+            logger.info(
+                f"✅ Admin sync completed: added {len(to_add)}, removed {len(to_remove)}"
+            )
         except Exception as e:
             logger.error(f"Error syncing admin emails: {e}")
             raise
@@ -607,7 +683,9 @@ class ChatAgentConfigDAO:
 
             to_remove_ids = current_id_set - desired_id_set
 
-            logger.info(f"📊 Admin sync: current={len(current_id_set)}, keep={len(desired_id_set)}, to_add={len(new_emails)}, to_remove={len(to_remove_ids)}")
+            logger.info(
+                f"📊 Admin sync: current={len(current_id_set)}, keep={len(desired_id_set)}, to_add={len(new_emails)}, to_remove={len(to_remove_ids)}"
+            )
 
             for user_id in to_remove_ids:
                 logger.info(f"➖ Removing admin by ID: {user_id}")
@@ -617,7 +695,9 @@ class ChatAgentConfigDAO:
                 logger.info(f"➕ Adding admin: {email}")
                 await self.add_admin(email)
 
-            logger.info(f"✅ Admin sync completed: added {len(new_emails)}, removed {len(to_remove_ids)}")
+            logger.info(
+                f"✅ Admin sync completed: added {len(new_emails)}, removed {len(to_remove_ids)}"
+            )
         except Exception as e:
             logger.error(f"Error syncing admins: {e}")
             raise
@@ -642,12 +722,16 @@ class ChatAgentConfigDAO:
                 logger.info(f"➖ Removing human agent: {email}")
                 await self.remove_human_agent(email)
 
-            logger.info(f"✅ Human agent sync completed: added {len(to_add)}, removed {len(to_remove)}")
+            logger.info(
+                f"✅ Human agent sync completed: added {len(to_add)}, removed {len(to_remove)}"
+            )
         except Exception as e:
             logger.error(f"Error syncing human agent emails: {e}")
             raise
 
-    async def sync_human_agents(self, desired_ids: List[str], new_emails: List[str]) -> None:
+    async def sync_human_agents(
+        self, desired_ids: List[str], new_emails: List[str]
+    ) -> None:
         """
         Sync human agents using IDs for existing users and emails for new users.
         - desired_ids: user IDs of existing agents to keep
@@ -661,7 +745,9 @@ class ChatAgentConfigDAO:
 
             to_remove_ids = current_id_set - desired_id_set
 
-            logger.info(f"📊 Human agent sync: current={len(current_id_set)}, keep={len(desired_id_set)}, to_add={len(new_emails)}, to_remove={len(to_remove_ids)}")
+            logger.info(
+                f"📊 Human agent sync: current={len(current_id_set)}, keep={len(desired_id_set)}, to_add={len(new_emails)}, to_remove={len(to_remove_ids)}"
+            )
 
             for user_id in to_remove_ids:
                 logger.info(f"➖ Removing human agent by ID: {user_id}")
@@ -671,15 +757,20 @@ class ChatAgentConfigDAO:
                 logger.info(f"➕ Adding human agent: {email}")
                 await self.add_human_agent(email)
 
-            logger.info(f"✅ Human agent sync completed: added {len(new_emails)}, removed {len(to_remove_ids)}")
+            logger.info(
+                f"✅ Human agent sync completed: added {len(new_emails)}, removed {len(to_remove_ids)}"
+            )
         except Exception as e:
             logger.error(f"Error syncing human agents: {e}")
             raise
 
-    async def update_llm_provider_tokens(self, provider: str, limit: int, used: int) -> bool:
+    async def update_llm_provider_tokens(
+        self, provider: str, limit: int, used: int
+    ) -> bool:
         """Upsert token limits and usage for an LLM provider (tenant-aware)."""
-        from shared.tenant_context import get_current_tenant_id, DEFAULT_TENANT_ID
-        tenant_id = get_current_tenant_id() or DEFAULT_TENANT_ID
+        pass
+
+        tenant_id = self._require_active_tenant_id()
 
         try:
             query = text("""
@@ -699,26 +790,38 @@ class ChatAgentConfigDAO:
             """)
             params = {
                 "tenant_id": tenant_id,
-                "provider": provider, 
-                "limit": limit, 
-                "used": used
+                "provider": provider,
+                "limit": limit,
+                "used": used,
             }
             logger.log_db_operation(str(query), params)
             from shared.tenant_context import tenant_context
+
             with tenant_context(tenant_id=tenant_id):
                 async with get_db_session() as session:
                     await session.execute(query, params)
                     await session.commit()
                     return True
         except Exception as e:
-            logger.log_db_query("update_llm_provider_tokens", {"provider": provider, "limit": limit, "used": used}, error=e)
+            logger.log_db_query(
+                "update_llm_provider_tokens",
+                {"provider": provider, "limit": limit, "used": used},
+                error=e,
+            )
             raise
 
-    async def save_chat_agent_config(self, admin_emails: List[str], human_agents: List[str],
-                                     response_timeout: int, response_policy: float,
-                                     hil_enabled: bool, hil_disabled_message: str,
-                                     persona_name: str, system_prompt: str,
-                                     llm_tokens: Dict[str, Dict[str, int]]) -> bool:
+    async def save_chat_agent_config(
+        self,
+        admin_emails: List[str],
+        human_agents: List[str],
+        response_timeout: int,
+        response_policy: float,
+        hil_enabled: bool,
+        hil_disabled_message: str,
+        persona_name: str,
+        system_prompt: str,
+        llm_tokens: Dict[str, Dict[str, int]],
+    ) -> bool:
         """
         DAO method that persists complete chat agent configuration.
         Orchestrates all chat agent related updates in one operation.
@@ -748,33 +851,25 @@ class ChatAgentConfigDAO:
             # 3. Update response timeout (security setting)
             logger.info(f"⏱️ [DAO] Updating response_timeout to {response_timeout}")
             await self.upsert_security_setting(
-                'response_timeout',
-                str(response_timeout),
-                'integer'
+                "response_timeout", str(response_timeout), "integer"
             )
 
             # 4. Update response policy (HIL policy - 15-300 seconds)
             logger.info(f"📋 [DAO] Updating response_policy to {response_policy}")
             await self.upsert_security_setting(
-                'response_policy',
-                str(response_policy),
-                'integer'
+                "response_policy", str(response_policy), "integer"
             )
 
             # 5. Update HIL enabled status
             logger.info(f"🎛️ [DAO] Updating hil_enabled to {hil_enabled}")
             await self.upsert_security_setting(
-                'hil_enabled',
-                str(hil_enabled),
-                'boolean'
+                "hil_enabled", str(hil_enabled), "boolean"
             )
 
             # 6. Update HIL disabled message
             logger.info(f"💬 [DAO] Updating hil_disabled_message")
             await self.upsert_security_setting(
-                'hil_disabled_message',
-                hil_disabled_message,
-                'string'
+                "hil_disabled_message", hil_disabled_message, "string"
             )
 
             # 7. Update active persona
@@ -784,8 +879,8 @@ class ChatAgentConfigDAO:
             # 8. Update LLM provider tokens
             logger.info(f"🔑 [DAO] Updating {len(llm_tokens)} LLM providers")
             for provider, tokens_data in llm_tokens.items():
-                limit = tokens_data.get('limit', 20000)
-                used = tokens_data.get('used', 0)
+                limit = tokens_data.get("limit", 20000)
+                used = tokens_data.get("used", 0)
                 await self.update_llm_provider_tokens(provider, limit, used)
 
             logger.info(f"✅ [DAO] Chat agent config persisted successfully")
