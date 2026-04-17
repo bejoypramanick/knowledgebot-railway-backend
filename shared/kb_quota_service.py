@@ -45,6 +45,16 @@ class KBQuotaService:
 
         now = datetime.now(timezone.utc)
         window = self._build_quota_window(tenant_id, tenant["created_at"], now)
+
+        latest_reset = await self._get_latest_manual_reset(tenant_id)
+        if latest_reset and latest_reset["cycle_start_at"] > window.cycle_start_at:
+            window = TenantQuotaWindow(
+                tenant_id=tenant_id,
+                tenant_created_at=tenant["created_at"],
+                cycle_start_at=latest_reset["cycle_start_at"],
+                cycle_end_at=latest_reset["cycle_end_at"],
+            )
+
         logger.info(
             f"🔍 [KB_QUOTA] Quota window: cycle_start={window.cycle_start_at}, cycle_end={window.cycle_end_at}"
         )
@@ -157,27 +167,42 @@ class KBQuotaService:
             raise HTTPException(status_code=404, detail="Tenant not found")
 
         now = datetime.now(timezone.utc)
-        window = self._build_quota_window(tenant_id, tenant["created_at"], now)
-        override = await self._get_or_create_monthly_override(tenant_id, window)
-        limit_kb = int(
-            new_limit_kb or override["quota_limit_kb"] or DEFAULT_MONTHLY_LIMIT_KB
-        )
+        limit_kb = int(new_limit_kb or DEFAULT_MONTHLY_LIMIT_KB)
 
         new_cycle_start = now
         new_cycle_end = self._add_one_month(now)
 
         query = text(
             """
-            UPDATE tenant_kb_quota_monthly_usage
-            SET quota_limit_kb = :quota_limit_kb,
-                cycle_start_at = :cycle_start_at,
-                cycle_end_at = :cycle_end_at,
-                reset_usage_at = NOW(),
-                manual_reset_count = COALESCE(manual_reset_count, 0) + 1,
-                last_manual_reset_at = NOW(),
+            INSERT INTO tenant_kb_quota_monthly_usage (
+                tenant_id,
+                cycle_start_at,
+                cycle_end_at,
+                quota_limit_kb,
+                reset_usage_at,
+                manual_reset_count,
+                last_manual_reset_at,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                :tenant_id,
+                :cycle_start_at,
+                :cycle_end_at,
+                :quota_limit_kb,
+                :reset_usage_at,
+                1,
+                NOW(),
+                NOW(),
+                NOW()
+            )
+            ON CONFLICT (tenant_id, cycle_start_at) DO UPDATE
+            SET quota_limit_kb = EXCLUDED.quota_limit_kb,
+                cycle_end_at = EXCLUDED.cycle_end_at,
+                reset_usage_at = EXCLUDED.reset_usage_at,
+                manual_reset_count = EXCLUDED.manual_reset_count,
+                last_manual_reset_at = EXCLUDED.last_manual_reset_at,
                 updated_at = NOW()
-            WHERE tenant_id = :tenant_id
-              AND cycle_start_at = :old_cycle_start_at
             """
         )
         async with get_db_session() as session:
@@ -185,10 +210,10 @@ class KBQuotaService:
                 query,
                 {
                     "tenant_id": tenant_id,
-                    "old_cycle_start_at": window.cycle_start_at,
                     "cycle_start_at": new_cycle_start,
                     "cycle_end_at": new_cycle_end,
                     "quota_limit_kb": limit_kb,
+                    "reset_usage_at": now,
                 },
             )
             await session.commit()
@@ -334,6 +359,28 @@ class KBQuotaService:
             row = (await session.execute(query, params)).mappings().first()
             await session.commit()
         return dict(row)
+
+    async def _get_latest_manual_reset(
+        self, tenant_id: str
+    ) -> Optional[Dict[str, Any]]:
+        query = text(
+            """
+            SELECT cycle_start_at, cycle_end_at
+            FROM tenant_kb_quota_monthly_usage
+            WHERE tenant_id = :tenant_id
+              AND manual_reset_count > 0
+              AND cycle_start_at > NOW() - INTERVAL '2 months'
+            ORDER BY cycle_start_at DESC
+            LIMIT 1
+            """
+        )
+        async with get_db_session() as session:
+            row = (
+                (await session.execute(query, {"tenant_id": tenant_id}))
+                .mappings()
+                .first()
+            )
+        return dict(row) if row else None
 
     async def _get_usage_bytes_for_window(
         self, tenant_id: str, window: TenantQuotaWindow
