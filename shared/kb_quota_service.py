@@ -228,6 +228,27 @@ class KBQuotaService:
             self._raise_quota_exceeded(summary, requested_bytes)
         return summary
 
+    async def check_quota_before_embedding(
+        self, tenant_id: str, content_bytes: int, item_label: str = "This content"
+    ) -> Dict[str, Any]:
+        """Check quota right before embedding generation. Returns summary if within quota, raises HTTPException if exceeded."""
+        summary = await self.get_tenant_quota_summary(tenant_id)
+        if summary["used_bytes"] + content_bytes > summary["quota_limit_bytes"]:
+            remaining_bytes = max(
+                summary["quota_limit_bytes"] - summary["used_bytes"], 0
+            )
+            remaining_kb = round(remaining_bytes / 1024, 2)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": KB_QUOTA_EXCEEDED_CODE,
+                    "message": f"{item_label} cannot be processed. Adding this content ({round(content_bytes / 1024, 2)} KB) would exceed your monthly KB quota ({round(summary['quota_limit_bytes'] / 1024, 2)} KB). You have {remaining_kb} KB remaining. Please delete some existing content or contact your administrator to reset the quota.",
+                    "tenant_id": tenant_id,
+                    "quota": summary,
+                },
+            )
+        return summary
+
     async def fail_if_tenant_quota_breached_after_processing(
         self,
         tenant_id: str,

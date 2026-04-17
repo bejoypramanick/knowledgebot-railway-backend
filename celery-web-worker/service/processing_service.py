@@ -11,6 +11,7 @@ import base64
 import re
 from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
+from fastapi import HTTPException
 import logging
 import hashlib
 import mimetypes
@@ -345,6 +346,25 @@ class ProcessingService:
 
             # Check if we have chunks
             if chunks:
+                # Calculate content size for quota check
+                content_bytes = sum(
+                    len(c.get("text") or c.get("content", "")) for c in chunks
+                )
+                tenant_id = get_current_tenant_id()
+                if tenant_id:
+                    logger.info(
+                        f"📊 [QUOTA_CHECK] Checking quota before embedding: content_bytes={content_bytes}"
+                    )
+                    try:
+                        await kb_quota_service.check_quota_before_embedding(
+                            tenant_id, content_bytes, f"Page '{page_data.page_url}'"
+                        )
+                    except HTTPException:
+                        raise
+                    except Exception as e:
+                        logger.error(f"❌ [QUOTA_CHECK] Error checking quota: {e}")
+                        raise
+
                 # Generate embeddings using our model-agnostic utility
                 logger.info(
                     f"🧬 Generating embeddings for {len(chunks)} chunks from {page_data.page_url}..."
@@ -1912,7 +1932,9 @@ class ProcessingService:
 
         summary = await kb_quota_service.get_tenant_quota_summary(tenant_id)
         processed_for_job = self._quota_usage_cache.get(website_id, 0)
-        final_total_bytes = summary["used_bytes"] + processed_for_job + max(page_bytes, 0)
+        final_total_bytes = (
+            summary["used_bytes"] + processed_for_job + max(page_bytes, 0)
+        )
         await kb_quota_service.fail_if_tenant_quota_breached_after_processing(
             tenant_id,
             final_total_bytes,
