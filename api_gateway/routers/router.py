@@ -1498,6 +1498,7 @@ async def generic_proxy_handler(request: Request, path: str):
             or backend_path.startswith("widget/")
             or backend_path.startswith("feedback")
             or backend_path.startswith("messages/")
+            or backend_path.startswith("superadmin/")
         ):
             # These are all configuration service endpoints but without the service prefix
             # Need to add "configuration/" prefix for proper routing
