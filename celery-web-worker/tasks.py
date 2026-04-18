@@ -255,11 +255,4 @@ def scrape_website_task(self, website_id: str, url: str, options: Dict[str, Any]
                     f"❌ [DB_UPDATE] Failed to update website status to failed: {dao_err}"
                 )
 
-
-logger.info(
-            f"📢 [BROADCAST] SUCCESS - KB quota error sent to user {user_email}: {error_message[:100] if error_message else 'unknown'}"
-        )
-    except Exception as broadcast_err:
-        logger.error(
-            f"❌ [BROADCAST] Failed to broadcast KB quota error: {broadcast_err}"
-        )
+            return {"success": False, "error": e.detail.get("message")}
