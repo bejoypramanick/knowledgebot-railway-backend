@@ -95,6 +95,8 @@ async def _fetch_all_data():
                     text("""
             SELECT document_id,
                    COUNT(*) as chunk_count,
+                   pg_size_pretty(SUM(pg_column_size(content))) as content_pretty,
+                   pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty,
                    SUM(pg_column_size(content)) as total_content_bytes,
                    SUM(pg_column_size(embedding)) as total_embedding_bytes
             FROM document_chunks
@@ -131,6 +133,8 @@ async def _fetch_all_data():
                     text("""
             SELECT document_id,
                    COUNT(*) as chunk_count,
+                   pg_size_pretty(SUM(pg_column_size(content))) as content_pretty,
+                   pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty,
                    SUM(pg_column_size(content)) as total_content_bytes,
                    SUM(pg_column_size(embedding)) as total_embedding_bytes
             FROM document_chunks
@@ -750,21 +754,21 @@ function render() {
         chunkStats = {
           chunk_count: stats.chunk_count || 0,
           total_content_bytes: stats.total_content_bytes || 0,
-          total_embedding_bytes: stats.total_embedding_bytes || 0
+          total_embedding_bytes: stats.total_embedding_bytes || 0,
+          content_pretty: stats.content_pretty || '-',
+          embedding_pretty: stats.embedding_pretty || '-'
         };
       }
     }
     
-    const contentKB = chunkStats.total_content_bytes ? (chunkStats.total_content_bytes / 1024).toFixed(1) : '-';
-    const embeddingKB = chunkStats.total_embedding_bytes ? (chunkStats.total_embedding_bytes / 1024).toFixed(1) : '-';
     const sourceName = meta.webpage_name || meta.source_url || meta.url || '-';
     
     return `<tr class="session-row" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'table-row':'none';this.classList.toggle('open')">
       <td>${fmtDateTime(r.created_at)}</td>
       <td class="mono source-cell" title="${sourceId}">${trunc(sourceName, 40)}</td>
       <td>${chunkStats.chunk_count || '-'}</td>
-      <td>${contentKB}</td>
-      <td>${embeddingKB}</td>
+      <td>${chunkStats.content_pretty || '-'}</td>
+      <td>${chunkStats.embedding_pretty || '-'}</td>
       <td>${callTypeLabel(r.api_call_type)}</td>
       <td>${r.model||'-'}</td>
       <td class="token-cell">${fmt(r.total_tokens || r.prompt_tokens || 0)}</td>
