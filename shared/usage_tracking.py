@@ -47,7 +47,7 @@ def text_payload_stats(value: Any) -> Dict[str, Any]:
 
 def text_payload_details(value: Any, *, max_chars: Optional[int] = None) -> Dict[str, Any]:
     """Return the actual text payload, capped to keep usage rows bounded."""
-    limit = max_chars or int(os.getenv("USAGE_TRACKING_MAX_TEXT_CHARS", "20000"))
+    limit = max_chars or int(os.getenv("USAGE_TRACKING_MAX_TEXT_CHARS", "1000000"))
 
     if value is None:
         text_parts = []
