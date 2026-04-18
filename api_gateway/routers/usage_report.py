@@ -71,6 +71,33 @@ async def _fetch_all_data():
             ).fetchall()
         ]
 
+        # Get chunk stats for files
+        file_chunk_stats = {
+            r.document_id: r
+            for r in (
+                await db.execute(
+                    text("""
+            SELECT document_id,
+                   COUNT(*) as chunk_count,
+                   SUM(LENGTH(content)) as total_content_bytes,
+                   SUM(
+                     CASE
+                       WHEN embedding IS NOT NULL THEN
+                         -- halfvec uses 4 bytes per dimension (float32)
+                         (array_length(embedding::real[], 1) * 4)
+                       ELSE 0
+                     END
+                   ) as total_embedding_bytes
+            FROM document_chunks
+            WHERE document_type = 'file'
+              AND document_id IN (SELECT id FROM file_uploads WHERE created_at >= :since)
+            GROUP BY document_id
+        """),
+                    {"since": since},
+                )
+            ).fetchall()
+        }
+
         websites = [
             _row_to_dict(r)
             for r in (
@@ -86,6 +113,32 @@ async def _fetch_all_data():
                 )
             ).fetchall()
         ]
+
+        # Get chunk stats for websites
+        website_chunk_stats = {
+            r.document_id: r
+            for r in (
+                await db.execute(
+                    text("""
+            SELECT document_id,
+                   COUNT(*) as chunk_count,
+                   SUM(LENGTH(content)) as total_content_bytes,
+                   SUM(
+                     CASE
+                       WHEN embedding IS NOT NULL THEN
+                         (array_length(embedding::real[], 1) * 4)
+                       ELSE 0
+                     END
+                   ) as total_embedding_bytes
+            FROM document_chunks
+            WHERE document_type = 'website'
+              AND document_id IN (SELECT id FROM scraped_websites WHERE created_at >= :since)
+            GROUP BY document_id
+        """),
+                    {"since": since},
+                )
+            ).fetchall()
+        }
 
         chat_messages = [
             _row_to_dict(r)
@@ -169,6 +222,8 @@ async def _fetch_all_data():
         "chat_messages": chat_messages,
         "run_steps": run_steps,
         "token_usage_log": token_usage_log,
+        "file_chunk_stats": file_chunk_stats,
+        "website_chunk_stats": website_chunk_stats,
     }
 
 
@@ -325,7 +380,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     </div>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th>Size</th><th>Char/Token Ratio</th><th>Source</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Source</th><th>Chunk Count</th><th title="Total content bytes in KB">Content KB</th><th title="Total embedding bytes in KB">Embedding KB</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th>Size</th><th>Char/Token Ratio</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -682,8 +737,31 @@ function render() {
   document.getElementById('token-log-table').innerHTML = ingestionTokenLog.slice(0,300).map(r => {
     const meta = parseMeta(r.request_metadata);
     const chunks = payloadTextChunks(meta);
+    
+    // Get source ID from metadata and look up chunk stats
+    const sourceId = meta.website_id || meta.file_id || '';
+    let chunkStats = { chunk_count: 0, total_content_bytes: 0, total_embedding_bytes: 0 };
+    if (sourceId) {
+      const stats = RAW.file_chunk_stats[sourceId] || RAW.website_chunk_stats[sourceId];
+      if (stats) {
+        chunkStats = {
+          chunk_count: stats.chunk_count || 0,
+          total_content_bytes: stats.total_content_bytes || 0,
+          total_embedding_bytes: stats.total_embedding_bytes || 0
+        };
+      }
+    }
+    
+    const contentKB = chunkStats.total_content_bytes ? (chunkStats.total_content_bytes / 1024).toFixed(1) : '-';
+    const embeddingKB = chunkStats.total_embedding_bytes ? (chunkStats.total_embedding_bytes / 1024).toFixed(1) : '-';
+    const sourceName = meta.webpage_name || meta.source_url || meta.url || '-';
+    
     return `<tr class="session-row" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'table-row':'none';this.classList.toggle('open')">
       <td>${fmtDateTime(r.created_at)}</td>
+      <td class="mono source-cell" title="${sourceId}">${trunc(sourceName, 40)}</td>
+      <td>${chunkStats.chunk_count || '-'}</td>
+      <td>${contentKB}</td>
+      <td>${embeddingKB}</td>
       <td>${callTypeLabel(r.api_call_type)}</td>
       <td>${r.model||'-'}</td>
       <td class="token-cell">${fmt(r.total_tokens || r.prompt_tokens || 0)}</td>
@@ -691,11 +769,10 @@ function render() {
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
       <td>${(() => { const t=r.total_tokens||r.prompt_tokens||0,c=payloadChars(meta)||0; return t>0 ? (c/t).toFixed(2) : '-'; })()}</td>
-      <td class="mono source-cell">${meta.source_url || meta.url || '-'}</td>
       <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
     </tr>
     <tr class="msg-row" style="display:none">
-      <td colspan="10">
+      <td colspan="13">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
