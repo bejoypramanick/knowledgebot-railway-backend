@@ -1017,7 +1017,7 @@ class ProcessingService:
             if not chunks:
                 raise Exception(f"Kreuzberg returned no chunks for {page_url}")
 
-            # Strip data URLs from chunks (already clean HTML, so should already be clean)
+            # Strip data URLs from chunks (should already be clean since HTML was cleaned before Kreuzberg)
             for chunk in chunks:
                 if isinstance(chunk.get("content"), str):
                     chunk["content"] = self._stripDataUrlImagesFromMarkdown(
@@ -1026,17 +1026,8 @@ class ProcessingService:
                 if isinstance(chunk.get("text"), str):
                     chunk["text"] = self._stripDataUrlImagesFromMarkdown(chunk["text"])
 
-            # Build markdown from chunks - this ensures both S3 and vector DB use the same content
-            markdown_from_chunks = "\n\n---\n\n".join(
-                c.get("content") or c.get("text") or ""
-                for c in chunks
-                if c.get("content") or c.get("text")
-            )
-
-            # Use chunks-based markdown for storage (this is what gets embedded)
-            final_markdown = (
-                markdown_from_chunks if markdown_from_chunks else markdown_content
-            )
+            # Use the same markdown for storage - it's the source that went to Kreuzberg
+            final_markdown = markdown_content
 
             for chunk in chunks:
                 if "metadata" not in chunk:
