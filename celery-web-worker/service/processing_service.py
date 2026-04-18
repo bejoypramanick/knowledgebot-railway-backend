@@ -939,9 +939,17 @@ class ProcessingService:
         if this is still the optimal way to use the Rust worker features.
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
+
+        # Step 1: Clean HTML - remove nav, menus, ads before sending to Kreuzberg
         cleaned_html = clean_html_preserving_images(html_content, page_url)
+
+        # Step 2: Strip data:image URLs from HTML BEFORE Kreuzberg
+        # This ensures both markdown and chunks come from the same clean source
+        html_no_data_urls = self._stripDataUrlImagesFromHtml(cleaned_html)
+
+        # Step 3: OCR images in cleaned HTML (without data URLs)
         html_with_image_text = await self._replacePageImagesWithOCRText(
-            cleaned_html, page_url, website_id
+            html_no_data_urls, page_url, website_id
         )
         html_filename = f"page_{url_hash}.html"
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
@@ -1009,6 +1017,7 @@ class ProcessingService:
             if not chunks:
                 raise Exception(f"Kreuzberg returned no chunks for {page_url}")
 
+            # Strip data URLs from chunks (already clean HTML, so should already be clean)
             for chunk in chunks:
                 if isinstance(chunk.get("content"), str):
                     chunk["content"] = self._stripDataUrlImagesFromMarkdown(
@@ -1016,6 +1025,18 @@ class ProcessingService:
                     )
                 if isinstance(chunk.get("text"), str):
                     chunk["text"] = self._stripDataUrlImagesFromMarkdown(chunk["text"])
+
+            # Build markdown from chunks - this ensures both S3 and vector DB use the same content
+            markdown_from_chunks = "\n\n---\n\n".join(
+                c.get("content") or c.get("text") or ""
+                for c in chunks
+                if c.get("content") or c.get("text")
+            )
+
+            # Use chunks-based markdown for storage (this is what gets embedded)
+            final_markdown = (
+                markdown_from_chunks if markdown_from_chunks else markdown_content
+            )
 
             for chunk in chunks:
                 if "metadata" not in chunk:
@@ -1028,7 +1049,7 @@ class ProcessingService:
 
             md_filename = f"page_{url_hash}.md"
             md_success, md_s3_key = await s3_file_storage.upload_file(
-                file_data=markdown_content.encode("utf-8"),
+                file_data=final_markdown.encode("utf-8"),
                 original_filename=md_filename,
                 file_type="processed",
             )
@@ -1040,7 +1061,7 @@ class ProcessingService:
             except Exception as cleanup_err:
                 logger.warning(f"⚠️ [CLEANUP] Failed to delete temp HTML: {cleanup_err}")
 
-            return markdown_content, processed_content_s3_key, chunks
+            return final_markdown, processed_content_s3_key, chunks
 
         except Exception as kreuzberg_err:
             try:
@@ -1475,6 +1496,24 @@ class ProcessingService:
             css_text,
             flags=re.IGNORECASE | re.DOTALL,
         )
+
+    def _stripDataUrlImagesFromHtml(self, html_content: str) -> str:
+        """Strip data:image URLs from HTML before sending to Kreuzberg."""
+        # Remove data:image src attributes from img tags
+        html_content = re.sub(
+            r'<img\b[^>]*\bsrc=["\']?data:image/[^"\'>]*["\']?[^>]*>',
+            "",
+            html_content,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        # Remove background-image with data:image
+        html_content = re.sub(
+            r'style=["\']([^"\']*)background-image:\s*url\([^)]*data:image/[^)]*\)["\']',
+            r'style="\1"',
+            html_content,
+            flags=re.IGNORECASE,
+        )
+        return html_content
 
     def _stripDataUrlImagesFromMarkdown(self, markdown_content: str) -> str:
         markdown_content = re.sub(
