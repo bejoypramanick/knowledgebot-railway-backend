@@ -383,7 +383,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     </div>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Source</th><th>Chunk Row Count</th><th>Content KB</th><th>Embedding KB</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th title="Size captured at embedding creation time">Size</th><th>Char/Token Ratio</th><th>Context</th></tr></thead>
+  <thead><tr><th>Date</th><th>Source</th><th>Chunk Row Count</th><th>Content KB</th><th>Embedding KB</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th title="Size of text payload sent to embedding API (not S3 file size)">Size</th><th>Char/Token Ratio</th><th>Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
