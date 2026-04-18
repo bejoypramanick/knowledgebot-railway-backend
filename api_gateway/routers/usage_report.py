@@ -96,14 +96,7 @@ async def _fetch_all_data():
             SELECT document_id,
                    COUNT(*) as chunk_count,
                    SUM(LENGTH(content)) as total_content_bytes,
-                   SUM(
-                     CASE
-                       WHEN embedding IS NOT NULL THEN
-                         -- halfvec uses 4 bytes per dimension (float32)
-                         (array_length(embedding::real[], 1) * 4)
-                       ELSE 0
-                     END
-                   ) as total_embedding_bytes
+                   SUM(pg_column_size(embedding)) as total_embedding_bytes
             FROM document_chunks
             WHERE document_type = 'file'
               AND document_id IN (SELECT id FROM file_uploads WHERE created_at >= :since)
@@ -139,13 +132,7 @@ async def _fetch_all_data():
             SELECT document_id,
                    COUNT(*) as chunk_count,
                    SUM(LENGTH(content)) as total_content_bytes,
-                   SUM(
-                     CASE
-                       WHEN embedding IS NOT NULL THEN
-                         (array_length(embedding::real[], 1) * 4)
-                       ELSE 0
-                     END
-                   ) as total_embedding_bytes
+                   SUM(pg_column_size(embedding)) as total_embedding_bytes
             FROM document_chunks
             WHERE document_type = 'website'
               AND document_id IN (SELECT id FROM scraped_websites WHERE created_at >= :since)
