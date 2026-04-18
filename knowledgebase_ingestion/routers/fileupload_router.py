@@ -740,18 +740,25 @@ async def upload_file_async(
             logger.info(f"   Task: tasks.process_file_upload_task")
             logger.info(f"   File ID: {file_id}")
 
-            result = file_celery.send_task(
-                'tasks.process_file_upload_task',
-                args=[
-                    file_id,  # Pass file_id instead of individual parameters
-                    user_email,  # Keep user_email for logging context
-                    tenant_id,
-                    tenant_slug,
-                    user_role_id,
-                ],
-                queue='file_processing'
-            )
-            celery_task_id = result.id
+            try:
+                result = file_celery.send_task(
+                    'tasks.process_file_upload_task',
+                    args=[
+                        file_id,  # Pass file_id instead of individual parameters
+                        user_email,  # Keep user_email for logging context
+                        tenant_id,
+                        tenant_slug,
+                        user_role_id,
+                    ],
+                    queue='file_processing'
+                )
+                celery_task_id = result.id
+            except Exception as celery_err:
+                error_message = f"Failed to queue file processing task: {celery_err}"
+                logger.error(f"❌ [CELERY_DISPATCH_FAILED] {error_message}", exc_info=True)
+                await update_file_status(file_id, "failed", error_message=error_message)
+                await _invalidate_kb_cache()
+                raise HTTPException(status_code=500, detail=error_message)
 
             logger.info(f"✅ [CELERY_DISPATCH_SUCCESS] Task dispatched to Celery")
             logger.info(f"   Celery Task ID: {celery_task_id}")
@@ -768,9 +775,12 @@ async def upload_file_async(
                 logger.info(f"⏱️  [DB_COMMIT_WAIT] Waited for DB commit")
             except Exception as db_err:
                 import traceback
+                error_message = f"Failed to store file processing task id: {db_err}"
                 logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
-                raise
+                await update_file_status(file_id, "failed", error_message=error_message)
+                await _invalidate_kb_cache()
+                raise HTTPException(status_code=500, detail=error_message)
 
             logger.info("✨ [UPLOAD_COMPLETE] File upload process completed successfully")
             await _invalidate_kb_cache()

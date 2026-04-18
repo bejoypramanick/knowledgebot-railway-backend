@@ -262,6 +262,11 @@ async def queue_website_for_scraping(
             logger.error(f"🚨 [ERROR_MESSAGE] {str(celery_err)}")
             logger.error(f"🚨 [ERROR_DETAILS] Full traceback:")
             logger.error("", exc_info=True)
+            await update_website_status(
+                website_id,
+                "failed",
+                error_message=f"Failed to queue website scraping task: {celery_err}",
+            )
             raise
 
         # Update DB record with the real Celery task ID
@@ -272,6 +277,11 @@ async def queue_website_for_scraping(
             logger.info(f"✅ [DB_UPDATE_SUCCESS] DB updated with Celery task ID")
         except Exception as db_err:
             logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}", exc_info=True)
+            await update_website_status(
+                website_id,
+                "failed",
+                error_message=f"Failed to store website scraping task id: {db_err}",
+            )
             raise
 
         logger.info("=" * 80)
