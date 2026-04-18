@@ -89,7 +89,7 @@ async def _fetch_all_data():
 
         # Get chunk stats for files
         file_chunk_stats = {
-            r.document_id: _chunk_stats_to_dict(r)
+            str(r.document_id): _chunk_stats_to_dict(r)
             for r in (
                 await db.execute(
                     text("""
@@ -125,7 +125,7 @@ async def _fetch_all_data():
 
         # Get chunk stats for websites
         website_chunk_stats = {
-            r.document_id: _chunk_stats_to_dict(r)
+            str(r.document_id): _chunk_stats_to_dict(r)
             for r in (
                 await db.execute(
                     text("""
