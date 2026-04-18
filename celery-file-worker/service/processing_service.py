@@ -469,7 +469,7 @@ async def process_file_content(
                     await (
                         kb_quota_service.fail_if_tenant_quota_breached_after_processing(
                             current_tenant_id,
-                            summary["used_bytes"] + file_size,
+                            summary["used_bytes"] + char_count,
                             "This file upload",
                         )
                     )

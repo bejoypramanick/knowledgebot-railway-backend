@@ -1779,7 +1779,7 @@ class ProcessingService:
         metrics = calculate_metrics(page_data.markdown)
         await self._enforce_quota_for_page(
             website_id=job_context.website_id,
-            page_bytes=metrics.get("file_size_bytes", 0),
+            char_count=metrics.get("char_count", 0),
         )
 
         if await self._isSinglePageMode(
@@ -1949,22 +1949,22 @@ class ProcessingService:
             storage_backend_state=storage_backend_state,
         )
 
-    async def _enforce_quota_for_page(self, website_id: str, page_bytes: int) -> None:
+    async def _enforce_quota_for_page(self, website_id: str, char_count: int) -> None:
         tenant_id = get_current_tenant_id()
         if not tenant_id:
             return
 
         summary = await kb_quota_service.get_tenant_quota_summary(tenant_id)
         processed_for_job = self._quota_usage_cache.get(website_id, 0)
-        final_total_bytes = (
-            summary["used_bytes"] + processed_for_job + max(page_bytes, 0)
+        final_total_chars = (
+            summary["used_bytes"] + processed_for_job + max(char_count, 0)
         )
         await kb_quota_service.fail_if_tenant_quota_breached_after_processing(
             tenant_id,
-            final_total_bytes,
+            final_total_chars,
             "This website scrape",
         )
-        self._quota_usage_cache[website_id] = processed_for_job + max(page_bytes, 0)
+        self._quota_usage_cache[website_id] = processed_for_job + max(char_count, 0)
 
     # ==================== UTILITIES ====================
 
