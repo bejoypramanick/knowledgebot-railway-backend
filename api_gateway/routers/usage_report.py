@@ -32,6 +32,22 @@ def _row_to_dict(row):
     return d
 
 
+def _chunk_stats_to_dict(row):
+    """Convert a chunk stats row to JSON-safe dict with string keys."""
+    d = dict(row._mapping)
+    # Convert document_id (UUID) to string for JSON
+    if "document_id" in d and d["document_id"]:
+        d["document_id"] = str(d["document_id"])
+    for k, v in d.items():
+        if isinstance(v, datetime):
+            d[k] = v.isoformat()
+        elif hasattr(v, "__str__") and not isinstance(
+            v, (int, float, bool, str, type(None))
+        ):
+            d[k] = str(v)
+    return d
+
+
 async def _fetch_all_data():
     """Fetch 365 days of data. JS will filter client-side."""
     since = datetime.utcnow() - timedelta(days=365)
@@ -73,7 +89,7 @@ async def _fetch_all_data():
 
         # Get chunk stats for files
         file_chunk_stats = {
-            r.document_id: r
+            r.document_id: _chunk_stats_to_dict(r)
             for r in (
                 await db.execute(
                     text("""
@@ -116,7 +132,7 @@ async def _fetch_all_data():
 
         # Get chunk stats for websites
         website_chunk_stats = {
-            r.document_id: r
+            r.document_id: _chunk_stats_to_dict(r)
             for r in (
                 await db.execute(
                     text("""
