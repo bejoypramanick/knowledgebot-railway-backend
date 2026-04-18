@@ -96,9 +96,7 @@ async def _fetch_all_data():
             SELECT document_id,
                    COUNT(*) as chunk_count,
                    pg_size_pretty(SUM(pg_column_size(content))) as content_pretty,
-                   pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty,
-                   SUM(pg_column_size(content)) as total_content_bytes,
-                   SUM(pg_column_size(embedding)) as total_embedding_bytes
+                   pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty
             FROM document_chunks
             WHERE document_type = 'file'
               AND document_id IN (SELECT id FROM file_uploads WHERE created_at >= :since)
@@ -134,9 +132,7 @@ async def _fetch_all_data():
             SELECT document_id,
                    COUNT(*) as chunk_count,
                    pg_size_pretty(SUM(pg_column_size(content))) as content_pretty,
-                   pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty,
-                   SUM(pg_column_size(content)) as total_content_bytes,
-                   SUM(pg_column_size(embedding)) as total_embedding_bytes
+                   pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty
             FROM document_chunks
             WHERE document_type = 'website'
               AND document_id IN (SELECT id FROM scraped_websites WHERE created_at >= :since)
@@ -753,8 +749,6 @@ function render() {
       if (stats) {
         chunkStats = {
           chunk_count: stats.chunk_count || 0,
-          total_content_bytes: stats.total_content_bytes || 0,
-          total_embedding_bytes: stats.total_embedding_bytes || 0,
           content_pretty: stats.content_pretty || '-',
           embedding_pretty: stats.embedding_pretty || '-'
         };
