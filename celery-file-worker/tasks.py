@@ -274,23 +274,7 @@ async def _broadcast_kb_quota_error(
 
         if not user_id:
             logger.warning(
-                f"⚠️ [BROADCAST] Could not find user ID for email {user_email}, falling back to broadcast"
-            )
-            from shared.redis_pubsub_manager import broadcast_event_to_all_agents
-
-            event_data = {
-                "event_type": "kb_quota_exceeded",
-                "tenant_id": tenant_id,
-                "user_email": user_email,
-                "website_id": website_id,
-                "file_id": file_id,
-                "url": url,
-                "error_message": error_message,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            await broadcast_event_to_all_agents(event_data, tenant_id=tenant_id)
-            logger.info(
-                f"📢 [BROADCAST] Fallback: broadcast to all agents in tenant {tenant_id}"
+                f"⚠️ [BROADCAST] Could not find user ID for email {user_email}, skipping notification"
             )
             return
 
