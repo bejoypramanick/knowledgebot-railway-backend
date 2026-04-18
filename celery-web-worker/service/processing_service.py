@@ -1012,19 +1012,11 @@ class ProcessingService:
                     f"Kreuzberg processing failed for {page_url}: {error_detail}"
                 )
 
-            markdown_content = self._stripDataUrlImagesFromMarkdown(kreuzberg_markdown)
+            # Use cleaned content directly from Kreuzberg (all cleaning done before sending to Kreuzberg)
+            markdown_content = kreuzberg_markdown
             chunks = kreuzberg_metadata.get("chunks") or []
             if not chunks:
                 raise Exception(f"Kreuzberg returned no chunks for {page_url}")
-
-            # Strip data URLs from chunks (should already be clean since HTML was cleaned before Kreuzberg)
-            for chunk in chunks:
-                if isinstance(chunk.get("content"), str):
-                    chunk["content"] = self._stripDataUrlImagesFromMarkdown(
-                        chunk["content"]
-                    )
-                if isinstance(chunk.get("text"), str):
-                    chunk["text"] = self._stripDataUrlImagesFromMarkdown(chunk["text"])
 
             # Use the same markdown for storage - it's the source that went to Kreuzberg
             final_markdown = markdown_content
