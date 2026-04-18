@@ -199,29 +199,6 @@ def process_file_upload_task(
                     f"❌ [DB_UPDATE] Failed to mark quota-blocked file as failed: {db_err}"
                 )
 
-            # Broadcast outside the main try block so it doesn't get swallowed
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                with tenant_context(
-                    tenant_id=tenant_id,
-                    tenant_slug=tenant_slug,
-                    user_role_id=user_role_id,
-                    user_email=user_email,
-                ):
-                    loop.run_until_complete(
-                        _broadcast_kb_quota_error(
-                            tenant_id=tenant_id,
-                            user_email=user_email,
-                            file_id=file_id,
-                            error_message=e.detail.get("message"),
-                        )
-                    )
-            except Exception as broadcast_err:
-                logger.error(
-                    f"❌ [BROADCAST] Failed to broadcast quota error: {broadcast_err}"
-                )
-
             return {"success": False, "error": e.detail.get("message")}
 
         # Retry with exponential backoff (60s, then 120s)
@@ -245,63 +222,3 @@ def process_file_upload_task(
                 "success": False,
                 "error": f"Processing failed after {self.max_retries} retries: {str(e)}",
             }
-
-
-async def _broadcast_kb_quota_error(
-    tenant_id: str,
-    user_email: str = None,
-    file_id: str = None,
-    website_id: str = None,
-    url: str = None,
-    error_message: str = None,
-):
-    """
-    Broadcast KB quota error to specific user for real-time notification.
-    """
-    try:
-        from shared.redis_pubsub_manager import (
-            broadcast_event_to_agent,
-            get_agent_channel_name,
-        )
-        from configuration.dao.chat_log_dao import ChatLogDAO
-        from datetime import datetime, timezone
-
-        # Get the agent's user ID from email
-        user_id = None
-        if user_email:
-            dao = ChatLogDAO()
-            user_id = await dao.get_user_id_by_email(user_email)
-
-        if not user_id:
-            logger.warning(
-                f"⚠️ [BROADCAST] Could not find user ID for email {user_email}, skipping notification"
-            )
-            return
-
-        channel_name = get_agent_channel_name(user_id, tenant_id=tenant_id)
-
-        event_data = {
-            "event_type": "kb_quota_exceeded",
-            "tenant_id": tenant_id,
-            "user_email": user_email,
-            "website_id": website_id,
-            "file_id": file_id,
-            "url": url,
-            "error_message": error_message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-        logger.info(
-            f"📢 [BROADCAST] About to broadcast to user {user_email} (ID: {user_id}) on channel: {channel_name}"
-        )
-        logger.info(f"📢 [BROADCAST] Event data: {event_data}")
-
-        await broadcast_event_to_agent(user_id, event_data, tenant_id=tenant_id)
-
-        logger.info(
-            f"📢 [BROADCAST] SUCCESS - KB quota error sent to user {user_email}: {error_message[:100] if error_message else 'unknown'}"
-        )
-    except Exception as broadcast_err:
-        logger.error(
-            f"❌ [BROADCAST] Failed to broadcast KB quota error: {broadcast_err}"
-        )
