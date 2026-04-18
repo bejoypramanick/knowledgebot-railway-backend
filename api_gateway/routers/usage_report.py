@@ -95,7 +95,7 @@ async def _fetch_all_data():
                     text("""
             SELECT document_id,
                    COUNT(*) as chunk_count,
-                   SUM(LENGTH(content)) as total_content_bytes,
+                   SUM(pg_column_size(content)) as total_content_bytes,
                    SUM(pg_column_size(embedding)) as total_embedding_bytes
             FROM document_chunks
             WHERE document_type = 'file'
@@ -131,7 +131,7 @@ async def _fetch_all_data():
                     text("""
             SELECT document_id,
                    COUNT(*) as chunk_count,
-                   SUM(LENGTH(content)) as total_content_bytes,
+                   SUM(pg_column_size(content)) as total_content_bytes,
                    SUM(pg_column_size(embedding)) as total_embedding_bytes
             FROM document_chunks
             WHERE document_type = 'website'
