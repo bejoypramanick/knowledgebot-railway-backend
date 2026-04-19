@@ -90,6 +90,7 @@ async def _fetch_all_data_once(tenant_id: str = None):
 
         # Use RLS-bypassing functions
         params = {"p_tenant_id": tenant_uuid, "p_since": since}
+        direct_params = {"tenant_id": tenant_uuid, "since": since}
         sessions = [
             _row_to_dict(r)
             for r in (
@@ -122,10 +123,16 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty
             FROM document_chunks
             WHERE document_type = 'file'
-              AND document_id IN (SELECT id FROM file_uploads WHERE created_at >= :since)
+              AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+              AND document_id IN (
+                SELECT id
+                FROM file_uploads
+                WHERE created_at >= :since
+                  AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+              )
             GROUP BY document_id
         """),
-                    {"since": since},
+                    direct_params,
                 )
             ).fetchall()
         }
@@ -153,10 +160,16 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty
             FROM document_chunks
             WHERE document_type = 'website'
-              AND document_id IN (SELECT id FROM scraped_websites WHERE created_at >= :since)
+              AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+              AND document_id IN (
+                SELECT id
+                FROM scraped_websites
+                WHERE created_at >= :since
+                  AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+              )
             GROUP BY document_id
         """),
-                    {"since": since},
+                    direct_params,
                 )
             ).fetchall()
         }
@@ -178,9 +191,10 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    cm.created_at
             FROM chat_messages cm
             WHERE cm.created_at >= :since
+              AND (:tenant_id IS NULL OR cm.tenant_id = :tenant_id)
             ORDER BY cm.created_at DESC
         """),
-                    {"since": since},
+                    direct_params,
                 )
             ).fetchall()
         ]
@@ -195,9 +209,10 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    token_count, token_source, created_at
             FROM agent_run_steps
             WHERE created_at >= :since
+              AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
             ORDER BY session_id, user_message_id, step_number
         """),
-                    {"since": since},
+                    direct_params,
                 )
             ).fetchall()
         ]
@@ -211,9 +226,10 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    tul.api_call_type, tul.request_metadata, tul.created_at
             FROM token_usage_log tul
             WHERE tul.created_at >= :since
+              AND (:tenant_id IS NULL OR tul.tenant_id = :tenant_id)
             ORDER BY tul.created_at DESC
         """),
-                {"since": since},
+                direct_params,
             )
         ).fetchall()
 
