@@ -385,17 +385,14 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 
 <div id="details-panel">
-<div class="section"><h2>Chat Sessions <span style="font-size:13px;color:var(--muted);font-weight:400">(click to expand messages)</span></h2><div class="table-wrap" style="max-height:700px"><table>
+<div class="section"><h2>Chat Sessions</h2><div class="table-wrap" style="max-height:700px"><table>
   <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Provider-reported input tokens">Prompt Tokens</th><th title="Provider-reported output tokens">Completion Tokens</th><th title="Gemini count_tokens totals for captured context text only">Captured Context Tokens</th><th title="Gemini count_tokens totals for visible message text">Message Tokens</th><th>Status</th></tr></thead>
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
 <div class="section" id="token-log-section">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:8px">
-    <h2 style="margin:0">Knowledge Ingestion <span style="font-size:13px;color:var(--muted);font-weight:400">(provider usage per ingestion request)</span></h2>
-    <div style="display:flex;gap:8px">
-      <button onclick="toggleAllRows('token-log-table', this)" id="btn-toggle-all" style="padding:4px 10px;font-size:11px;border-radius:6px;cursor:pointer;background:var(--card);border:1px solid var(--border);font-weight:600;color:var(--accent)">Expand All</button>
-    </div>
+    <h2 style="margin:0">Knowledge Ingestion</h2>
   </div>
   <div class="table-wrap"><table>
   <thead><tr><th>Date</th><th>Source</th><th>Chunk Row Count</th><th>Content KB</th><th>Embedding KB</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th title="Size of text payload sent to embedding API (not S3 file size)">Size</th><th>Char/Token Ratio</th><th>Context</th></tr></thead>
@@ -778,7 +775,6 @@ function render() {
       <td class="token-cell">${fmt((r.total_system_prompt_token_count||0)+(r.total_history_token_count||0)+(r.total_tool_def_token_count||0))}</td>
       <td class="token-cell">${fmt((r.total_user_msg_token_count||0)+(r.total_bot_response_token_count||0))}</td>
       <td>${badge(r.archive_status)}</td>`;
-    sessionRow.onclick = function() { toggleSession(this, r.id); };
     sessionsEl.appendChild(sessionRow);
   });
 
@@ -803,9 +799,9 @@ function render() {
     
     const sourceName = meta.webpage_name || meta.source_url || meta.url || '-';
     
-    return `<tr class="session-row" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'table-row':'none';this.classList.toggle('open')">
+    return `<tr>
       <td>${fmtDateTime(r.created_at)}</td>
-      <td class="mono source-cell" title="${sourceId}">${trunc(sourceName, 40)}</td>
+      <td class="mono source-cell">${trunc(sourceName, 40)}</td>
       <td>${chunkStats.chunk_count || '-'}</td>
       <td>${chunkStats.content_pretty || '-'}</td>
       <td>${chunkStats.embedding_pretty || '-'}</td>
@@ -816,20 +812,8 @@ function render() {
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
       <td>${(() => { const t=r.total_tokens||r.prompt_tokens||0,c=payloadChars(meta)||0; return t>0 ? (c/t).toFixed(2) : '-'; })()}</td>
-      <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(metadataSummary(meta))}</div></td>
+      <td>${escHtml(metadataSummary(meta))}</td>
     </tr>
-    <tr class="msg-row" style="display:none">
-      <td colspan="13">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
-          <div>
-            <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${chunks.length ? `${fmt(chunks.length)} captured text chunk${chunks.length===1?'':'s'}` : 'Text payload details'}</div>
-            ${meta.source_url ? `<div style="font-size:11px;color:var(--accent);font-weight:600;max-width:100%;overflow-wrap:anywhere;word-break:break-word">Source: <a href="${meta.source_url}" target="_blank" class="source-link">${meta.source_url}</a></div>` : ''}
-          </div>
-          <div style="font-size:10px;color:var(--muted);background:rgba(0,0,0,.04);padding:4px 8px;border-radius:4px">
-            Model: ${r.model} | Provider: ${r.provider}
-          </div>
-        </div>
-        ${renderPayloadText(meta)}
       </td>
     </tr>`;
   }).join('');
