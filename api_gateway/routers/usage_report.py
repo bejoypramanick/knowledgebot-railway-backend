@@ -123,12 +123,12 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty
             FROM document_chunks
             WHERE document_type = 'file'
-              AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+              AND (:tenant_id::UUID IS NULL OR tenant_id = :tenant_id::UUID)
               AND document_id IN (
                 SELECT id
                 FROM file_uploads
                 WHERE created_at >= :since
-                  AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+                  AND (:tenant_id::UUID IS NULL OR tenant_id = :tenant_id::UUID)
               )
             GROUP BY document_id
         """),
@@ -160,12 +160,12 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty
             FROM document_chunks
             WHERE document_type = 'website'
-              AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+              AND (:tenant_id::UUID IS NULL OR tenant_id = :tenant_id::UUID)
               AND document_id IN (
                 SELECT id
                 FROM scraped_websites
                 WHERE created_at >= :since
-                  AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+                  AND (:tenant_id::UUID IS NULL OR tenant_id = :tenant_id::UUID)
               )
             GROUP BY document_id
         """),
@@ -191,7 +191,7 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    cm.created_at
             FROM chat_messages cm
             WHERE cm.created_at >= :since
-              AND (:tenant_id IS NULL OR cm.tenant_id = :tenant_id)
+              AND (:tenant_id::UUID IS NULL OR cm.tenant_id = :tenant_id::UUID)
             ORDER BY cm.created_at DESC
         """),
                     direct_params,
@@ -209,7 +209,7 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    token_count, token_source, created_at
             FROM agent_run_steps
             WHERE created_at >= :since
-              AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+              AND (:tenant_id::UUID IS NULL OR tenant_id = :tenant_id::UUID)
             ORDER BY session_id, user_message_id, step_number
         """),
                     direct_params,
@@ -226,7 +226,7 @@ async def _fetch_all_data_once(tenant_id: str = None):
                    tul.api_call_type, tul.request_metadata, tul.created_at
             FROM token_usage_log tul
             WHERE tul.created_at >= :since
-              AND (:tenant_id IS NULL OR tul.tenant_id = :tenant_id)
+              AND (:tenant_id::UUID IS NULL OR tul.tenant_id = :tenant_id::UUID)
             ORDER BY tul.created_at DESC
         """),
                 direct_params,
