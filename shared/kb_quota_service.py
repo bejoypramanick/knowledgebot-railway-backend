@@ -263,8 +263,6 @@ class KBQuotaService:
                 detail={
                     "code": KB_QUOTA_EXCEEDED_CODE,
                     "message": f"Cannot add {item_label}. You have {remaining_mb_rounded} MB left but this page uses {content_mb_rounded} MB. Your monthly limit is {limit_mb_rounded} MB. Please delete existing content or ask your admin to increase the limit.",
-                    "tenant_id": tenant_id,
-                    "quota": summary,
                 },
             )
         return summary
@@ -277,26 +275,26 @@ class KBQuotaService:
     ) -> None:
         summary = await self.get_tenant_quota_summary(tenant_id)
         if final_total_bytes > summary["quota_limit_bytes"]:
+            final_mb = round(final_total_bytes / (1024 * 1024), 2)
+            limit_mb = round(summary["quota_limit_bytes"] / (1024 * 1024), 2)
             raise HTTPException(
                 status_code=409,
                 detail={
                     "code": KB_QUOTA_EXCEEDED_CODE,
-                    "message": f"{item_label} exceeded this tenant's monthly knowledge base quota.",
-                    "tenant_id": tenant_id,
-                    "quota": summary,
+                    "message": f"Cannot add {item_label}. This would exceed your monthly limit of {limit_mb} MB ({final_mb} MB used). Please delete existing content or ask your admin to increase the limit.",
                 },
             )
 
     def _raise_quota_exceeded(
         self, summary: Dict[str, Any], requested_bytes: int
     ) -> None:
+        requested_mb = round(requested_bytes / (1024 * 1024), 2)
+        limit_mb = round(summary["quota_limit_bytes"] / (1024 * 1024), 2)
         raise HTTPException(
             status_code=409,
             detail={
                 "code": KB_QUOTA_EXCEEDED_CODE,
-                "message": "Monthly knowledge base quota reached. Uploads and website scraping are blocked until the next calendar-month reset or a manual reset by superadmin.",
-                "requested_bytes": requested_bytes,
-                "quota": summary,
+                "message": f"Cannot add this content ({requested_mb} MB). Your monthly limit is {limit_mb} MB. Please delete existing content or ask your admin to increase the limit.",
             },
         )
 
