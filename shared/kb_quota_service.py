@@ -55,15 +55,20 @@ class KBQuotaService:
 
         limit_kb = int(override["quota_limit_kb"] or DEFAULT_MONTHLY_LIMIT_KB)
         limit_bytes = limit_kb * 1024
-        raw_usage_bytes = await self._get_usage_bytes_for_window(tenant_id, window)
-        usage_bytes = min(raw_usage_bytes, limit_bytes)
+        live_usage_bytes = await self._get_live_usage_bytes(tenant_id)
+        gross_usage_bytes = await self._get_usage_bytes_for_window(tenant_id, window)
+        usage_bytes = min(live_usage_bytes, limit_bytes)
+        gross_capped_bytes = min(gross_usage_bytes, limit_bytes)
         logger.info(
-            f"🔍 [KB_QUOTA] Usage bytes: raw={raw_usage_bytes}, capped={usage_bytes}, limit={limit_bytes}"
+            f"🔍 [KB_QUOTA] Usage bytes: live={live_usage_bytes}, gross={gross_usage_bytes}, capped_live={usage_bytes}, limit={limit_bytes}"
         )
         remaining_bytes = max(limit_bytes - usage_bytes, 0)
+        gross_remaining_bytes = max(limit_bytes - gross_capped_bytes, 0)
         quota_limit_mb = round(limit_kb / KB_PER_MB, 2)
         used_mb = round(usage_bytes / (KB_PER_MB * 1024), 2)
         remaining_mb = round(remaining_bytes / (KB_PER_MB * 1024), 2)
+        gross_used_mb = round(gross_capped_bytes / (KB_PER_MB * 1024), 2)
+        gross_remaining_mb = round(gross_remaining_bytes / (KB_PER_MB * 1024), 2)
 
         summary = {
             "tenant_id": tenant_id,
@@ -73,13 +78,23 @@ class KBQuotaService:
             "quota_limit_mb": quota_limit_mb,
             "quota_limit_bytes": limit_bytes,
             "used_bytes": usage_bytes,
-            "raw_used_bytes": raw_usage_bytes,
+            "raw_used_bytes": live_usage_bytes,
             "used_kb": round(usage_bytes / 1024, 2),
             "used_mb": used_mb,
             "remaining_bytes": remaining_bytes,
             "remaining_kb": round(remaining_bytes / 1024, 2),
             "remaining_mb": remaining_mb,
             "usage_percent": round((usage_bytes / limit_bytes) * 100, 2)
+            if limit_bytes > 0
+            else 0,
+            "gross_used_bytes": gross_capped_bytes,
+            "gross_raw_used_bytes": gross_usage_bytes,
+            "gross_used_kb": round(gross_capped_bytes / 1024, 2),
+            "gross_used_mb": gross_used_mb,
+            "gross_remaining_bytes": gross_remaining_bytes,
+            "gross_remaining_kb": round(gross_remaining_bytes / 1024, 2),
+            "gross_remaining_mb": gross_remaining_mb,
+            "gross_usage_percent": round((gross_capped_bytes / limit_bytes) * 100, 2)
             if limit_bytes > 0
             else 0,
             "cycle_start_at": window.cycle_start_at.isoformat(),
@@ -455,6 +470,29 @@ class KBQuotaService:
                     {"tenant_id": tenant_id, "cycle_start_at": window.cycle_start_at},
                 )
             ).scalar()
+        return int(total or 0)
+
+    async def _get_live_usage_bytes(self, tenant_id: str) -> int:
+        query = text(
+            """
+            WITH file_usage AS (
+                SELECT COALESCE(SUM(char_count), 0) AS total_bytes
+                FROM file_uploads
+                WHERE tenant_id = :tenant_id
+                  AND processing_status IN ('pending', 'queued', 'processing', 'completed')
+            ),
+            website_usage AS (
+                SELECT COALESCE(SUM(char_count), 0) AS total_bytes
+                FROM scraped_websites
+                WHERE tenant_id = :tenant_id
+                  AND processing_status IN ('pending', 'queued', 'processing', 'completed')
+                  AND parent_id IS NULL
+            )
+            SELECT COALESCE((SELECT total_bytes FROM file_usage), 0) + COALESCE((SELECT total_bytes FROM website_usage), 0) AS total_bytes
+            """
+        )
+        async with get_db_session() as session:
+            total = (await session.execute(query, {"tenant_id": tenant_id})).scalar()
         return int(total or 0)
 
 
