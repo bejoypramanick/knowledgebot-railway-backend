@@ -125,7 +125,7 @@ class AtomicDeletionService:
                             f"⚠️ [VECTOR_CLEANUP] Failed to delete chunks for file {file_id}: {vec_err}"
                         )
 
-                    # Step 5: Mark as deleted in database and clear char_count for quota
+                    # Step 5: Mark as deleted in database (char_count stays for additive monthly usage)
                     await session.execute(
                         text("""
                         UPDATE file_uploads
@@ -135,7 +135,6 @@ class AtomicDeletionService:
                             storage_backend_state = 'deleted',
                             s3_key = NULL,
                             processed_content_s3_key = NULL,
-                            char_count = 0,
                             updated_at = CURRENT_TIMESTAMP,
                             error_message = 'Atomically deleted at ' || CURRENT_TIMESTAMP::text
                         WHERE id = :id
@@ -257,7 +256,7 @@ class AtomicDeletionService:
                                 f"⚠️ [VECTOR_CLEANUP] Failed to delete chunks for website {website_id}: {vec_err}"
                             )
 
-                        # Step 5: Mark as deleted in database and clear char_count for quota
+                        # Step 5: Mark as deleted in database (char_count stays for additive monthly usage)
                         await conn.execute(
                             """
                             UPDATE scraped_websites
@@ -266,7 +265,6 @@ class AtomicDeletionService:
                                 storage_document_uri = NULL,
                                 storage_backend_state = 'deleted',
                                 processed_content_s3_key = NULL,
-                                char_count = 0,
                                 updated_at = NOW(),
                                 error_message = 'Atomically deleted at ' || NOW()::text
                             WHERE id = $1
