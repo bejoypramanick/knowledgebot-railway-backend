@@ -226,6 +226,9 @@ async def _fetch_all_data():
             f"Sample metadata type: {type(first_meta)} value: {str(first_meta)[:100]}"
         )
 
+    logger.info(
+        f"Fetched {len(sessions)} sessions, {len(files)} files, {len(websites)} websites, {len(tenants)} tenants"
+    )
     return {
         "tenants": tenants,
         "sessions": sessions,
