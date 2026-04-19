@@ -2436,7 +2436,15 @@ async def update_superadmin_kb_limit(
         body.get("quota_limit_kb")
         or round(float(body.get("quota_limit_mb") or 0) * 1024)
     )
-    data = await kb_quota_service.set_tenant_quota_limit(tenant_id, quota_limit_kb)
+    storage_quota_limit_kb = body.get("storage_quota_limit_kb")
+    if storage_quota_limit_kb is None and body.get("storage_quota_limit_mb") is not None:
+        storage_quota_limit_kb = round(float(body.get("storage_quota_limit_mb")) * 1024)
+    data = await kb_quota_service.set_tenant_quota_limit(
+        tenant_id,
+        quota_limit_kb,
+        body.get("quota_cycle"),
+        int(storage_quota_limit_kb) if storage_quota_limit_kb is not None else None,
+    )
     return {"success": True, "data": data}
 
 
@@ -2450,9 +2458,14 @@ async def manual_reset_superadmin_kb_limit(
     quota_limit_kb = body.get("quota_limit_kb")
     if quota_limit_kb is None and body.get("quota_limit_mb") is not None:
         quota_limit_kb = round(float(body.get("quota_limit_mb")) * 1024)
+    storage_quota_limit_kb = body.get("storage_quota_limit_kb")
+    if storage_quota_limit_kb is None and body.get("storage_quota_limit_mb") is not None:
+        storage_quota_limit_kb = round(float(body.get("storage_quota_limit_mb")) * 1024)
     data = await kb_quota_service.manual_reset_tenant_quota(
         tenant_id,
         int(quota_limit_kb) if quota_limit_kb is not None else None,
+        body.get("quota_cycle"),
+        int(storage_quota_limit_kb) if storage_quota_limit_kb is not None else None,
     )
     return {"success": True, "data": data}
 

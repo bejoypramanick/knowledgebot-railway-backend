@@ -15,6 +15,7 @@ logger = get_otel_logger("kb_quota_service", "shared")
 DEFAULT_MONTHLY_LIMIT_KB = 20 * 1024
 KB_PER_MB = 1024
 KB_QUOTA_EXCEEDED_CODE = "kb_quota_exceeded"
+VALID_QUOTA_CYCLES = {"daily", "monthly"}
 
 
 @dataclass
@@ -43,8 +44,10 @@ class KBQuotaService:
             logger.error(f"❌ [KB_QUOTA] Tenant not found: {tenant_id}")
             raise HTTPException(status_code=404, detail="Tenant not found")
 
+        config = await self._get_or_create_quota_config(tenant_id)
+        quota_cycle = self._normalize_quota_cycle(config.get("quota_cycle"))
         now = datetime.now(timezone.utc)
-        window = self._build_quota_window(tenant_id, tenant["created_at"], now)
+        window = self._build_quota_window(tenant_id, tenant["created_at"], now, quota_cycle)
 
         logger.info(
             f"🔍 [KB_QUOTA] Quota window: cycle_start={window.cycle_start_at}, cycle_end={window.cycle_end_at}"
@@ -53,18 +56,21 @@ class KBQuotaService:
         override = await self._get_or_create_monthly_override(tenant_id, window)
         logger.info(f"🔍 [KB_QUOTA] Override config: {override}")
 
-        limit_kb = int(override["quota_limit_kb"] or DEFAULT_MONTHLY_LIMIT_KB)
+        limit_kb = int(override["quota_limit_kb"] or config.get("quota_limit_kb") or DEFAULT_MONTHLY_LIMIT_KB)
+        storage_limit_kb = int(config.get("storage_quota_limit_kb") or limit_kb)
         limit_bytes = limit_kb * 1024
+        storage_limit_bytes = storage_limit_kb * 1024
         live_usage_bytes = await self._get_live_usage_bytes(tenant_id)
         gross_usage_bytes = await self._get_usage_bytes_for_window(tenant_id, window)
-        usage_bytes = min(live_usage_bytes, limit_bytes)
+        usage_bytes = min(live_usage_bytes, storage_limit_bytes)
         gross_capped_bytes = min(gross_usage_bytes, limit_bytes)
         logger.info(
-            f"🔍 [KB_QUOTA] Usage bytes: live={live_usage_bytes}, gross={gross_usage_bytes}, capped_live={usage_bytes}, limit={limit_bytes}"
+            f"🔍 [KB_QUOTA] Usage bytes: live={live_usage_bytes}, gross={gross_usage_bytes}, capped_live={usage_bytes}, upload_limit={limit_bytes}, storage_limit={storage_limit_bytes}"
         )
-        remaining_bytes = max(limit_bytes - usage_bytes, 0)
+        remaining_bytes = max(storage_limit_bytes - usage_bytes, 0)
         gross_remaining_bytes = max(limit_bytes - gross_capped_bytes, 0)
         quota_limit_mb = round(limit_kb / KB_PER_MB, 2)
+        storage_quota_limit_mb = round(storage_limit_kb / KB_PER_MB, 2)
         used_mb = round(usage_bytes / (KB_PER_MB * 1024), 2)
         remaining_mb = round(remaining_bytes / (KB_PER_MB * 1024), 2)
         gross_used_mb = round(gross_capped_bytes / (KB_PER_MB * 1024), 2)
@@ -77,6 +83,10 @@ class KBQuotaService:
             "quota_limit_kb": limit_kb,
             "quota_limit_mb": quota_limit_mb,
             "quota_limit_bytes": limit_bytes,
+            "quota_cycle": quota_cycle,
+            "storage_quota_limit_kb": storage_limit_kb,
+            "storage_quota_limit_mb": storage_quota_limit_mb,
+            "storage_quota_limit_bytes": storage_limit_bytes,
             "used_bytes": usage_bytes,
             "raw_used_bytes": live_usage_bytes,
             "used_kb": round(usage_bytes / 1024, 2),
@@ -84,8 +94,8 @@ class KBQuotaService:
             "remaining_bytes": remaining_bytes,
             "remaining_kb": round(remaining_bytes / 1024, 2),
             "remaining_mb": remaining_mb,
-            "usage_percent": round((usage_bytes / limit_bytes) * 100, 2)
-            if limit_bytes > 0
+            "usage_percent": round((usage_bytes / storage_limit_bytes) * 100, 2)
+            if storage_limit_bytes > 0
             else 0,
             "gross_used_bytes": gross_capped_bytes,
             "gross_raw_used_bytes": gross_usage_bytes,
@@ -106,7 +116,8 @@ class KBQuotaService:
             "last_manual_reset_at": override["last_manual_reset_at"].isoformat()
             if override.get("last_manual_reset_at")
             else None,
-            "is_limit_reached": usage_bytes >= limit_bytes,
+            "is_limit_reached": usage_bytes >= storage_limit_bytes,
+            "is_upload_limit_reached": gross_capped_bytes >= limit_bytes,
         }
         logger.info(f"✅ [KB_QUOTA] Summary: {summary}")
         return summary
@@ -150,32 +161,68 @@ class KBQuotaService:
         return summaries
 
     async def set_tenant_quota_limit(
-        self, tenant_id: str, quota_limit_kb: int
+        self,
+        tenant_id: str,
+        quota_limit_kb: int,
+        quota_cycle: Optional[str] = None,
+        storage_quota_limit_kb: Optional[int] = None,
     ) -> Dict[str, Any]:
         if quota_limit_kb <= 0:
             raise HTTPException(
                 status_code=400, detail="Quota limit must be greater than 0 KB"
             )
+        if storage_quota_limit_kb is not None and int(storage_quota_limit_kb) <= 0:
+            raise HTTPException(
+                status_code=400, detail="Storage quota limit must be greater than 0 KB"
+            )
+        existing_config = await self._get_or_create_quota_config(tenant_id)
+        normalized_cycle = self._normalize_quota_cycle(
+            quota_cycle or existing_config.get("quota_cycle")
+        )
+        normalized_storage_limit_kb = int(
+            storage_quota_limit_kb
+            if storage_quota_limit_kb is not None
+            else existing_config.get("storage_quota_limit_kb") or quota_limit_kb
+        )
 
         query = text(
             """
-            INSERT INTO tenant_kb_quota_config (tenant_id, quota_limit_kb, created_at, updated_at)
-            VALUES (:tenant_id, :quota_limit_kb, NOW(), NOW())
+            INSERT INTO tenant_kb_quota_config (
+                tenant_id,
+                quota_limit_kb,
+                storage_quota_limit_kb,
+                quota_cycle,
+                created_at,
+                updated_at
+            )
+            VALUES (:tenant_id, :quota_limit_kb, :storage_quota_limit_kb, :quota_cycle, NOW(), NOW())
             ON CONFLICT (tenant_id) DO UPDATE
             SET quota_limit_kb = EXCLUDED.quota_limit_kb,
+                storage_quota_limit_kb = EXCLUDED.storage_quota_limit_kb,
+                quota_cycle = EXCLUDED.quota_cycle,
                 updated_at = NOW()
             """
         )
         async with get_db_session() as session:
             await session.execute(
-                query, {"tenant_id": tenant_id, "quota_limit_kb": quota_limit_kb}
+                query,
+                {
+                    "tenant_id": tenant_id,
+                    "quota_limit_kb": quota_limit_kb,
+                    "storage_quota_limit_kb": normalized_storage_limit_kb,
+                    "quota_cycle": normalized_cycle,
+                },
             )
             await session.commit()
 
         return await self.get_tenant_quota_summary(tenant_id)
 
     async def manual_reset_tenant_quota(
-        self, tenant_id: str, new_limit_kb: Optional[int] = None
+        self,
+        tenant_id: str,
+        new_limit_kb: Optional[int] = None,
+        quota_cycle: Optional[str] = None,
+        storage_quota_limit_kb: Optional[int] = None,
     ) -> Dict[str, Any]:
         tenant = await self._get_tenant_row(tenant_id)
         if not tenant:
@@ -185,12 +232,27 @@ class KBQuotaService:
             raise HTTPException(
                 status_code=400, detail="Quota limit must be greater than 0 KB"
             )
+        if storage_quota_limit_kb is not None and int(storage_quota_limit_kb) <= 0:
+            raise HTTPException(
+                status_code=400, detail="Storage quota limit must be greater than 0 KB"
+            )
 
+        config = await self._get_or_create_quota_config(tenant_id)
+        normalized_cycle = self._normalize_quota_cycle(quota_cycle or config.get("quota_cycle"))
         now = datetime.now(timezone.utc)
-        window = self._build_quota_window(tenant_id, tenant["created_at"], now)
+        window = self._build_quota_window(tenant_id, tenant["created_at"], now, normalized_cycle)
 
-        if new_limit_kb is not None:
-            await self.set_tenant_quota_limit(tenant_id, int(new_limit_kb))
+        if new_limit_kb is not None or quota_cycle is not None or storage_quota_limit_kb is not None:
+            await self.set_tenant_quota_limit(
+                tenant_id,
+                int(new_limit_kb if new_limit_kb is not None else config["quota_limit_kb"]),
+                normalized_cycle,
+                int(
+                    storage_quota_limit_kb
+                    if storage_quota_limit_kb is not None
+                    else config.get("storage_quota_limit_kb") or config["quota_limit_kb"]
+                ),
+            )
 
         query = text(
             """
@@ -254,8 +316,10 @@ class KBQuotaService:
         self, tenant_id: str, requested_bytes: int
     ) -> Dict[str, Any]:
         summary = await self.get_tenant_quota_summary(tenant_id)
-        if summary["used_bytes"] + requested_bytes > summary["quota_limit_bytes"]:
-            self._raise_quota_exceeded(summary, requested_bytes)
+        if summary["gross_raw_used_bytes"] + requested_bytes > summary["quota_limit_bytes"]:
+            self._raise_quota_exceeded(summary, requested_bytes, limit_type="upload")
+        if summary["raw_used_bytes"] + requested_bytes > summary["storage_quota_limit_bytes"]:
+            self._raise_quota_exceeded(summary, requested_bytes, limit_type="storage")
         return summary
 
     async def check_quota_before_embedding(
@@ -263,20 +327,33 @@ class KBQuotaService:
     ) -> Dict[str, Any]:
         """Check quota right before embedding generation. Returns summary if within quota, raises HTTPException if exceeded."""
         summary = await self.get_tenant_quota_summary(tenant_id)
-        if summary["used_bytes"] + content_bytes > summary["quota_limit_bytes"]:
+        if summary["gross_raw_used_bytes"] + content_bytes > summary["quota_limit_bytes"]:
             remaining_bytes = max(
-                summary["quota_limit_bytes"] - summary["used_bytes"], 0
+                summary["quota_limit_bytes"] - summary["gross_raw_used_bytes"], 0
             )
-            remaining_mb = round(remaining_bytes / (1024 * 1024), 2)
-            content_mb = round(content_bytes / (1024 * 1024), 2)
             content_mb_rounded = round(content_bytes / (1024 * 1024), 2)
             limit_mb_rounded = round(summary["quota_limit_bytes"] / (1024 * 1024), 2)
+            remaining_mb_rounded = round(remaining_bytes / (1024 * 1024), 2)
+            cycle_label = summary.get("quota_cycle", "monthly")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": KB_QUOTA_EXCEEDED_CODE,
+                    "message": f"Cannot add {item_label}. You have {remaining_mb_rounded} MB left but this content uses {content_mb_rounded} MB. Your {cycle_label} upload limit is {limit_mb_rounded} MB. Please ask your admin to increase the limit.",
+                },
+            )
+        if summary["raw_used_bytes"] + content_bytes > summary["storage_quota_limit_bytes"]:
+            remaining_bytes = max(
+                summary["storage_quota_limit_bytes"] - summary["raw_used_bytes"], 0
+            )
+            content_mb_rounded = round(content_bytes / (1024 * 1024), 2)
+            limit_mb_rounded = round(summary["storage_quota_limit_bytes"] / (1024 * 1024), 2)
             remaining_mb_rounded = round(remaining_bytes / (1024 * 1024), 2)
             raise HTTPException(
                 status_code=409,
                 detail={
                     "code": KB_QUOTA_EXCEEDED_CODE,
-                    "message": f"Cannot add {item_label}. You have {remaining_mb_rounded} MB left but this page uses {content_mb_rounded} MB. Your monthly limit is {limit_mb_rounded} MB. Please delete existing content or ask your admin to increase the limit.",
+                    "message": f"Cannot add {item_label}. You have {remaining_mb_rounded} MB storage left but this content uses {content_mb_rounded} MB. Your storage limit is {limit_mb_rounded} MB. Please delete existing content or ask your admin to increase the limit.",
                 },
             )
         return summary
@@ -288,27 +365,36 @@ class KBQuotaService:
         item_label: str,
     ) -> None:
         summary = await self.get_tenant_quota_summary(tenant_id)
-        if final_total_bytes > summary["quota_limit_bytes"]:
+        if final_total_bytes > summary["storage_quota_limit_bytes"]:
             final_mb = round(final_total_bytes / (1024 * 1024), 2)
-            limit_mb = round(summary["quota_limit_bytes"] / (1024 * 1024), 2)
+            limit_mb = round(summary["storage_quota_limit_bytes"] / (1024 * 1024), 2)
             raise HTTPException(
                 status_code=409,
                 detail={
                     "code": KB_QUOTA_EXCEEDED_CODE,
-                    "message": f"Cannot add {item_label}. This would exceed your monthly limit of {limit_mb} MB ({final_mb} MB used). Please delete existing content or ask your admin to increase the limit.",
+                    "message": f"Cannot add {item_label}. This would exceed your storage limit of {limit_mb} MB ({final_mb} MB used). Please delete existing content or ask your admin to increase the limit.",
                 },
             )
 
     def _raise_quota_exceeded(
-        self, summary: Dict[str, Any], requested_bytes: int
+        self,
+        summary: Dict[str, Any],
+        requested_bytes: int,
+        limit_type: str = "upload",
     ) -> None:
         requested_mb = round(requested_bytes / (1024 * 1024), 2)
-        limit_mb = round(summary["quota_limit_bytes"] / (1024 * 1024), 2)
+        if limit_type == "storage":
+            limit_mb = round(summary["storage_quota_limit_bytes"] / (1024 * 1024), 2)
+            message = f"Cannot add this content ({requested_mb} MB). Your storage limit is {limit_mb} MB. Please delete existing content or ask your admin to increase the limit."
+        else:
+            limit_mb = round(summary["quota_limit_bytes"] / (1024 * 1024), 2)
+            cycle_label = summary.get("quota_cycle", "monthly")
+            message = f"Cannot add this content ({requested_mb} MB). Your {cycle_label} upload limit is {limit_mb} MB. Please ask your admin to increase the limit."
         raise HTTPException(
             status_code=409,
             detail={
                 "code": KB_QUOTA_EXCEEDED_CODE,
-                "message": f"Cannot add this content ({requested_mb} MB). Your monthly limit is {limit_mb} MB. Please delete existing content or ask your admin to increase the limit.",
+                "message": message,
             },
         )
 
@@ -333,12 +419,18 @@ class KBQuotaService:
         tenant_id: str,
         tenant_created_at: datetime,
         now: datetime,
+        quota_cycle: str = "monthly",
     ) -> TenantQuotaWindow:
         tenant_created_at_utc = tenant_created_at.astimezone(timezone.utc)
-        cycle_start_at = now.astimezone(timezone.utc).replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
-        cycle_end_at = self._add_one_month(cycle_start_at)
+        now_utc = now.astimezone(timezone.utc)
+        if self._normalize_quota_cycle(quota_cycle) == "daily":
+            cycle_start_at = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+            cycle_end_at = cycle_start_at + timedelta(days=1)
+        else:
+            cycle_start_at = now_utc.replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            )
+            cycle_end_at = self._add_one_month(cycle_start_at)
         return TenantQuotaWindow(
             tenant_id=tenant_id,
             tenant_created_at=tenant_created_at_utc,
@@ -409,6 +501,44 @@ class KBQuotaService:
         }
         async with get_db_session() as session:
             row = (await session.execute(query, params)).mappings().first()
+            await session.commit()
+        return dict(row)
+
+    def _normalize_quota_cycle(self, quota_cycle: Optional[str]) -> str:
+        normalized = str(quota_cycle or "monthly").strip().lower()
+        if normalized not in VALID_QUOTA_CYCLES:
+            raise HTTPException(
+                status_code=400, detail="Quota cycle must be daily or monthly"
+            )
+        return normalized
+
+    async def _get_or_create_quota_config(self, tenant_id: str) -> Dict[str, Any]:
+        query = text(
+            """
+            INSERT INTO tenant_kb_quota_config (
+                tenant_id,
+                quota_limit_kb,
+                storage_quota_limit_kb,
+                quota_cycle,
+                created_at,
+                updated_at
+            )
+            VALUES (:tenant_id, :default_limit_kb, :default_limit_kb, 'monthly', NOW(), NOW())
+            ON CONFLICT (tenant_id) DO UPDATE
+            SET updated_at = tenant_kb_quota_config.updated_at
+            RETURNING tenant_id, quota_limit_kb, storage_quota_limit_kb, quota_cycle
+            """
+        )
+        async with get_db_session() as session:
+            row = (
+                await session.execute(
+                    query,
+                    {
+                        "tenant_id": tenant_id,
+                        "default_limit_kb": DEFAULT_MONTHLY_LIMIT_KB,
+                    },
+                )
+            ).mappings().first()
             await session.commit()
         return dict(row)
 
