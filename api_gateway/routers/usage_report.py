@@ -251,7 +251,11 @@ async def _fetch_all_data(tenant_id: str = None):
 @router.get("/usage", response_class=HTMLResponse)
 async def usage_report(request: Request, tenant: str = ""):
     """Single endpoint. Filter by tenant on server-side via ?tenant= query param."""
+    print(f"[USAGE REPORT] tenant param: '{tenant}'")
     data = await _fetch_all_data(tenant_id=tenant if tenant else None)
+    print(
+        f"[USAGE REPORT] returned {len(data.get('sessions', []))} sessions, {len(data.get('files', []))} files"
+    )
     data_json = json.dumps(data, default=str)
 
     html = (
@@ -1097,10 +1101,12 @@ function downloadExcel() {
 
 // === INIT ===
 currentTenant = getTenantFromUrl();
+console.log('currentTenant from URL:', currentTenant);
 initTenantFilter();
 if (currentTenant) {
   document.getElementById('tenant-filter').value = currentTenant;
 }
+console.log('Sessions in RAW:', RAW.sessions ? RAW.sessions.length : 0);
 render();
 </script>
 </body>
