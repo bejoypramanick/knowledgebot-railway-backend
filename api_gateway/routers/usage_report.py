@@ -53,18 +53,7 @@ async def _fetch_all_data(tenant_id: str = None):
     from uuid import UUID
 
     since = datetime.utcnow() - timedelta(days=365)
-
-    files_query = """
-        SELECT fu.id, fu.tenant_id, fu.original_filename, fu.display_name, fu.file_extension, fu.processing_status,
-               fu.file_size, fu.char_count,
-               fu.filestore_character_count, fu.filestore_word_count, fu.filestore_token_count,
-               fu.processed_by_extractor, fu.created_at
-        FROM file_uploads fu WHERE fu.created_at >= :since"""
-    files_params = {"since": since}
-    if tenant_id:
-        files_query += " AND fu.tenant_id = :tenant_id"
-        files_params["tenant_id"] = tenant_id
-    files_query += " ORDER BY fu.created_at DESC"
+    tenant_uuid = UUID(tenant_id) if tenant_id else None
 
     async with get_db_session() as db:
         tenants = {
@@ -74,28 +63,26 @@ async def _fetch_all_data(tenant_id: str = None):
             ).fetchall()
         }
 
-        params = {"since": since}
-        sessions_query = """
-            SELECT cs.id, cs.tenant_id, cs.started_at, cs.last_activity_at, cs.message_count,
-                   cs.total_character_count, cs.total_word_count, cs.total_token_count,
-                   cs.total_message_token_count, cs.total_prompt_token_count, cs.total_completion_token_count,
-                   cs.total_system_prompt_token_count, cs.total_history_token_count,
-                   cs.total_tool_def_token_count, cs.total_user_msg_token_count, cs.total_bot_response_token_count,
-                   cs.archive_status, cs.sentiment, cs.duration_minutes, cs.created_at
-            FROM chat_sessions cs WHERE cs.created_at >= :since"""
-        if tenant_id:
-            sessions_query += " AND cs.tenant_id = :tenant_id"
-            params["tenant_id"] = tenant_id
-        sessions_query += " ORDER BY cs.created_at DESC"
-
+        # Use RLS-bypassing functions
+        params = {"p_tenant_id": tenant_uuid, "p_since": since}
         sessions = [
             _row_to_dict(r)
-            for r in (await db.execute(text(sessions_query), params)).fetchall()
+            for r in (
+                await db.execute(
+                    text("SELECT * FROM get_usage_sessions(:p_tenant_id, :p_since)"),
+                    params,
+                )
+            ).fetchall()
         ]
 
         files = [
             _row_to_dict(r)
-            for r in (await db.execute(text(files_query), files_params)).fetchall()
+            for r in (
+                await db.execute(
+                    text("SELECT * FROM get_usage_files(:p_tenant_id, :p_since)"),
+                    params,
+                )
+            ).fetchall()
         ]
 
         # Get chunk stats for files
@@ -118,22 +105,14 @@ async def _fetch_all_data(tenant_id: str = None):
             ).fetchall()
         }
 
-        websites_query = """
-            SELECT sw.id, sw.tenant_id, sw.original_url, sw.title, sw.processing_status, sw.pages_scraped,
-                   sw.file_size, sw.char_count,
-                   sw.filestore_character_count, sw.filestore_word_count, sw.filestore_token_count,
-                   sw.parent_id, sw.depth, sw.created_at
-            FROM scraped_websites sw WHERE sw.created_at >= :since"""
-        websites_params = {"since": since}
-        if tenant_id:
-            websites_query += " AND sw.tenant_id = :tenant_id"
-            websites_params["tenant_id"] = tenant_id
-        websites_query += " ORDER BY sw.created_at DESC"
-
+        # Use RLS-bypassing function for websites
         websites = [
             _row_to_dict(r)
             for r in (
-                await db.execute(text(websites_query), websites_params)
+                await db.execute(
+                    text("SELECT * FROM get_usage_websites(:p_tenant_id, :p_since)"),
+                    params,
+                )
             ).fetchall()
         ]
 
