@@ -29,8 +29,6 @@ gevent>=24.2.1
 nest-asyncio>=1.5.8
 # MessagePack for extractor result deserialization
 msgpack>=1.0.5
-# Chunking library
-chonkie[all]
 # Google Generative AI (NEW SDK)
 google-genai>=1.60.0
 # OpenAI embeddings

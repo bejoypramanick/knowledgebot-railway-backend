@@ -29,7 +29,6 @@ lxml>=4.9.0
 markdownify>=0.11.6
 tenacity>=8.2.2
 trafilatura>=1.12.0
-chonkie[all]
 # AWS S3 for file storage
 boto3>=1.34.0
 # PII Detection in Logs (Presidio - regex-only, no NLP models)

@@ -21,7 +21,7 @@ from shared.kreuzberg_integration import (
     should_use_kreuzberg_for_file,
     create_markdown_temp_file,
 )
-from shared.chunking_service import chunking_service
+
 from shared.sqlalchemy_db import get_db_session
 from shared.file_metrics import calculate_metrics
 
@@ -364,19 +364,6 @@ async def process_file_content(
                 f"🤖 [VECTOR_DB] Uploading chunks to pgvector - Original: {original_filename}..."
             )
             try:
-                # Only apply local chunking for raw non-Kreuzberg text inputs.
-                if (
-                    not semantic_chunks
-                    and content_for_upload
-                    and not processed_by_extractor
-                ):
-                    logger.info(
-                        f"🧩 [CHUNKING] No chunks found, applying Chonkie to content_for_upload..."
-                    )
-                    semantic_chunks = await chunking_service.chunk_text(
-                        content_for_upload, original_filename
-                    )
-
                 from shared.vector_dao import vector_dao
 
                 chunks_to_insert = semantic_chunks
