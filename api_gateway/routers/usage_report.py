@@ -429,14 +429,18 @@ function filterByDate(arr, days, dateField='created_at') {
 // Tenant filtering
 let currentTenant = '';
 const TENANTS = RAW.tenants || {};
+console.log('TENANTS:', TENANTS);
+console.log('Sample session tenant_id:', RAW.sessions?.[0]?.tenant_id);
 
 function setTenant(id) {
+  console.log('setTenant:', id);
   currentTenant = id;
   render();
 }
 
 function filterByTenant(arr) {
   if (!currentTenant) return arr;
+  console.log('Filtering by tenant:', currentTenant, 'sample tenant_id:', arr[0]?.tenant_id, 'type:', typeof arr[0]?.tenant_id);
   return arr.filter(r => r.tenant_id === currentTenant);
 }
 
