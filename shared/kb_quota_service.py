@@ -255,11 +255,14 @@ class KBQuotaService:
             )
             remaining_mb = round(remaining_bytes / (1024 * 1024), 2)
             content_mb = round(content_bytes / (1024 * 1024), 2)
+            content_mb_rounded = round(content_bytes / (1024 * 1024), 2)
+            limit_mb_rounded = round(summary["quota_limit_bytes"] / (1024 * 1024), 2)
+            remaining_mb_rounded = round(remaining_bytes / (1024 * 1024), 2)
             raise HTTPException(
                 status_code=409,
                 detail={
                     "code": KB_QUOTA_EXCEEDED_CODE,
-                    "message": f"{item_label} cannot be processed. Adding this content ({content_mb} MB) would exceed your monthly KB quota ({summary['quota_limit_mb']} MB). You have {remaining_mb} MB remaining. Please contact your administrator to reset or change the quota.",
+                    "message": f"Cannot add '{item_label}'. You have {remaining_mb_rounded} MB left but this page uses {content_mb_rounded} MB. Your monthly limit is {limit_mb_rounded} MB. Please delete existing content or ask your admin to increase the limit.",
                     "tenant_id": tenant_id,
                     "quota": summary,
                 },
