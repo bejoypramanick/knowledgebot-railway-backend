@@ -1101,6 +1101,7 @@ initTenantFilter();
 if (currentTenant) {
   document.getElementById('tenant-filter').value = currentTenant;
 }
+render();
 </script>
 </body>
 </html>"""
