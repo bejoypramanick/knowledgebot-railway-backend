@@ -668,7 +668,7 @@ function render() {
   const sessions = filterByTenant(filterByDate(RAW.sessions, days));
   const files = filterByTenant(filterByDate(RAW.files, days));
   const websites = filterByTenant(filterByDate(RAW.websites, days));
-  const tokenLog = filterByDate(RAW.token_usage_log||[], days);
+  const tokenLog = filterByTenant(filterByDate(RAW.token_usage_log||[], days));
   const ingestionTokenLog = tokenLog.filter(isIngestionUsage);
 
   document.getElementById('subtitle').textContent =
