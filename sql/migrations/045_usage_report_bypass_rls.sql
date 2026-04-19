@@ -1,7 +1,12 @@
 -- Migration: 045_usage_report_bypass_rls
 -- Description: Create a function to bypass RLS for usage report queries
 
-CREATE OR REPLACE FUNCTION public.get_usage_sessions(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
+DROP FUNCTION IF EXISTS public.get_usage_sessions(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.get_usage_files(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.get_usage_websites(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.get_usage_token_log(UUID, TIMESTAMPTZ);
+
+CREATE FUNCTION public.get_usage_sessions(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
 RETURNS TABLE (
     id UUID,
     tenant_id UUID,
@@ -42,7 +47,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.get_usage_files(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
+CREATE FUNCTION public.get_usage_files(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
 RETURNS TABLE (
     id UUID,
     tenant_id UUID,
@@ -74,7 +79,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.get_usage_websites(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
+CREATE FUNCTION public.get_usage_websites(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
 RETURNS TABLE (
     id UUID,
     tenant_id UUID,
@@ -108,7 +113,7 @@ END;
 $$;
 
 -- Also create function for token_usage_log
-CREATE OR REPLACE FUNCTION public.get_usage_token_log(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
+CREATE FUNCTION public.get_usage_token_log(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
 RETURNS TABLE (
     id UUID,
     tenant_id UUID,
