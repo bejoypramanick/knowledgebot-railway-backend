@@ -410,9 +410,11 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <script>
 // === DATA ===
+console.log('data_json length:', data_json.length);
 const RAW = """
         + data_json
         + """;
+console.log('RAW keys:', Object.keys(RAW));
 let currentDays = 30;
 
 // === HELPERS ===
