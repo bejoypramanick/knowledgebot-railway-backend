@@ -262,7 +262,7 @@ class KBQuotaService:
                 status_code=409,
                 detail={
                     "code": KB_QUOTA_EXCEEDED_CODE,
-                    "message": f"Cannot add '{item_label}'. You have {remaining_mb_rounded} MB left but this page uses {content_mb_rounded} MB. Your monthly limit is {limit_mb_rounded} MB. Please delete existing content or ask your admin to increase the limit.",
+                    "message": f"Cannot add {item_label}. You have {remaining_mb_rounded} MB left but this page uses {content_mb_rounded} MB. Your monthly limit is {limit_mb_rounded} MB. Please delete existing content or ask your admin to increase the limit.",
                     "tenant_id": tenant_id,
                     "quota": summary,
                 },
