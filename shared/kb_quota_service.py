@@ -226,7 +226,9 @@ class KBQuotaService:
                     "cycle_start_at": window.cycle_start_at,
                     "cycle_end_at": window.cycle_end_at,
                     "reset_usage_at": now,
-                    "new_limit_kb": int(new_limit_kb) if new_limit_kb is not None else None,
+                    "new_limit_kb": int(new_limit_kb)
+                    if new_limit_kb is not None
+                    else None,
                     "default_limit_kb": DEFAULT_MONTHLY_LIMIT_KB,
                 },
             )
@@ -432,6 +434,7 @@ class KBQuotaService:
                 SELECT COALESCE(SUM(char_count), 0) AS total_bytes
                 FROM file_uploads, usage_window
                 WHERE tenant_id = :tenant_id
+                  AND processing_status != 'deleted'
                   AND completed_at >= usage_window.reset_usage_at
                   AND completed_at < usage_window.cycle_end_at
             ),
@@ -439,6 +442,7 @@ class KBQuotaService:
                 SELECT COALESCE(SUM(char_count), 0) AS total_bytes
                 FROM scraped_websites, usage_window
                 WHERE tenant_id = :tenant_id
+                  AND processing_status != 'deleted'
                   AND completed_at >= usage_window.reset_usage_at
                   AND completed_at < usage_window.cycle_end_at
                   AND parent_id IS NULL
