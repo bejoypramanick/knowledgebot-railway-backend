@@ -49,6 +49,31 @@ def _chunk_stats_to_dict(row):
 
 
 async def _fetch_all_data(tenant_id: str = None):
+    """Fetch report data, retrying once if asyncpg has a stale prepared plan."""
+    try:
+        return await _fetch_all_data_once(tenant_id=tenant_id)
+    except Exception as exc:
+        if not _is_stale_prepared_statement_error(exc):
+            raise
+
+        logger.warning(
+            "Usage report hit a stale asyncpg prepared statement after a DB schema "
+            "change; retrying once with a fresh session."
+        )
+        return await _fetch_all_data_once(tenant_id=tenant_id)
+
+
+def _is_stale_prepared_statement_error(exc: Exception) -> bool:
+    """Detect asyncpg cached-plan failures raised through SQLAlchemy wrappers."""
+    error_text = str(exc)
+    return (
+        "InvalidCachedStatementError" in error_text
+        or "cached statement plan is invalid" in error_text
+        or "cached plan must not change result type" in error_text
+    )
+
+
+async def _fetch_all_data_once(tenant_id: str = None):
     """Fetch 365 days of data. If tenant_id provided, filter by tenant."""
     from uuid import UUID
 

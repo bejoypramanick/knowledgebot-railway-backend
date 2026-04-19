@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from shared.otel_logger import get_otel_logger
@@ -173,6 +174,12 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
     statement_timeout = os.getenv("DB_STATEMENT_TIMEOUT", "60000")
     connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "60"))  # 60s for cold-start resilience
     command_timeout = int(os.getenv("DB_COMMAND_TIMEOUT", "20"))
+    prepared_statement_cache_size = int(
+        os.getenv("DB_PREPARED_STATEMENT_CACHE_SIZE", "0")
+    )
+    async_url = make_url(async_url).update_query_dict(
+        {"prepared_statement_cache_size": str(prepared_statement_cache_size)}
+    )
 
     logger.info("🚀 Initializing SQLAlchemy async engine with cold-start retry logic...")
     logger.info(f"📊 Pool: size={pool_size}, overflow={pool_max_overflow}, recycle={pool_recycle}s")
@@ -194,6 +201,9 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
         ssl_setting = ssl_mode  # Allow explicit override: disable, require, prefer, etc.
 
     logger.info(f"🔒 SSL mode: {ssl_setting} (configured: {ssl_mode})")
+    logger.info(
+        f"🧠 Prepared statement cache size: {prepared_statement_cache_size}"
+    )
 
     last_error = None
     for attempt in range(1, max_retries + 1):
