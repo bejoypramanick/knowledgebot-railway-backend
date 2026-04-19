@@ -35,7 +35,7 @@ RETURNS TABLE (
     total_bot_response_token_count INTEGER,
     archive_status VARCHAR,
     sentiment VARCHAR,
-    duration_minutes INTEGER,
+    duration_minutes NUMERIC,
     created_at TIMESTAMPTZ
 )
 LANGUAGE plpgsql
