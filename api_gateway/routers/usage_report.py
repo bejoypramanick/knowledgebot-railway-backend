@@ -445,11 +445,6 @@ function getTenantFromUrl() {
   return params.get('tenant') || '';
 }
 
-function getTenantName(id) {
-  return TENANTS[id]?.name || TENANTS[id]?.slug || id || 'Unknown';
-}
-}
-
 // Populate tenant dropdown
 function initTenantFilter() {
   const sel = document.getElementById('tenant-filter');
