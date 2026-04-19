@@ -381,7 +381,7 @@ async def process_file_content(
                         )
                         try:
                             await kb_quota_service.check_quota_before_embedding(
-                                tenant_id, content_bytes, f"File '{original_filename}'"
+                                tenant_id, content_bytes, original_filename
                             )
                         except HTTPException:
                             raise

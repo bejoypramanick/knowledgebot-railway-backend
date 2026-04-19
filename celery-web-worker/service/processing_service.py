@@ -357,7 +357,7 @@ class ProcessingService:
                     )
                     try:
                         await kb_quota_service.check_quota_before_embedding(
-                            tenant_id, content_bytes, f"Page '{page_data.page_url}'"
+                            tenant_id, content_bytes, page_data.page_url
                         )
                     except HTTPException:
                         raise
