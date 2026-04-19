@@ -1,12 +1,12 @@
 -- Migration: 045_usage_report_bypass_rls
 -- Description: Create a function to bypass RLS for usage report queries
 
-CREATE OR REPLACE FUNCTION public.get_usage_sessions(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMP DEFAULT NULL)
+CREATE OR REPLACE FUNCTION public.get_usage_sessions(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
 RETURNS TABLE (
     id UUID,
     tenant_id UUID,
-    started_at TIMESTAMP,
-    last_activity_at TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    last_activity_at TIMESTAMPTZ,
     message_count INTEGER,
     total_character_count BIGINT,
     total_word_count BIGINT,
@@ -22,7 +22,7 @@ RETURNS TABLE (
     archive_status VARCHAR,
     sentiment VARCHAR,
     duration_minutes INTEGER,
-    created_at TIMESTAMP
+    created_at TIMESTAMPTZ
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -42,7 +42,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.get_usage_files(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMP DEFAULT NULL)
+CREATE OR REPLACE FUNCTION public.get_usage_files(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
 RETURNS TABLE (
     id UUID,
     tenant_id UUID,
@@ -56,7 +56,7 @@ RETURNS TABLE (
     filestore_word_count BIGINT,
     filestore_token_count BIGINT,
     processed_by_extractor VARCHAR,
-    created_at TIMESTAMP
+    created_at TIMESTAMPTZ
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -74,7 +74,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.get_usage_websites(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMP DEFAULT NULL)
+CREATE OR REPLACE FUNCTION public.get_usage_websites(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
 RETURNS TABLE (
     id UUID,
     tenant_id UUID,
@@ -89,7 +89,7 @@ RETURNS TABLE (
     filestore_token_count BIGINT,
     parent_id UUID,
     depth INTEGER,
-    created_at TIMESTAMP
+    created_at TIMESTAMPTZ
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -108,12 +108,12 @@ END;
 $$;
 
 -- Also create function for token_usage_log
-CREATE OR REPLACE FUNCTION public.get_usage_token_log(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMP DEFAULT NULL)
+CREATE OR REPLACE FUNCTION public.get_usage_token_log(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
 RETURNS TABLE (
     id UUID,
     tenant_id UUID,
     session_id UUID,
-    created_at TIMESTAMP,
+    created_at TIMESTAMPTZ,
     total_tokens BIGINT,
     prompt_tokens BIGINT,
     completion_tokens BIGINT,
