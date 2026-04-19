@@ -562,6 +562,7 @@ class ScrapingDAO:
                     metadata = metadata || CAST(:metadata AS jsonb),
                     processed_content_s3_key = :processed_content_s3_key,
                     processing_status = 'completed',
+                    completed_at = COALESCE(completed_at, NOW()),
                     updated_at = NOW()
                 WHERE id = :website_id AND processing_status != 'deleted'
                 RETURNING OLD.metadata AS previous_metadata, OLD.processing_status AS old_status, NEW.processing_status AS new_status
