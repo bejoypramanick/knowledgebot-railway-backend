@@ -49,22 +49,30 @@ def _chunk_stats_to_dict(row):
 
 
 async def _fetch_all_data():
-    """Fetch 365 days of data. JS will filter client-side."""
+    """Fetch 365 days of data with tenant segregation. JS will filter client-side."""
     since = datetime.utcnow() - timedelta(days=365)
 
     async with get_db_session() as db:
+        # Get all tenants for mapping
+        tenants = {
+            str(r.id): {"id": str(r.id), "name": r.name, "slug": r.slug}
+            for r in (
+                await db.execute(text("SELECT id, name, slug FROM tenants"))
+            ).fetchall()
+        }
+
         sessions = [
             _row_to_dict(r)
             for r in (
                 await db.execute(
                     text("""
-            SELECT id, started_at, last_activity_at, message_count,
-                   total_character_count, total_word_count, total_token_count,
-                   total_message_token_count, total_prompt_token_count, total_completion_token_count,
-                   total_system_prompt_token_count, total_history_token_count,
-                   total_tool_def_token_count, total_user_msg_token_count, total_bot_response_token_count,
-                   archive_status, sentiment, duration_minutes, created_at
-            FROM chat_sessions WHERE created_at >= :since ORDER BY created_at DESC
+            SELECT cs.id, cs.tenant_id, cs.started_at, cs.last_activity_at, cs.message_count,
+                   cs.total_character_count, cs.total_word_count, cs.total_token_count,
+                   cs.total_message_token_count, cs.total_prompt_token_count, cs.total_completion_token_count,
+                   cs.total_system_prompt_token_count, cs.total_history_token_count,
+                   cs.total_tool_def_token_count, cs.total_user_msg_token_count, cs.total_bot_response_token_count,
+                   cs.archive_status, cs.sentiment, cs.duration_minutes, cs.created_at
+            FROM chat_sessions cs WHERE cs.created_at >= :since ORDER BY cs.created_at DESC
         """),
                     {"since": since},
                 )
@@ -76,11 +84,11 @@ async def _fetch_all_data():
             for r in (
                 await db.execute(
                     text("""
-            SELECT id, original_filename, display_name, file_extension, processing_status,
-                   file_size, char_count,
-                   filestore_character_count, filestore_word_count, filestore_token_count,
-                   processed_by_extractor, created_at
-            FROM file_uploads WHERE created_at >= :since ORDER BY created_at DESC
+            SELECT fu.id, fu.tenant_id, fu.original_filename, fu.display_name, fu.file_extension, fu.processing_status,
+                   fu.file_size, fu.char_count,
+                   fu.filestore_character_count, fu.filestore_word_count, fu.filestore_token_count,
+                   fu.processed_by_extractor, fu.created_at
+            FROM file_uploads fu WHERE fu.created_at >= :since ORDER BY fu.created_at DESC
         """),
                     {"since": since},
                 )
@@ -112,11 +120,11 @@ async def _fetch_all_data():
             for r in (
                 await db.execute(
                     text("""
-            SELECT id, original_url, title, processing_status, pages_scraped,
-                   file_size, char_count,
-                   filestore_character_count, filestore_word_count, filestore_token_count,
-                   parent_id, depth, created_at
-            FROM scraped_websites WHERE created_at >= :since ORDER BY created_at DESC
+            SELECT sw.id, sw.tenant_id, sw.original_url, sw.title, sw.processing_status, sw.pages_scraped,
+                   sw.file_size, sw.char_count,
+                   sw.filestore_character_count, sw.filestore_word_count, sw.filestore_token_count,
+                   sw.parent_id, sw.depth, sw.created_at
+            FROM scraped_websites sw WHERE sw.created_at >= :since ORDER BY sw.created_at DESC
         """),
                     {"since": since},
                 )
@@ -188,12 +196,12 @@ async def _fetch_all_data():
         rows = (
             await db.execute(
                 text("""
-            SELECT id, session_id, message_id, provider, model,
-                   prompt_tokens, completion_tokens, total_tokens,
-                   api_call_type, request_metadata, created_at
-            FROM token_usage_log
-            WHERE created_at >= :since
-            ORDER BY created_at DESC
+            SELECT tul.id, tul.session_id, tul.message_id, tul.provider, tul.model,
+                   tul.prompt_tokens, tul.completion_tokens, tul.total_tokens,
+                   tul.api_call_type, tul.request_metadata, tul.created_at
+            FROM token_usage_log tul
+            WHERE tul.created_at >= :since
+            ORDER BY tul.created_at DESC
         """),
                 {"since": since},
             )
@@ -219,6 +227,7 @@ async def _fetch_all_data():
         )
 
     return {
+        "tenants": tenants,
         "sessions": sessions,
         "files": files,
         "websites": websites,
@@ -358,6 +367,9 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
   <button onclick="setDays(180)" id="btn-180">180 Days</button>
   <button onclick="setDays(365)" id="btn-365">All Time</button>
   <span style="flex:1"></span>
+  <select id="tenant-filter" onchange="setTenant(this.value)" style="padding:8px 12px;border-radius:8px;font-size:13px;border:1px solid var(--border);background:var(--card);max-width:200px">
+    <option value="">All Tenants</option>
+  </select>
   <button onclick="downloadExcel()">Download Excel</button>
 </div>
 
@@ -409,6 +421,36 @@ const escHtml = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 function filterByDate(arr, days, dateField='created_at') {
   const c = cutoff(days);
   return arr.filter(r => (r[dateField]||'') >= c);
+}
+
+// Tenant filtering
+let currentTenant = '';
+const TENANTS = RAW.tenants || {};
+
+function setTenant(id) {
+  currentTenant = id;
+  render();
+}
+
+function filterByTenant(arr) {
+  if (!currentTenant) return arr;
+  return arr.filter(r => r.tenant_id === currentTenant);
+}
+
+function getTenantName(id) {
+  return TENANTS[id]?.name || TENANTS[id]?.slug || id || 'Unknown';
+}
+
+// Populate tenant dropdown
+function initTenantFilter() {
+  const sel = document.getElementById('tenant-filter');
+  if (!sel) return;
+  Object.entries(TENANTS).forEach(([id, t]) => {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = t.name || t.slug;
+    sel.appendChild(opt);
+  });
 }
 
 // Extract cache tokens from request_metadata JSONB
@@ -620,9 +662,9 @@ function setDays(d) {
 // === RENDER ===
 function render() {
   const days = currentDays;
-  const sessions = filterByDate(RAW.sessions, days);
-  const files = filterByDate(RAW.files, days);
-  const websites = filterByDate(RAW.websites, days);
+  const sessions = filterByTenant(filterByDate(RAW.sessions, days));
+  const files = filterByTenant(filterByDate(RAW.files, days));
+  const websites = filterByTenant(filterByDate(RAW.websites, days));
   const tokenLog = filterByDate(RAW.token_usage_log||[], days);
   const ingestionTokenLog = tokenLog.filter(isIngestionUsage);
 
@@ -1062,6 +1104,7 @@ function downloadExcel() {
 
 
 // === INIT ===
+initTenantFilter();
 render();
 </script>
 </body>
