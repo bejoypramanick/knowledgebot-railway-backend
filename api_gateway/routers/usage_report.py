@@ -48,12 +48,25 @@ def _chunk_stats_to_dict(row):
     return d
 
 
-async def _fetch_all_data():
-    """Fetch 365 days of data with tenant segregation. JS will filter client-side."""
+async def _fetch_all_data(tenant_id: str = None):
+    """Fetch 365 days of data. If tenant_id provided, filter by tenant."""
+    from uuid import UUID
+
     since = datetime.utcnow() - timedelta(days=365)
 
+    files_query = """
+        SELECT fu.id, fu.tenant_id, fu.original_filename, fu.display_name, fu.file_extension, fu.processing_status,
+               fu.file_size, fu.char_count,
+               fu.filestore_character_count, fu.filestore_word_count, fu.filestore_token_count,
+               fu.processed_by_extractor, fu.created_at
+        FROM file_uploads fu WHERE fu.created_at >= :since"""
+    files_params = {"since": since}
+    if tenant_id:
+        files_query += " AND fu.tenant_id = :tenant_id"
+        files_params["tenant_id"] = tenant_id
+    files_query += " ORDER BY fu.created_at DESC"
+
     async with get_db_session() as db:
-        # Get all tenants for mapping
         tenants = {
             str(r.id): {"id": str(r.id), "name": r.name, "slug": r.slug}
             for r in (
@@ -61,38 +74,28 @@ async def _fetch_all_data():
             ).fetchall()
         }
 
-        sessions = [
-            _row_to_dict(r)
-            for r in (
-                await db.execute(
-                    text("""
+        params = {"since": since}
+        sessions_query = """
             SELECT cs.id, cs.tenant_id, cs.started_at, cs.last_activity_at, cs.message_count,
                    cs.total_character_count, cs.total_word_count, cs.total_token_count,
                    cs.total_message_token_count, cs.total_prompt_token_count, cs.total_completion_token_count,
                    cs.total_system_prompt_token_count, cs.total_history_token_count,
                    cs.total_tool_def_token_count, cs.total_user_msg_token_count, cs.total_bot_response_token_count,
                    cs.archive_status, cs.sentiment, cs.duration_minutes, cs.created_at
-            FROM chat_sessions cs WHERE cs.created_at >= :since ORDER BY cs.created_at DESC
-        """),
-                    {"since": since},
-                )
-            ).fetchall()
+            FROM chat_sessions cs WHERE cs.created_at >= :since"""
+        if tenant_id:
+            sessions_query += " AND cs.tenant_id = :tenant_id"
+            params["tenant_id"] = tenant_id
+        sessions_query += " ORDER BY cs.created_at DESC"
+
+        sessions = [
+            _row_to_dict(r)
+            for r in (await db.execute(text(sessions_query), params)).fetchall()
         ]
 
         files = [
             _row_to_dict(r)
-            for r in (
-                await db.execute(
-                    text("""
-            SELECT fu.id, fu.tenant_id, fu.original_filename, fu.display_name, fu.file_extension, fu.processing_status,
-                   fu.file_size, fu.char_count,
-                   fu.filestore_character_count, fu.filestore_word_count, fu.filestore_token_count,
-                   fu.processed_by_extractor, fu.created_at
-            FROM file_uploads fu WHERE fu.created_at >= :since ORDER BY fu.created_at DESC
-        """),
-                    {"since": since},
-                )
-            ).fetchall()
+            for r in (await db.execute(text(files_query), files_params)).fetchall()
         ]
 
         # Get chunk stats for files
@@ -115,19 +118,22 @@ async def _fetch_all_data():
             ).fetchall()
         }
 
-        websites = [
-            _row_to_dict(r)
-            for r in (
-                await db.execute(
-                    text("""
+        websites_query = """
             SELECT sw.id, sw.tenant_id, sw.original_url, sw.title, sw.processing_status, sw.pages_scraped,
                    sw.file_size, sw.char_count,
                    sw.filestore_character_count, sw.filestore_word_count, sw.filestore_token_count,
                    sw.parent_id, sw.depth, sw.created_at
-            FROM scraped_websites sw WHERE sw.created_at >= :since ORDER BY sw.created_at DESC
-        """),
-                    {"since": since},
-                )
+            FROM scraped_websites sw WHERE sw.created_at >= :since"""
+        websites_params = {"since": since}
+        if tenant_id:
+            websites_query += " AND sw.tenant_id = :tenant_id"
+            websites_params["tenant_id"] = tenant_id
+        websites_query += " ORDER BY sw.created_at DESC"
+
+        websites = [
+            _row_to_dict(r)
+            for r in (
+                await db.execute(text(websites_query), websites_params)
             ).fetchall()
         ]
 
@@ -243,9 +249,9 @@ async def _fetch_all_data():
 
 
 @router.get("/usage", response_class=HTMLResponse)
-async def usage_report(request: Request):
-    """Single endpoint. All data embedded, JS handles filtering/downloads."""
-    data = await _fetch_all_data()
+async def usage_report(request: Request, tenant: str = ""):
+    """Single endpoint. Filter by tenant on server-side via ?tenant= query param."""
+    data = await _fetch_all_data(tenant_id=tenant if tenant else None)
     data_json = json.dumps(data, default=str)
 
     html = (
@@ -423,23 +429,25 @@ function filterByDate(arr, days, dateField='created_at') {
   return arr.filter(r => (r[dateField]||'') >= c);
 }
 
-// Tenant filtering
+// Tenant filtering - server-side
 let currentTenant = '';
 const TENANTS = RAW.tenants || {};
+const BASE_URL = window.location.pathname.replace('/usage', '');
 
-function setTenant(id) {
+async function setTenant(id) {
   currentTenant = id;
-  render();
+  const url = id ? `${BASE_URL}/usage?tenant=${id}` : `${BASE_URL}/usage`;
+  window.location.href = url;
 }
 
-function filterByTenant(arr) {
-  if (!currentTenant) return arr;
-  const tid = String(currentTenant);
-  return arr.filter(r => String(r.tenant_id) === tid);
+function getTenantFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('tenant') || '';
 }
 
 function getTenantName(id) {
   return TENANTS[id]?.name || TENANTS[id]?.slug || id || 'Unknown';
+}
 }
 
 // Populate tenant dropdown
@@ -663,10 +671,10 @@ function setDays(d) {
 // === RENDER ===
 function render() {
   const days = currentDays;
-  const sessions = filterByTenant(filterByDate(RAW.sessions, days));
-  const files = filterByTenant(filterByDate(RAW.files, days));
-  const websites = filterByTenant(filterByDate(RAW.websites, days));
-  const tokenLog = filterByTenant(filterByDate(RAW.token_usage_log||[], days));
+  const sessions = filterByDate(RAW.sessions, days);
+  const files = filterByDate(RAW.files, days);
+  const websites = filterByDate(RAW.websites, days);
+  const tokenLog = filterByDate(RAW.token_usage_log||[], days);
   const ingestionTokenLog = tokenLog.filter(isIngestionUsage);
 
   document.getElementById('subtitle').textContent =
@@ -1092,8 +1100,11 @@ function downloadExcel() {
 
 
 // === INIT ===
+currentTenant = getTenantFromUrl();
 initTenantFilter();
-render();
+if (currentTenant) {
+  document.getElementById('tenant-filter').value = currentTenant;
+}
 </script>
 </body>
 </html>"""
