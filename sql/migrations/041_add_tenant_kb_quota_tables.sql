@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS public.tenant_kb_quota_config (
     tenant_id uuid PRIMARY KEY REFERENCES public.tenants(id) ON DELETE CASCADE,
-    quota_limit_kb bigint NOT NULL DEFAULT 102400,
+    quota_limit_kb bigint NOT NULL DEFAULT 20480,
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

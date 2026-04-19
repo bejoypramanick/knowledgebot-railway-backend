@@ -2432,7 +2432,10 @@ async def update_superadmin_kb_limit(
     user: dict = Depends(get_current_user)
 ):
     await require_superadmin(user)
-    quota_limit_kb = int(body.get("quota_limit_kb") or 0)
+    quota_limit_kb = int(
+        body.get("quota_limit_kb")
+        or round(float(body.get("quota_limit_mb") or 0) * 1024)
+    )
     data = await kb_quota_service.set_tenant_quota_limit(tenant_id, quota_limit_kb)
     return {"success": True, "data": data}
 
@@ -2445,6 +2448,8 @@ async def manual_reset_superadmin_kb_limit(
 ):
     await require_superadmin(user)
     quota_limit_kb = body.get("quota_limit_kb")
+    if quota_limit_kb is None and body.get("quota_limit_mb") is not None:
+        quota_limit_kb = round(float(body.get("quota_limit_mb")) * 1024)
     data = await kb_quota_service.manual_reset_tenant_quota(
         tenant_id,
         int(quota_limit_kb) if quota_limit_kb is not None else None,

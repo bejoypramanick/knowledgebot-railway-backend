@@ -437,10 +437,10 @@ class AuthDAO:
                     )
                     VALUES (
                         :tenant_id,
-                        NOW(),
-                        NOW() + INTERVAL '1 month',
+                        date_trunc('month', NOW()),
+                        date_trunc('month', NOW()) + INTERVAL '1 month',
                         :quota_limit_kb,
-                        NOW(),
+                        date_trunc('month', NOW()),
                         0,
                         NOW(),
                         NOW()

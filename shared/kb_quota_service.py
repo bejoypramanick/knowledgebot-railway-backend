@@ -13,7 +13,8 @@ from shared.tenant_context import get_current_tenant_id
 
 logger = get_otel_logger("kb_quota_service", "shared")
 
-DEFAULT_MONTHLY_LIMIT_KB = 1024 * 100
+DEFAULT_MONTHLY_LIMIT_KB = 20 * 1024
+KB_PER_MB = 1024
 KB_QUOTA_EXCEEDED_CODE = "kb_quota_exceeded"
 
 
@@ -46,15 +47,6 @@ class KBQuotaService:
         now = datetime.now(timezone.utc)
         window = self._build_quota_window(tenant_id, tenant["created_at"], now)
 
-        latest_reset = await self._get_latest_manual_reset(tenant_id)
-        if latest_reset and latest_reset["cycle_start_at"] > window.cycle_start_at:
-            window = TenantQuotaWindow(
-                tenant_id=tenant_id,
-                tenant_created_at=tenant["created_at"],
-                cycle_start_at=latest_reset["cycle_start_at"],
-                cycle_end_at=latest_reset["cycle_end_at"],
-            )
-
         logger.info(
             f"🔍 [KB_QUOTA] Quota window: cycle_start={window.cycle_start_at}, cycle_end={window.cycle_end_at}"
         )
@@ -62,23 +54,32 @@ class KBQuotaService:
         override = await self._get_or_create_monthly_override(tenant_id, window)
         logger.info(f"🔍 [KB_QUOTA] Override config: {override}")
 
-        usage_bytes = await self._get_usage_bytes_for_window(tenant_id, window)
-        logger.info(f"🔍 [KB_QUOTA] Usage bytes: {usage_bytes}")
-
         limit_kb = int(override["quota_limit_kb"] or DEFAULT_MONTHLY_LIMIT_KB)
         limit_bytes = limit_kb * 1024
+        raw_usage_bytes = await self._get_usage_bytes_for_window(tenant_id, window)
+        usage_bytes = min(raw_usage_bytes, limit_bytes)
+        logger.info(
+            f"🔍 [KB_QUOTA] Usage bytes: raw={raw_usage_bytes}, capped={usage_bytes}, limit={limit_bytes}"
+        )
         remaining_bytes = max(limit_bytes - usage_bytes, 0)
+        quota_limit_mb = round(limit_kb / KB_PER_MB, 2)
+        used_mb = round(usage_bytes / (KB_PER_MB * 1024), 2)
+        remaining_mb = round(remaining_bytes / (KB_PER_MB * 1024), 2)
 
         summary = {
             "tenant_id": tenant_id,
             "tenant_slug": tenant["slug"],
             "tenant_name": tenant["name"],
             "quota_limit_kb": limit_kb,
+            "quota_limit_mb": quota_limit_mb,
             "quota_limit_bytes": limit_bytes,
             "used_bytes": usage_bytes,
+            "raw_used_bytes": raw_usage_bytes,
             "used_kb": round(usage_bytes / 1024, 2),
+            "used_mb": used_mb,
             "remaining_bytes": remaining_bytes,
             "remaining_kb": round(remaining_bytes / 1024, 2),
+            "remaining_mb": remaining_mb,
             "usage_percent": round((usage_bytes / limit_bytes) * 100, 2)
             if limit_bytes > 0
             else 0,
@@ -166,14 +167,26 @@ class KBQuotaService:
         if not tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
 
-        now = datetime.now(timezone.utc)
-        limit_kb = int(new_limit_kb or DEFAULT_MONTHLY_LIMIT_KB)
+        if new_limit_kb is not None and int(new_limit_kb) <= 0:
+            raise HTTPException(
+                status_code=400, detail="Quota limit must be greater than 0 KB"
+            )
 
-        new_cycle_start = now
-        new_cycle_end = self._add_one_month(now)
+        now = datetime.now(timezone.utc)
+        window = self._build_quota_window(tenant_id, tenant["created_at"], now)
+
+        if new_limit_kb is not None:
+            await self.set_tenant_quota_limit(tenant_id, int(new_limit_kb))
 
         query = text(
             """
+            WITH config AS (
+                SELECT COALESCE(
+                    :new_limit_kb,
+                    (SELECT quota_limit_kb FROM tenant_kb_quota_config WHERE tenant_id = :tenant_id),
+                    :default_limit_kb
+                ) AS quota_limit_kb
+            )
             INSERT INTO tenant_kb_quota_monthly_usage (
                 tenant_id,
                 cycle_start_at,
@@ -185,22 +198,22 @@ class KBQuotaService:
                 created_at,
                 updated_at
             )
-            VALUES (
+            SELECT
                 :tenant_id,
                 :cycle_start_at,
                 :cycle_end_at,
-                :quota_limit_kb,
+                config.quota_limit_kb,
                 :reset_usage_at,
                 1,
                 NOW(),
                 NOW(),
                 NOW()
-            )
+            FROM config
             ON CONFLICT (tenant_id, cycle_start_at) DO UPDATE
             SET quota_limit_kb = EXCLUDED.quota_limit_kb,
                 cycle_end_at = EXCLUDED.cycle_end_at,
                 reset_usage_at = EXCLUDED.reset_usage_at,
-                manual_reset_count = EXCLUDED.manual_reset_count,
+                manual_reset_count = tenant_kb_quota_monthly_usage.manual_reset_count + 1,
                 last_manual_reset_at = EXCLUDED.last_manual_reset_at,
                 updated_at = NOW()
             """
@@ -210,10 +223,11 @@ class KBQuotaService:
                 query,
                 {
                     "tenant_id": tenant_id,
-                    "cycle_start_at": new_cycle_start,
-                    "cycle_end_at": new_cycle_end,
-                    "quota_limit_kb": limit_kb,
+                    "cycle_start_at": window.cycle_start_at,
+                    "cycle_end_at": window.cycle_end_at,
                     "reset_usage_at": now,
+                    "new_limit_kb": int(new_limit_kb) if new_limit_kb is not None else None,
+                    "default_limit_kb": DEFAULT_MONTHLY_LIMIT_KB,
                 },
             )
             await session.commit()
@@ -237,12 +251,13 @@ class KBQuotaService:
             remaining_bytes = max(
                 summary["quota_limit_bytes"] - summary["used_bytes"], 0
             )
-            remaining_kb = round(remaining_bytes / 1024, 2)
+            remaining_mb = round(remaining_bytes / (1024 * 1024), 2)
+            content_mb = round(content_bytes / (1024 * 1024), 2)
             raise HTTPException(
                 status_code=409,
                 detail={
                     "code": KB_QUOTA_EXCEEDED_CODE,
-                    "message": f"{item_label} cannot be processed. Adding this content ({round(content_bytes / 1024, 2)} KB) would exceed your monthly KB quota ({round(summary['quota_limit_bytes'] / 1024, 2)} KB). You have {remaining_kb} KB remaining. Please delete some existing content or contact your administrator to reset the quota.",
+                    "message": f"{item_label} cannot be processed. Adding this content ({content_mb} MB) would exceed your monthly KB quota ({summary['quota_limit_mb']} MB). You have {remaining_mb} MB remaining. Please contact your administrator to reset or change the quota.",
                     "tenant_id": tenant_id,
                     "quota": summary,
                 },
@@ -274,7 +289,7 @@ class KBQuotaService:
             status_code=409,
             detail={
                 "code": KB_QUOTA_EXCEEDED_CODE,
-                "message": "Monthly knowledge base quota reached. Uploads and website scraping are blocked until the next reset or a manual reset by superadmin.",
+                "message": "Monthly knowledge base quota reached. Uploads and website scraping are blocked until the next calendar-month reset or a manual reset by superadmin.",
                 "requested_bytes": requested_bytes,
                 "quota": summary,
             },
@@ -302,19 +317,17 @@ class KBQuotaService:
         tenant_created_at: datetime,
         now: datetime,
     ) -> TenantQuotaWindow:
-        anchor = tenant_created_at.astimezone(timezone.utc)
-        cursor = anchor
-
-        while True:
-            next_cursor = self._add_one_month(cursor)
-            if now < next_cursor:
-                return TenantQuotaWindow(
-                    tenant_id=tenant_id,
-                    tenant_created_at=anchor,
-                    cycle_start_at=cursor,
-                    cycle_end_at=next_cursor,
-                )
-            cursor = next_cursor
+        tenant_created_at_utc = tenant_created_at.astimezone(timezone.utc)
+        cycle_start_at = now.astimezone(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        cycle_end_at = self._add_one_month(cycle_start_at)
+        return TenantQuotaWindow(
+            tenant_id=tenant_id,
+            tenant_created_at=tenant_created_at_utc,
+            cycle_start_at=cycle_start_at,
+            cycle_end_at=cycle_end_at,
+        )
 
     def _add_one_month(self, value: datetime) -> datetime:
         year = value.year + (1 if value.month == 12 else 0)
@@ -366,6 +379,7 @@ class KBQuotaService:
             FROM config
             ON CONFLICT (tenant_id, cycle_start_at) DO UPDATE
             SET cycle_end_at = EXCLUDED.cycle_end_at,
+                quota_limit_kb = EXCLUDED.quota_limit_kb,
                 updated_at = NOW()
             RETURNING tenant_id, cycle_start_at, cycle_end_at, quota_limit_kb, reset_usage_at, manual_reset_count, last_manual_reset_at
             """
