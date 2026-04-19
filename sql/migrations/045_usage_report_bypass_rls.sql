@@ -1,9 +1,17 @@
 -- Migration: 045_usage_report_bypass_rls
 -- Description: Create a function to bypass RLS for usage report queries
 
+DROP FUNCTION IF EXISTS public.get_usage_sessions();
+DROP FUNCTION IF EXISTS public.get_usage_sessions(UUID);
 DROP FUNCTION IF EXISTS public.get_usage_sessions(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.get_usage_files();
+DROP FUNCTION IF EXISTS public.get_usage_files(UUID);
 DROP FUNCTION IF EXISTS public.get_usage_files(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.get_usage_websites();
+DROP FUNCTION IF EXISTS public.get_usage_websites(UUID);
 DROP FUNCTION IF EXISTS public.get_usage_websites(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.get_usage_token_log();
+DROP FUNCTION IF EXISTS public.get_usage_token_log(UUID);
 DROP FUNCTION IF EXISTS public.get_usage_token_log(UUID, TIMESTAMPTZ);
 
 CREATE FUNCTION public.get_usage_sessions(p_tenant_id UUID DEFAULT NULL, p_since TIMESTAMPTZ DEFAULT NULL)
