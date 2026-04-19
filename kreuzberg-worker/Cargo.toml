@@ -10,7 +10,7 @@ aws-config = "1"
 aws-credential-types = "1"
 aws-sdk-s3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
-kreuzberg = { version = "=4.6.1", features = ["tokio-runtime", "pdf", "ocr", "paddle-ocr", "chunking", "html", "office", "excel", "quality", "language-detection", "layout-detection"] }
+kreuzberg = { version = "=4.2.15", features = ["tokio-runtime", "pdf", "ocr", "paddle-ocr", "chunking", "html", "office", "excel", "quality", "language-detection", "layout-detection"] }
 redis = { version = "0.27", features = ["tokio-comp"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
