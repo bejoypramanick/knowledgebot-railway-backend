@@ -847,12 +847,6 @@ class ProcessingService:
                                 f"✅ [CRAWL4AI] Fetched HTML: {len(result.html)} bytes from {page_url}"
                             )
 
-                            # Remove all hyperlinks from HTML
-                            cleaned_html = self._removeHyperlinks(result.html)
-                            logger.info(
-                                f"🔗 [CLEANUP] Removed hyperlinks, cleaned HTML: {len(cleaned_html)} bytes"
-                            )
-
                             # Extract title and description from metadata
                             title = None
                             description = None
@@ -862,7 +856,7 @@ class ProcessingService:
 
                             return (
                                 page_url,
-                                cleaned_html,
+                                result.html,
                                 title,
                                 description,
                                 result.session_id,
@@ -889,15 +883,6 @@ class ProcessingService:
                     await asyncio.sleep(CRAWL4AI_FETCH_RETRY_DELAY_SECONDS * attempt)
 
             return None
-
-    def _removeHyperlinks(self, html: str) -> str:
-        """Remove all hyperlinks from HTML, keeping link text"""
-        from bs4 import BeautifulSoup
-
-        soup = BeautifulSoup(html, "lxml")
-        for a_tag in soup.find_all("a"):
-            a_tag.replace_with(a_tag.get_text())
-        return str(soup)
 
     async def _extractLinksFromHTML(
         self, html: str, page_url: str, base_domain: str, visited_urls: set
