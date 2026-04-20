@@ -470,29 +470,70 @@ class ComprehensiveDeletionService:
                             affected
                         )
                     else:
-                        status = await conn.execute(
-                            """UPDATE scraped_websites
-                            SET processing_status = 'deleted', updated_at = NOW()
-                            WHERE id = $1 OR parent_id = $1""",
-                            website_id,
-                        )
-                        affected = int(status.split()[-1])
                         logger.info(
-                            f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION operation=UPDATE affected={affected}"
+                            f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION executing_update=true"
                         )
 
-                        verify = await conn.fetch(
-                            "SELECT processing_status FROM scraped_websites WHERE id = $1",
-                            website_id,
-                        )
-                        if verify:
-                            new_status = verify[0]["processing_status"]
-                            logger.info(
-                                f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION verify_status={new_status}"
+                        # Debug: show what records would match the WHERE clause
+                        try:
+                            debug_match = await conn.fetch(
+                                "SELECT id, processing_status, parent_id FROM scraped_websites WHERE id = $1 OR parent_id = $1",
+                                website_id,
                             )
-                        else:
                             logger.info(
-                                f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION verify=NOT_FOUND"
+                                f"[DELETE_WEBSITE] website_id={website_id} step=DEBUG matching_records_count={len(debug_match) if debug_match else 0}"
+                            )
+                            if debug_match:
+                                for dm in debug_match:
+                                    logger.info(
+                                        f"[DELETE_WEBSITE] website_id={website_id} step=DEBUG match_id={dm['id']} parent_id={dm['parent_id']} current_status={dm['processing_status']}"
+                                    )
+                        except Exception as debug_err:
+                            logger.error(
+                                f"[DELETE_WEBSITE] website_id={website_id} step=DEBUG error={str(debug_err)}"
+                            )
+
+                        try:
+                            status = await conn.execute(
+                                """UPDATE scraped_websites
+                                SET processing_status = 'deleted', updated_at = NOW()
+                                WHERE id = $1 OR parent_id = $1""",
+                                website_id,
+                            )
+                            logger.info(
+                                f"[DELETE_WEBSITE] website_id={website_id} step=UPDATE status_raw='{status}'"
+                            )
+                            affected = int(status.split()[-1])
+                            logger.info(
+                                f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION operation=UPDATE affected={affected}"
+                            )
+                        except Exception as update_err:
+                            logger.error(
+                                f"[DELETE_WEBSITE] website_id={website_id} step=UPDATE error={str(update_err)}"
+                            )
+                            raise
+
+                        # Verify the update worked - fetch after update within same transaction
+                        try:
+                            verify = await conn.fetch(
+                                "SELECT id, processing_status, parent_id FROM scraped_websites WHERE id = $1 OR parent_id = $1",
+                                website_id,
+                            )
+                            logger.info(
+                                f"[DELETE_WEBSITE] website_id={website_id} step=VERIFY query_result_count={len(verify) if verify else 0}"
+                            )
+                            if verify:
+                                for v in verify:
+                                    logger.info(
+                                        f"[DELETE_WEBSITE] website_id={website_id} step=VERIFY id={v['id']} parent_id={v['parent_id']} status={v['processing_status']}"
+                                    )
+                            else:
+                                logger.info(
+                                    f"[DELETE_WEBSITE] website_id={website_id} step=VERIFY result=NOT_FOUND"
+                                )
+                        except Exception as verify_err:
+                            logger.error(
+                                f"[DELETE_WEBSITE] website_id={website_id} step=VERIFY error={str(verify_err)}"
                             )
 
                         deletion_report["cleanup_summary"]["db_records_affected"] = (
@@ -504,6 +545,9 @@ class ComprehensiveDeletionService:
                     )
                     deletion_report["success"] = True
                     deletion_report["completed_at"] = datetime.utcnow().isoformat()
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} final_report success={deletion_report['success']} affected={deletion_report.get('cleanup_summary', {}).get('db_records_affected')} completed_at={deletion_report.get('completed_at')}"
+                    )
                     return deletion_report
 
         except Exception as e:
@@ -513,6 +557,7 @@ class ComprehensiveDeletionService:
                 f"[DELETE_WEBSITE] website_id={website_id} step=ERROR error={str(e)}"
             )
             logger.error(f"[DELETE_WEBSITE] traceback={traceback.format_exc()}")
+            logger.error(f"[DELETE_WEBSITE] deletion_report_at_error={deletion_report}")
             deletion_report["success"] = False
             deletion_report["errors"].append(
                 {"step": DeletionStep.DB_TRANSACTION.value, "error": str(e)}
