@@ -2980,7 +2980,7 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
 
     query = text("""
         WITH reset_date AS (
-            SELECT :cycle_start_at::timestamptz AS cycle_start
+            SELECT CAST(:cycle_start_at AS timestamptz) AS cycle_start
         ),
         file_uploads_in_cycle AS (
             SELECT 
