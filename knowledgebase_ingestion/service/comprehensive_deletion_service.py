@@ -150,7 +150,10 @@ class ComprehensiveDeletionService:
 
         try:
             async with get_db_connection() as conn:
-                async with conn.transaction():
+                async with conn.transaction() as tx:
+                    logger.info(
+                        f"[DELETE_FILE] file_id={file_id} step=TRANSACTION started"
+                    )
                     # Step 1: LOOKUP
                     logger.info(
                         f"[DELETE_FILE] file_id={file_id} step=LOOKUP start=true"
@@ -312,6 +315,10 @@ class ComprehensiveDeletionService:
                     logger.info(
                         f"[DELETE_FILE] file_id={file_id} step=DB_TRANSACTION success=true affected={affected}"
                     )
+                    await tx.commit()
+                    logger.info(
+                        f"[DELETE_FILE] file_id={file_id} step=COMMIT committed=true"
+                    )
                     return deletion_report
 
         except Exception as e:
@@ -337,7 +344,10 @@ class ComprehensiveDeletionService:
 
         try:
             async with get_db_connection() as conn:
-                async with conn.transaction():
+                async with conn.transaction() as tx:
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=TRANSACTION started"
+                    )
                     # Step 1: LOOKUP
                     logger.info(
                         f"[DELETE_WEBSITE] website_id={website_id} step=LOOKUP start=true"
@@ -562,6 +572,13 @@ class ComprehensiveDeletionService:
                     logger.info(
                         f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION success=true affected={affected}"
                     )
+
+                    # Explicit commit to ensure the transaction is committed
+                    await tx.commit()
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=COMMIT committed=true"
+                    )
+
                     deletion_report["success"] = True
                     deletion_report["completed_at"] = datetime.utcnow().isoformat()
                     logger.info(

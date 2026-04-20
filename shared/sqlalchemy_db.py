@@ -104,7 +104,9 @@ async def _verify_runtime_role_respects_rls(conn) -> None:
         )
 
 
-async def init_database(database_url: Optional[str] = None, max_retries: int = 5) -> None:
+async def init_database(
+    database_url: Optional[str] = None, max_retries: int = 5
+) -> None:
     """
     Initialize SQLAlchemy async engine with exponential backoff for cold starts.
 
@@ -168,11 +170,17 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
     # IMPORTANT: Use SMALL pool_size for serverless/cold-start scenarios
     # If 5 services each have pool_size=10, that's 50+ connections hitting DB at startup
     # Railway hobby tier often has 20-50 max connections total
-    pool_size = int(os.getenv("DB_POOL_SIZE", "3"))  # Reduced from 10 to 3 for serverless
-    pool_max_overflow = int(os.getenv("DB_POOL_MAX_OVERFLOW", "2"))  # Reduced from 10 to 2
+    pool_size = int(
+        os.getenv("DB_POOL_SIZE", "3")
+    )  # Reduced from 10 to 3 for serverless
+    pool_max_overflow = int(
+        os.getenv("DB_POOL_MAX_OVERFLOW", "2")
+    )  # Reduced from 10 to 2
     pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "3600"))
     statement_timeout = os.getenv("DB_STATEMENT_TIMEOUT", "60000")
-    connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "60"))  # 60s for cold-start resilience
+    connect_timeout = int(
+        os.getenv("DB_CONNECT_TIMEOUT", "60")
+    )  # 60s for cold-start resilience
     command_timeout = int(os.getenv("DB_COMMAND_TIMEOUT", "20"))
     prepared_statement_cache_size = int(
         os.getenv("DB_PREPARED_STATEMENT_CACHE_SIZE", "0")
@@ -181,9 +189,15 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
         {"prepared_statement_cache_size": str(prepared_statement_cache_size)}
     )
 
-    logger.info("🚀 Initializing SQLAlchemy async engine with cold-start retry logic...")
-    logger.info(f"📊 Pool: size={pool_size}, overflow={pool_max_overflow}, recycle={pool_recycle}s")
-    logger.info(f"⏱️  Timeouts: connect={connect_timeout}s, command={command_timeout}s, statement={statement_timeout}ms")
+    logger.info(
+        "🚀 Initializing SQLAlchemy async engine with cold-start retry logic..."
+    )
+    logger.info(
+        f"📊 Pool: size={pool_size}, overflow={pool_max_overflow}, recycle={pool_recycle}s"
+    )
+    logger.info(
+        f"⏱️  Timeouts: connect={connect_timeout}s, command={command_timeout}s, statement={statement_timeout}ms"
+    )
 
     # SSL configuration for Railway
     # Internal URLs (railway.internal) don't need SSL — they're on a private network.
@@ -198,12 +212,12 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
         else:
             ssl_setting = "require"
     else:
-        ssl_setting = ssl_mode  # Allow explicit override: disable, require, prefer, etc.
+        ssl_setting = (
+            ssl_mode  # Allow explicit override: disable, require, prefer, etc.
+        )
 
     logger.info(f"🔒 SSL mode: {ssl_setting} (configured: {ssl_mode})")
-    logger.info(
-        f"🧠 Prepared statement cache size: {prepared_statement_cache_size}"
-    )
+    logger.info(f"🧠 Prepared statement cache size: {prepared_statement_cache_size}")
 
     last_error = None
     for attempt in range(1, max_retries + 1):
@@ -239,6 +253,7 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
                     connect_args["ssl"] = False
                 elif ssl_setting == "require":
                     import ssl as ssl_module
+
                     ssl_ctx = ssl_module.create_default_context()
                     ssl_ctx.check_hostname = False
                     ssl_ctx.verify_mode = ssl_module.CERT_NONE
@@ -278,21 +293,29 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
                     await _verify_runtime_role_respects_rls(conn)
 
             logger.info("✅ SQLAlchemy engine initialized successfully")
-            logger.info(f"📊 Production pool: min={pool_size}, max={pool_size + pool_max_overflow}, "
-                       f"recycle={pool_recycle}s, pre_ping=True")
+            logger.info(
+                f"📊 Production pool: min={pool_size}, max={pool_size + pool_max_overflow}, "
+                f"recycle={pool_recycle}s, pre_ping=True"
+            )
             return
 
         except asyncio.TimeoutError as e:
             last_error = e
-            logger.error(f"❌ Attempt {attempt}/{max_retries} timeout (>{attempt_timeout}s): {e}")
+            logger.error(
+                f"❌ Attempt {attempt}/{max_retries} timeout (>{attempt_timeout}s): {e}"
+            )
 
             if attempt < max_retries:
                 wait_time = 2 ** (attempt - 1)
                 logger.info(f"⏳ Retrying in {wait_time}s...")
                 await asyncio.sleep(wait_time)
             else:
-                logger.error(f"❌ All {max_retries} attempts timed out. Container will exit.")
-                raise RuntimeError(f"Database connection timeout after {max_retries} attempts")
+                logger.error(
+                    f"❌ All {max_retries} attempts timed out. Container will exit."
+                )
+                raise RuntimeError(
+                    f"Database connection timeout after {max_retries} attempts"
+                )
 
         except Exception as e:
             last_error = e
@@ -305,7 +328,9 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
                 await asyncio.sleep(wait_time)
             else:
                 # All retries exhausted - let container crash (fail fast)
-                logger.error(f"❌ All {max_retries} connection attempts failed. Container will exit.")
+                logger.error(
+                    f"❌ All {max_retries} connection attempts failed. Container will exit."
+                )
                 raise RuntimeError(
                     f"Failed to connect to database after {max_retries} attempts. Last error: {last_error}"
                 )
@@ -330,25 +355,24 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         Exception: If connection fails
     """
     if _async_session_maker is None:
-        raise RuntimeError(
-            "Database not initialized. Call init_database() first."
-        )
+        raise RuntimeError("Database not initialized. Call init_database() first.")
 
     session = None
     import time
+
     start_time = time.time()
-    
+
     try:
         session = _async_session_maker()
         async with session:
             await _apply_request_context(session)
             yield session
-            
+
         # Log slow session usage (held for more than 5 seconds)
         duration = time.time() - start_time
         if duration > 5.0:
             logger.warning(f"⚠️ Slow database session: held for {duration:.2f}s")
-            
+
     except asyncio.CancelledError:
         # Handle request cancellation gracefully
         logger.warning("⚠️ Database session cancelled (likely due to request timeout)")
@@ -377,14 +401,14 @@ async def get_db_connection():
     The connection is automatically returned to the pool on exit.
     """
     if _engine is None:
-        raise RuntimeError(
-            "Database not initialized. Call init_database() first."
-        )
+        raise RuntimeError("Database not initialized. Call init_database() first.")
 
     # Get raw asyncpg connection from SQLAlchemy's async engine pool
     async with _engine.connect() as sa_conn:
         await _apply_request_context(sa_conn)
         raw_conn = await sa_conn.get_raw_connection()
+        conn_host = raw_conn.dbapi_connection.driver_connection.host
+        logger.info(f"[DB_CONNECTION] host={conn_host}")
         yield raw_conn.dbapi_connection.driver_connection
 
 
@@ -408,7 +432,9 @@ async def health_check() -> dict:
             }
 
         async with _engine.connect() as conn:
-            result = await conn.execute(text("SELECT current_setting('server_version') AS version"))
+            result = await conn.execute(
+                text("SELECT current_setting('server_version') AS version")
+            )
             pg_version = result.scalar()
 
         latency_ms = (time.time() - start) * 1000
@@ -422,11 +448,11 @@ async def health_check() -> dict:
             "overflow": pool.overflow(),
             "total_connections": pool.size() + pool.overflow(),
         }
-        
+
         # Log pool stats if connections are getting exhausted
         if pool.checkedout() > pool.size() * 0.8:
             logger.warning(f"⚠️ Connection pool usage high: {pool_stats}")
-        
+
         return {
             "status": "healthy",
             "message": "Database connection healthy",
