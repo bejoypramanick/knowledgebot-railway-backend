@@ -3042,29 +3042,28 @@ async def get_storage_breakdown(user: dict = Depends(get_current_user)):
     if not tenant_id:
         raise HTTPException(status_code=400, detail="Tenant context required")
 
+    # Only COMPLETED items for active storage
     query = text(
         """
         WITH file_stats AS (
             SELECT
                 COUNT(*) AS file_count,
-                COALESCE(SUM(pg_column_size(dc.content)), 0) AS content_bytes
+                COALESCE(SUM(file_size), 0) AS total_bytes
             FROM file_uploads fu
-            JOIN document_chunks dc ON dc.document_id = fu.id AND dc.document_type = 'file'
             WHERE fu.tenant_id = :tenant_id AND fu.processing_status = 'completed'
         ),
         website_stats AS (
             SELECT
                 COUNT(DISTINCT sw.id) AS website_count,
-                COALESCE(SUM(pg_column_size(dc.content)), 0) AS content_bytes
+                COALESCE(SUM(sw.file_size), 0) AS total_bytes
             FROM scraped_websites sw
-            JOIN document_chunks dc ON dc.document_id = sw.id AND dc.document_type = 'website'
             WHERE sw.tenant_id = :tenant_id AND sw.processing_status = 'completed' AND sw.parent_id IS NULL
         )
         SELECT
             COALESCE((SELECT file_count FROM file_stats), 0) AS files_count,
-            COALESCE((SELECT content_bytes FROM file_stats), 0) AS files_bytes,
+            COALESCE((SELECT total_bytes FROM file_stats), 0) AS files_bytes,
             COALESCE((SELECT website_count FROM website_stats), 0) AS websites_count,
-            COALESCE((SELECT content_bytes FROM website_stats), 0) AS websites_bytes
+            COALESCE((SELECT total_bytes FROM website_stats), 0) AS websites_bytes
         """
     )
 
@@ -3103,6 +3102,7 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         tenant_id, tenant["created_at"], now, quota_cycle
     )
 
+    # Use original tables to include COMPLETED + DELETED items in cycle
     query = text(
         """
         WITH reset_date AS (
@@ -3111,9 +3111,8 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         file_uploads_in_cycle AS (
             SELECT
                 COUNT(*) AS file_count,
-                COALESCE(SUM(pg_column_size(dc.content)), 0) AS content_bytes
+                COALESCE(SUM(file_size), 0) AS total_bytes
             FROM file_uploads fu
-            JOIN document_chunks dc ON dc.document_id = fu.id AND dc.document_type = 'file'
             CROSS JOIN reset_date
             WHERE fu.tenant_id = :tenant_id
               AND fu.processing_status IN ('completed', 'deleted')
@@ -3122,9 +3121,8 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         websites_in_cycle AS (
             SELECT
                 COUNT(DISTINCT sw.id) AS website_count,
-                COALESCE(SUM(pg_column_size(dc.content)), 0) AS content_bytes
+                COALESCE(SUM(sw.file_size), 0) AS total_bytes
             FROM scraped_websites sw
-            JOIN document_chunks dc ON dc.document_id = sw.id AND dc.document_type = 'website'
             CROSS JOIN reset_date
             WHERE sw.tenant_id = :tenant_id
               AND sw.processing_status IN ('completed', 'deleted')
@@ -3133,9 +3131,9 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         )
         SELECT
             COALESCE((SELECT file_count FROM file_uploads_in_cycle), 0) AS files_count,
-            COALESCE((SELECT content_bytes FROM file_uploads_in_cycle), 0) AS files_bytes,
+            COALESCE((SELECT total_bytes FROM file_uploads_in_cycle), 0) AS files_bytes,
             COALESCE((SELECT website_count FROM websites_in_cycle), 0) AS websites_count,
-            COALESCE((SELECT content_bytes FROM websites_in_cycle), 0) AS websites_bytes
+            COALESCE((SELECT total_bytes FROM websites_in_cycle), 0) AS websites_bytes
         """
     )
 
