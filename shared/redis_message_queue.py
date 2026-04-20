@@ -520,6 +520,83 @@ class RedisMessageQueue:
 
         return success
 
+    def cleanup_file_task_state(
+        self,
+        task_id: Optional[str],
+        extra_terms: Optional[List[str]] = None,
+        keep_cancel_flag: bool = False,
+    ) -> int:
+        """
+        Delete Redis state/messages associated with a file task.
+
+        This removes direct task keys and filters queued task/result messages that
+        reference the deleted file or its Celery/extraction job IDs.
+        """
+        terms = [term for term in ([task_id] + (extra_terms or [])) if term]
+        if not terms:
+            return 0
+
+        deleted = 0
+        if not self._is_file_available():
+            return deleted
+
+        try:
+            keys = {f"celery-task-meta-{task_id}"} if task_id else set()
+            if task_id and not keep_cancel_flag:
+                keys.add(f"task_cancelled:{task_id}")
+            for term in terms:
+                for key in self._file_connection.scan_iter(match=f"*{term}*", count=500):
+                    keys.add(key)
+
+            if keys:
+                deleted += int(self._file_connection.delete(*keys) or 0)
+
+            for queue_name in (
+                self.FILE_TASK_QUEUE,
+                self.FILE_RESULT_QUEUE,
+                self.EXTRACT_TASK_QUEUE,
+                self.EXTRACT_RESULT_QUEUE,
+            ):
+                deleted += self._purge_list_messages_containing_terms(
+                    self._file_connection,
+                    queue_name,
+                    terms,
+                )
+
+            logger.info(
+                f"🧹 Cleaned Redis file task state for task={task_id or 'none'} "
+                f"terms={len(terms)} deleted_or_removed={deleted}"
+            )
+        except Exception as e:
+            logger.error(f"❌ Error cleaning Redis file task state for {task_id}: {e}")
+
+        return deleted
+
+    def _purge_list_messages_containing_terms(self, connection, queue_name: str, terms: List[str]) -> int:
+        """Remove list entries whose JSON/string payload contains any term."""
+        messages = connection.lrange(queue_name, 0, -1)
+        if not messages:
+            return 0
+
+        kept = []
+        removed = 0
+        for message in messages:
+            text = message.decode("utf-8", errors="ignore") if isinstance(message, bytes) else str(message)
+            if any(term in text for term in terms):
+                removed += 1
+            else:
+                kept.append(message)
+
+        if removed:
+            pipe = connection.pipeline()
+            pipe.delete(queue_name)
+            if kept:
+                pipe.rpush(queue_name, *kept)
+            pipe.execute()
+            logger.info(f"🧹 Removed {removed} stale Redis message(s) from {queue_name}")
+
+        return removed
+
     def clear_file_task_queue(self) -> bool:
         """Remove all pending file tasks from queue (replaces celery queue purge)."""
         if not self._is_file_available():

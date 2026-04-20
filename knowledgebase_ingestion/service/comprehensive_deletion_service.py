@@ -463,6 +463,7 @@ class ComprehensiveDeletionService:
 
             redis_queue = RedisMessageQueue()
             redis_queue.set_task_cancelled(task_id)
+            redis_queue.cleanup_file_task_state(task_id, keep_cancel_flag=True)
 
             logger.info(f"   ✅ Redis cleaned: {task_id}")
             return True
@@ -514,6 +515,17 @@ class ComprehensiveDeletionService:
                 logger.warning(
                     f"   ⚠️ [REDIS_FILE_CLEANUP] Failed for {purpose} on file {file_id}: {redis_err}"
                 )
+
+        try:
+            redis_queue = RedisMessageQueue()
+            total_deleted += redis_queue.cleanup_file_task_state(
+                self._record_value(file_record, "celery_task_id"),
+                extra_terms=terms,
+            )
+        except Exception as queue_err:
+            logger.warning(
+                f"   ⚠️ [REDIS_FILE_CLEANUP] Queue message cleanup failed for file {file_id}: {queue_err}"
+            )
 
         return total_deleted
 

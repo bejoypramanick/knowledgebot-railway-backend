@@ -9,6 +9,11 @@ from shared.otel_logger import get_otel_logger
 logger = get_otel_logger("html_cleaner", "shared")
 
 
+def _is_live_tag(element) -> bool:
+    """BeautifulSoup keeps decomposed tags in old lists with attrs=None."""
+    return bool(element is not None and getattr(element, "attrs", None) is not None)
+
+
 def clean_html_preserving_images(html_content: str, url: Optional[str] = None) -> str:
     """
     Clean obvious navigation/footer/link noise before Kreuzberg extraction.
@@ -31,6 +36,8 @@ def clean_html_preserving_images(html_content: str, url: Optional[str] = None) -
 
         for tag_name in ("script", "noscript", "iframe", "template"):
             for element in soup.find_all(tag_name):
+                if not _is_live_tag(element):
+                    continue
                 element.decompose()
                 removed += 1
 
@@ -43,6 +50,8 @@ def clean_html_preserving_images(html_content: str, url: Optional[str] = None) -
             "[role='contentinfo']",
         ):
             for element in soup.select(selector):
+                if not _is_live_tag(element):
+                    continue
                 element.decompose()
                 removed += 1
 
@@ -51,6 +60,8 @@ def clean_html_preserving_images(html_content: str, url: Optional[str] = None) -
             re.IGNORECASE,
         )
         for element in list(soup.find_all(True)):
+            if not _is_live_tag(element):
+                continue
             tokens = " ".join(
                 str(value)
                 for attr in ("id", "class", "role", "aria-label", "data-testid", "data-test")
@@ -64,7 +75,9 @@ def clean_html_preserving_images(html_content: str, url: Optional[str] = None) -
                 element.decompose()
                 removed += 1
 
-        for anchor in soup.find_all("a"):
+        for anchor in list(soup.find_all("a")):
+            if not _is_live_tag(anchor):
+                continue
             href = (anchor.get("href") or "").strip()
             title = (anchor.get("title") or "").strip().lower()
             text_content = anchor.get_text(" ", strip=True)
