@@ -576,18 +576,18 @@ class KBQuotaService:
                   AND cycle_start_at = :cycle_start_at
             ),
             file_usage AS (
-                SELECT COALESCE(SUM(char_count), 0) AS total_bytes
+                SELECT COALESCE(SUM(COALESCE(file_size, char_count, 0)), 0) AS total_bytes
                 FROM file_uploads, usage_window
                 WHERE tenant_id = :tenant_id
-                  AND completed_at >= usage_window.reset_usage_at
-                  AND completed_at < usage_window.cycle_end_at
+                  AND created_at >= usage_window.reset_usage_at
+                  AND created_at < usage_window.cycle_end_at
             ),
             website_usage AS (
-                SELECT COALESCE(SUM(char_count), 0) AS total_bytes
+                SELECT COALESCE(SUM(COALESCE(file_size, char_count, 0)), 0) AS total_bytes
                 FROM scraped_websites, usage_window
                 WHERE tenant_id = :tenant_id
-                  AND completed_at >= usage_window.reset_usage_at
-                  AND completed_at < usage_window.cycle_end_at
+                  AND created_at >= usage_window.reset_usage_at
+                  AND created_at < usage_window.cycle_end_at
                   AND parent_id IS NULL
             )
             SELECT COALESCE((SELECT total_bytes FROM file_usage), 0) + COALESCE((SELECT total_bytes FROM website_usage), 0) AS total_bytes
