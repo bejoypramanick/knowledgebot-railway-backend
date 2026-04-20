@@ -606,17 +606,23 @@ class KBQuotaService:
         query = text(
             """
             WITH file_usage AS (
-                SELECT COALESCE(SUM(char_count), 0) AS total_bytes
-                FROM file_uploads
-                WHERE tenant_id = :tenant_id
-                  AND processing_status IN ('pending', 'queued', 'processing', 'completed')
+                SELECT COALESCE(SUM(octet_length(dc.content)), 0) AS total_bytes
+                FROM file_uploads fu
+                JOIN document_chunks dc
+                  ON dc.document_id = fu.id
+                 AND dc.document_type = 'file'
+                WHERE fu.tenant_id = :tenant_id
+                  AND fu.processing_status IN ('pending', 'queued', 'processing', 'completed')
             ),
             website_usage AS (
-                SELECT COALESCE(SUM(char_count), 0) AS total_bytes
-                FROM scraped_websites
-                WHERE tenant_id = :tenant_id
-                  AND processing_status IN ('pending', 'queued', 'processing', 'completed')
-                  AND parent_id IS NULL
+                SELECT COALESCE(SUM(octet_length(dc.content)), 0) AS total_bytes
+                FROM scraped_websites sw
+                JOIN document_chunks dc
+                  ON dc.document_id = sw.id
+                 AND dc.document_type = 'website'
+                WHERE sw.tenant_id = :tenant_id
+                  AND sw.processing_status IN ('pending', 'queued', 'processing', 'completed')
+                  AND sw.parent_id IS NULL
             )
             SELECT COALESCE((SELECT total_bytes FROM file_usage), 0) + COALESCE((SELECT total_bytes FROM website_usage), 0) AS total_bytes
             """
