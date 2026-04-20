@@ -13,6 +13,7 @@ Handles:
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
+import asyncio
 import re
 
 from shared.otel_logger import get_otel_logger
@@ -566,11 +567,23 @@ class ComprehensiveDeletionService:
                     deletion_report["success"] = True
                     deletion_report["completed_at"] = datetime.utcnow().isoformat()
 
-                    # POST-TRANSACTION VERIFY - fresh connection to check after commit
+                    # POST-TRANSACTION VERIFY - close pool, wait, and reconnect to force fresh connection
                     logger.info(
                         f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY start=true"
                     )
                     try:
+                        # Dispose connection pool to force new connection
+                        from shared.sqlalchemy_db import _engine
+
+                        if _engine:
+                            await _engine.dispose()
+                            logger.info(
+                                f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY disposed_pool=true"
+                            )
+
+                        # Wait a moment for any replication/sync
+                        await asyncio.sleep(0.5)
+
                         async with get_db_connection() as post_conn:
                             post_status = await post_conn.fetchrow(
                                 "SELECT id, processing_status FROM scraped_websites WHERE id = $1",
