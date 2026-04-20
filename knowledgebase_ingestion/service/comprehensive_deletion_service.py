@@ -26,6 +26,7 @@ logger = get_otel_logger("comprehensive_deletion_service", "knowledgebase-ingest
 
 class ItemType(str, Enum):
     """Type of knowledge base item"""
+
     FILE = "file"
     WEBSITE = "website"
     WEBPAGE = "webpage"
@@ -34,6 +35,7 @@ class ItemType(str, Enum):
 
 class DeletionStep(str, Enum):
     """Steps in the deletion process"""
+
     LOOKUP = "lookup"
     CELERY_REVOKE = "celery_revoke"
     REDIS_CLEANUP = "redis_cleanup"
@@ -50,10 +52,7 @@ class ComprehensiveDeletionService:
         self.deletion_log: Dict[str, List[Dict[str, Any]]] = {}
 
     async def delete_item(
-        self,
-        item_id: str,
-        item_type: ItemType,
-        hard_delete: bool = False
+        self, item_id: str, item_type: ItemType, hard_delete: bool = False
     ) -> Dict[str, Any]:
         """
         Delete a knowledge base item completely - wipes all data points.
@@ -67,7 +66,9 @@ class ComprehensiveDeletionService:
             Complete deletion report with all operations and results
         """
         logger.info("=" * 100)
-        logger.info(f"🗑️  [COMPREHENSIVE_DELETION_START] Deleting {item_type.value} ID: {item_id}")
+        logger.info(
+            f"🗑️  [COMPREHENSIVE_DELETION_START] Deleting {item_type.value} ID: {item_id}"
+        )
         logger.info(f"   Hard Delete: {hard_delete}")
         logger.info("=" * 100)
 
@@ -83,18 +84,22 @@ class ComprehensiveDeletionService:
                 "redis_keys_deleted": 0,
                 "s3_raw_files_deleted": 0,
                 "s3_processed_files_deleted": 0,
-                "db_records_affected": 0
+                "db_records_affected": 0,
             },
             "errors": [],
-            "warnings": []
+            "warnings": [],
         }
 
         try:
             # Route to appropriate deletion method
             if item_type == ItemType.FILE:
-                result = await self._delete_file_comprehensive(item_id, hard_delete, deletion_report)
+                result = await self._delete_file_comprehensive(
+                    item_id, hard_delete, deletion_report
+                )
             elif item_type in [ItemType.WEBSITE, ItemType.WEBPAGE, ItemType.SITEMAP]:
-                result = await self._delete_website_comprehensive(item_id, hard_delete, deletion_report)
+                result = await self._delete_website_comprehensive(
+                    item_id, hard_delete, deletion_report
+                )
             else:
                 raise ValueError(f"Unknown item type: {item_type}")
 
@@ -107,14 +112,17 @@ class ComprehensiveDeletionService:
 
         except Exception as e:
             import traceback
+
             logger.error(f"❌ [DELETION_FAILED] Critical error: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             deletion_report["success"] = False
-            deletion_report["errors"].append({
-                "step": "unknown",
-                "error": str(e),
-                "timestamp": datetime.utcnow().isoformat()
-            })
+            deletion_report["errors"].append(
+                {
+                    "step": "unknown",
+                    "error": str(e),
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
             deletion_report["completed_at"] = datetime.utcnow().isoformat()
             return deletion_report
 
@@ -136,10 +144,7 @@ class ComprehensiveDeletionService:
     # ============================================================================
 
     async def _delete_file_comprehensive(
-        self,
-        file_id: str,
-        hard_delete: bool,
-        deletion_report: Dict[str, Any]
+        self, file_id: str, hard_delete: bool, deletion_report: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Complete deletion of uploaded file"""
 
@@ -155,78 +160,110 @@ class ComprehensiveDeletionService:
                         FROM file_uploads
                         WHERE id = $1
                         FOR UPDATE""",
-                        file_id
+                        file_id,
                     )
 
                     if not file_record:
                         deletion_report["success"] = False
-                        deletion_report["errors"].append({
-                            "step": DeletionStep.LOOKUP.value,
-                            "error": f"File {file_id} not found"
-                        })
+                        deletion_report["errors"].append(
+                            {
+                                "step": DeletionStep.LOOKUP.value,
+                                "error": f"File {file_id} not found",
+                            }
+                        )
                         deletion_report["completed_at"] = datetime.utcnow().isoformat()
                         logger.error(f"❌ File {file_id} not found")
                         return deletion_report
 
-                    deletion_report["filename"] = file_record['original_filename']
-                    logger.info(f"✅ [LOOKUP] Found: {file_record['original_filename']}")
-                    logger.info(f"   Processing Status: {file_record['processing_status']}")
+                    deletion_report["filename"] = file_record["original_filename"]
+                    logger.info(
+                        f"✅ [LOOKUP] Found: {file_record['original_filename']}"
+                    )
+                    logger.info(
+                        f"   Processing Status: {file_record['processing_status']}"
+                    )
                     logger.info(f"   Celery Task: {file_record['celery_task_id']}")
                     logger.info(f"   S3 Raw: {file_record['s3_key']}")
-                    logger.info(f"   S3 Processed: {file_record['processed_content_s3_key']}")
+                    logger.info(
+                        f"   S3 Processed: {file_record['processed_content_s3_key']}"
+                    )
 
                     # Step 2: CELERY REVOCATION
                     logger.info(f"🔪 [CELERY_REVOKE] Terminating Celery tasks...")
                     celery_revoked = await self._revoke_celery_task(
-                        file_record['celery_task_id'],
-                        task_type="file"
+                        file_record["celery_task_id"], task_type="file"
                     )
-                    deletion_report["cleanup_summary"]["celery_tasks_revoked"] = 1 if celery_revoked else 0
-
-
+                    deletion_report["cleanup_summary"]["celery_tasks_revoked"] = (
+                        1 if celery_revoked else 0
+                    )
 
                     # Step 3: REDIS CLEANUP
                     logger.info(f"🚩 [REDIS_CLEANUP] Cleaning Redis state...")
-                    redis_cleaned = await self._cleanup_redis_task_state(file_record['celery_task_id'])
+                    redis_cleaned = await self._cleanup_redis_task_state(
+                        file_record["celery_task_id"]
+                    )
                     if redis_cleaned:
                         deletion_report["cleanup_summary"]["redis_keys_deleted"] += 1
-                    file_redis_keys_deleted = await self._cleanup_file_redis_references(file_id, file_record)
-                    deletion_report["cleanup_summary"]["redis_keys_deleted"] += file_redis_keys_deleted
+                    file_redis_keys_deleted = await self._cleanup_file_redis_references(
+                        file_id, file_record
+                    )
+                    deletion_report["cleanup_summary"]["redis_keys_deleted"] += (
+                        file_redis_keys_deleted
+                    )
 
                     # Step 4: S3 CLEANUP - BOTH raw and processed
                     logger.info(f"☁️  [S3_DELETE] Deleting from S3...")
-                    await self._delete_from_s3_complete([
-                        file_record['s3_key'],
-                        file_record['processed_content_s3_key']
-                    ])
-                    deletion_report["cleanup_summary"]["s3_raw_files_deleted"] = 1 if file_record['s3_key'] else 0
-                    deletion_report["cleanup_summary"]["s3_processed_files_deleted"] = 1 if file_record['processed_content_s3_key'] else 0
+                    await self._delete_from_s3_complete(
+                        [file_record["s3_key"], file_record["processed_content_s3_key"]]
+                    )
+                    deletion_report["cleanup_summary"]["s3_raw_files_deleted"] = (
+                        1 if file_record["s3_key"] else 0
+                    )
+                    deletion_report["cleanup_summary"]["s3_processed_files_deleted"] = (
+                        1 if file_record["processed_content_s3_key"] else 0
+                    )
 
                     # Step 5: VECTOR CHUNK CLEANUP
                     logger.info(f"🧹 [VECTOR_CLEANUP] Deleting vector chunks...")
                     try:
                         from shared.vector_dao import vector_dao
-                        chunks_deleted = await vector_dao.delete_chunks_for_document(file_id, "file")
-                        deletion_report["cleanup_summary"]["vector_chunks_deleted"] = chunks_deleted
-                        logger.info(f"   🧹 Deleted {chunks_deleted} vector chunks for file {file_id}")
+
+                        chunks_deleted = await vector_dao.delete_chunks_for_document(
+                            file_id, "file"
+                        )
+                        deletion_report["cleanup_summary"]["vector_chunks_deleted"] = (
+                            chunks_deleted
+                        )
+                        logger.info(
+                            f"   🧹 Deleted {chunks_deleted} vector chunks for file {file_id}"
+                        )
                     except Exception as vec_err:
                         logger.warning(f"   ⚠️ Vector chunk cleanup failed: {vec_err}")
-                        deletion_report["warnings"].append(f"Vector cleanup failed: {vec_err}")
+                        deletion_report["warnings"].append(
+                            f"Vector cleanup failed: {vec_err}"
+                        )
 
                     # Step 6: DATABASE TRANSACTION
                     logger.info(f"💾 [DB_TRANSACTION] Updating database...")
                     if hard_delete:
                         # Hard delete: remove from database
+                        logger.info(f"   🗑️ Executing hard delete for file_id={file_id}")
                         status_str = await conn.execute(
-                            "DELETE FROM file_uploads WHERE id = $1::uuid",
-                            file_id
+                            "DELETE FROM file_uploads WHERE id = $1", file_id
                         )
                         # status_str is e.g. "DELETE 1"
                         affected = int(status_str.split()[-1])
-                        deletion_report["cleanup_summary"]["db_records_affected"] = affected
-                        logger.info(f"   🗑️  Hard deleted from database ({affected} rows affected)")
+                        deletion_report["cleanup_summary"]["db_records_affected"] = (
+                            affected
+                        )
+                        logger.info(
+                            f"   🗑️  Hard deleted from database ({affected} rows affected)"
+                        )
                     else:
                         # Soft delete: mark as deleted with audit trail
+                        logger.info(
+                            f"   📝 Executing soft delete for file_id={file_id}"
+                        )
                         status_str = await conn.execute(
                             """UPDATE file_uploads
                             SET processing_status = 'deleted',
@@ -237,13 +274,20 @@ class ComprehensiveDeletionService:
                                 processed_content_s3_key = NULL,
                                 updated_at = NOW(),
                                 error_message = 'Comprehensively deleted'
-                            WHERE id = $1::uuid""",
-                            file_id
+                            WHERE id = $1""",
+                            file_id,
                         )
                         # status_str is e.g. "UPDATE 1" or "UPDATE 0"
                         affected = int(status_str.split()[-1])
-                        deletion_report["cleanup_summary"]["db_records_affected"] = affected
-                        logger.info(f"   📌 Soft deleted in database ({affected} rows affected)")
+                        logger.info(
+                            f"   📝 Soft delete result: {status_str}, affected={affected}"
+                        )
+                        deletion_report["cleanup_summary"]["db_records_affected"] = (
+                            affected
+                        )
+                        logger.info(
+                            f"   📌 Soft deleted in database ({affected} rows affected)"
+                        )
 
                     # Transaction committed successfully
                     deletion_report["success"] = True
@@ -253,13 +297,13 @@ class ComprehensiveDeletionService:
 
         except Exception as e:
             import traceback
+
             logger.error(f"❌ [FILE_DELETION_ERROR] {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             deletion_report["success"] = False
-            deletion_report["errors"].append({
-                "step": DeletionStep.DB_TRANSACTION.value,
-                "error": str(e)
-            })
+            deletion_report["errors"].append(
+                {"step": DeletionStep.DB_TRANSACTION.value, "error": str(e)}
+            )
             deletion_report["completed_at"] = datetime.utcnow().isoformat()
             return deletion_report
 
@@ -268,10 +312,7 @@ class ComprehensiveDeletionService:
     # ============================================================================
 
     async def _delete_website_comprehensive(
-        self,
-        website_id: str,
-        hard_delete: bool,
-        deletion_report: Dict[str, Any]
+        self, website_id: str, hard_delete: bool, deletion_report: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Complete deletion of website/page with parent-child handling"""
 
@@ -287,23 +328,33 @@ class ComprehensiveDeletionService:
                         FROM scraped_websites
                         WHERE id = $1
                         FOR UPDATE""",
-                        website_id
+                        website_id,
                     )
 
                     if not website_record:
                         deletion_report["success"] = False
-                        deletion_report["errors"].append({
-                            "step": DeletionStep.LOOKUP.value,
-                            "error": f"Website {website_id} not found"
-                        })
+                        deletion_report["errors"].append(
+                            {
+                                "step": DeletionStep.LOOKUP.value,
+                                "error": f"Website {website_id} not found",
+                            }
+                        )
                         deletion_report["completed_at"] = datetime.utcnow().isoformat()
                         return deletion_report
 
-                    is_parent = website_record['parent_id'] is None
-                    deletion_report["url"] = website_record['original_url']
+                    is_parent = website_record["parent_id"] is None
+                    deletion_report["url"] = website_record["original_url"]
                     deletion_report["is_parent"] = is_parent
                     logger.info(f"✅ [LOOKUP] Found: {website_record['original_url']}")
-                    logger.info(f"   Type: {'Parent Website' if is_parent else 'Child Page'}")
+                    logger.info(
+                        f"   Type: {'Parent Website' if is_parent else 'Child Page'}"
+                    )
+                    logger.info(
+                        f"   Current Status: {website_record['processing_status']}"
+                    )
+                    logger.info(
+                        f"   Website ID: {website_id} (type: {type(website_id).__name__})"
+                    )
 
                     # Get all child pages if this is a parent
                     child_pages = []
@@ -315,7 +366,7 @@ class ComprehensiveDeletionService:
                             FROM scraped_websites
                             WHERE parent_id = $1
                             FOR UPDATE""",
-                            website_id
+                            website_id,
                         )
                         logger.info(f"   Found {len(child_pages)} child pages")
                         deletion_report["child_pages_count"] = len(child_pages)
@@ -328,106 +379,149 @@ class ComprehensiveDeletionService:
                     celery_revoked = 0
 
                     # Always revoke parent task
-                    if website_record['celery_task_id']:
-                        if await self._revoke_celery_task(website_record['celery_task_id'], "website"):
+                    if website_record["celery_task_id"]:
+                        if await self._revoke_celery_task(
+                            website_record["celery_task_id"], "website"
+                        ):
                             celery_revoked += 1
 
                     # Revoke child tasks (only for parent deletion)
                     for child in child_pages:
-                        if child['celery_task_id']:
-                            if await self._revoke_celery_task(child['celery_task_id'], "website"):
+                        if child["celery_task_id"]:
+                            if await self._revoke_celery_task(
+                                child["celery_task_id"], "website"
+                            ):
                                 celery_revoked += 1
 
-                    deletion_report["cleanup_summary"]["celery_tasks_revoked"] = celery_revoked
-
-
+                    deletion_report["cleanup_summary"]["celery_tasks_revoked"] = (
+                        celery_revoked
+                    )
 
                     # Step 3: REDIS CLEANUP
                     logger.info(f"🚩 [REDIS_CLEANUP] Cleaning Redis state...")
                     redis_deleted = 0
                     for page in all_pages:
-                        if page['celery_task_id']:
-                            if await self._cleanup_redis_task_state(page['celery_task_id']):
+                        if page["celery_task_id"]:
+                            if await self._cleanup_redis_task_state(
+                                page["celery_task_id"]
+                            ):
                                 redis_deleted += 1
-                    deletion_report["cleanup_summary"]["redis_keys_deleted"] = redis_deleted
+                    deletion_report["cleanup_summary"]["redis_keys_deleted"] = (
+                        redis_deleted
+                    )
 
                     # Step 4: VECTOR CHUNK CLEANUP
                     logger.info(f"🧹 [VECTOR_CLEANUP] Deleting vector chunks...")
                     try:
                         from shared.vector_dao import vector_dao
-                        all_page_ids = [str(p['id']) for p in all_pages]
-                        chunks_deleted = await vector_dao.delete_chunks_for_documents(all_page_ids, "website")
-                        deletion_report["cleanup_summary"]["vector_chunks_deleted"] = chunks_deleted
-                        logger.info(f"   🧹 Deleted {chunks_deleted} vector chunks for {len(all_page_ids)} website pages")
+
+                        all_page_ids = [str(p["id"]) for p in all_pages]
+                        chunks_deleted = await vector_dao.delete_chunks_for_documents(
+                            all_page_ids, "website"
+                        )
+                        deletion_report["cleanup_summary"]["vector_chunks_deleted"] = (
+                            chunks_deleted
+                        )
+                        logger.info(
+                            f"   🧹 Deleted {chunks_deleted} vector chunks for {len(all_page_ids)} website pages"
+                        )
                     except Exception as vec_err:
                         logger.warning(f"   ⚠️ Vector chunk cleanup failed: {vec_err}")
-                        deletion_report["warnings"].append(f"Vector cleanup failed: {vec_err}")
+                        deletion_report["warnings"].append(
+                            f"Vector cleanup failed: {vec_err}"
+                        )
 
                     # Step 5: DATABASE TRANSACTION (atomic - parent + children together)
-                    logger.info(f"💾 [DB_TRANSACTION] Updating database ({len(all_pages)} records)...")
+                    logger.info(
+                        f"💾 [DB_TRANSACTION] Updating database ({len(all_pages)} records)..."
+                    )
 
                     if hard_delete:
                         # Hard delete: remove all pages
-                        await conn.execute(
-                            "DELETE FROM scraped_websites WHERE id = $1",
-                            website_id
+                        logger.info(
+                            f"   🗑️ Executing hard delete for website_id={website_id}"
                         )
                         status1 = await conn.execute(
-                            "DELETE FROM scraped_websites WHERE id = $1::uuid",
-                            website_id
+                            "DELETE FROM scraped_websites WHERE id = $1",
+                            website_id,
                         )
                         affected = int(status1.split()[-1])
-                        
+                        logger.info(
+                            f"   🗑️ Hard delete result: {status1}, affected={affected}"
+                        )
+
                         if child_pages:
                             status2 = await conn.execute(
-                                "DELETE FROM scraped_websites WHERE parent_id = $1::uuid",
-                                website_id
+                                "DELETE FROM scraped_websites WHERE parent_id = $1",
+                                website_id,
                             )
                             affected += int(status2.split()[-1])
-                        
-                        deletion_report["cleanup_summary"]["db_records_affected"] = affected
-                        logger.info(f"   🗑️  Hard deleted from database ({affected} rows affected)")
+
+                        deletion_report["cleanup_summary"]["db_records_affected"] = (
+                            affected
+                        )
+                        logger.info(
+                            f"   🗑️  Hard deleted from database ({affected} rows affected)"
+                        )
                     else:
                         # Soft delete: mark as deleted
+                        logger.info(
+                            f"   📝 Executing soft delete for website_id={website_id}"
+                        )
                         status1 = await conn.execute(
                             """UPDATE scraped_websites
                             SET processing_status = 'deleted',
                                 updated_at = NOW(),
                                 error_message = 'Comprehensively deleted'
-                            WHERE id = $1::uuid""",
-                            website_id
+                            WHERE id = $1""",
+                            website_id,
                         )
                         affected = int(status1.split()[-1])
-                        
+                        logger.info(
+                            f"   📝 Soft delete result for parent: {status1}, affected={affected}"
+                        )
+
                         if child_pages:
+                            logger.info(
+                                f"   📝 Soft deleting {len(child_pages)} child pages"
+                            )
                             status2 = await conn.execute(
                                 """UPDATE scraped_websites
                                 SET processing_status = 'deleted',
                                     updated_at = NOW(),
                                     error_message = 'Comprehensively deleted'
-                                WHERE parent_id = $1::uuid""",
-                                website_id
+                                WHERE parent_id = $1""",
+                                website_id,
                             )
                             affected += int(status2.split()[-1])
-                            
-                        deletion_report["cleanup_summary"]["db_records_affected"] = affected
-                        logger.info(f"   📌 Soft deleted in database ({affected} rows affected)")
+                            logger.info(
+                                f"   📝 Soft delete result for children: {status2}"
+                            )
+
+                        deletion_report["cleanup_summary"]["db_records_affected"] = (
+                            affected
+                        )
+                        logger.info(
+                            f"   📌 Soft deleted in database ({affected} rows affected)"
+                        )
 
                     # Transaction committed successfully
                     deletion_report["success"] = True
                     deletion_report["completed_at"] = datetime.utcnow().isoformat()
-                    logger.info(f"✅ [COMPREHENSIVE_DELETION] Website/pages deleted completely")
+                    logger.info(
+                        f"✅ [COMPREHENSIVE_DELETION] Website/pages deleted completely"
+                    )
                     return deletion_report
 
         except Exception as e:
             import traceback
+
             logger.error(f"❌ [WEBSITE_DELETION_ERROR] {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             deletion_report["success"] = False
-            deletion_report["errors"].append({
-                "step": DeletionStep.DB_TRANSACTION.value,
-                "error": str(e)
-            })
+            deletion_report["errors"].append(
+                {"step": DeletionStep.DB_TRANSACTION.value, "error": str(e)}
+            )
             deletion_report["completed_at"] = datetime.utcnow().isoformat()
             return deletion_report
 
@@ -447,7 +541,7 @@ class ComprehensiveDeletionService:
             celery_app = file_celery if task_type == "file" else web_celery
 
             # Revoke with SIGKILL to force termination
-            celery_app.control.revoke(task_id, terminate=True, signal='SIGKILL')
+            celery_app.control.revoke(task_id, terminate=True, signal="SIGKILL")
 
             logger.info(f"   ✅ Task revoked: {task_id}")
             return True
@@ -473,7 +567,9 @@ class ComprehensiveDeletionService:
             logger.warning(f"   ⚠️  Could not clean Redis: {e}")
             return False
 
-    async def _cleanup_file_redis_references(self, file_id: str, file_record: Any) -> int:
+    async def _cleanup_file_redis_references(
+        self, file_id: str, file_record: Any
+    ) -> int:
         """Delete Redis cache/state keys that directly reference an individual file."""
         terms = self._redis_search_terms(
             [
@@ -505,7 +601,9 @@ class ComprehensiveDeletionService:
                     cache=False,
                 )
                 try:
-                    deleted = await self._delete_redis_keys_matching_terms(client, terms)
+                    deleted = await self._delete_redis_keys_matching_terms(
+                        client, terms
+                    )
                     total_deleted += deleted
                     logger.info(
                         f"   🧹 [REDIS_FILE_CLEANUP] Deleted {deleted} keys from {purpose} "
@@ -550,7 +648,9 @@ class ComprehensiveDeletionService:
             terms.append(text_value)
         return terms
 
-    async def _delete_redis_keys_matching_terms(self, client: Any, terms: List[str]) -> int:
+    async def _delete_redis_keys_matching_terms(
+        self, client: Any, terms: List[str]
+    ) -> int:
         deleted = 0
         key_names = set()
         for term in terms:
@@ -564,8 +664,6 @@ class ComprehensiveDeletionService:
 
     def _redis_glob_escape(self, value: str) -> str:
         return re.sub(r"([][?*\\])", r"\\\1", value)
-
-
 
     async def _delete_from_s3_complete(self, s3_keys: Optional[List[str]]) -> int:
         """Delete all S3 files (both raw uploads and processed content)"""
@@ -592,7 +690,9 @@ class ComprehensiveDeletionService:
                 except Exception as e:
                     logger.warning(f"   ⚠️  Could not delete {s3_key}: {e}")
 
-            logger.info(f"   ✅ S3 cleanup complete: {deleted_count}/{len(keys_to_delete)} deleted")
+            logger.info(
+                f"   ✅ S3 cleanup complete: {deleted_count}/{len(keys_to_delete)} deleted"
+            )
             return deleted_count
 
         except Exception as e:

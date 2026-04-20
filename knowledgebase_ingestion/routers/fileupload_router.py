@@ -2,6 +2,7 @@
 File Upload Router
 Handles all file upload related endpoints
 """
+
 from fastapi import APIRouter, HTTPException, Request, UploadFile, Form
 from fastapi.responses import JSONResponse
 from typing import Optional, Dict, Any
@@ -10,12 +11,19 @@ import mimetypes
 from knowledgebase_ingestion.utils.auth import extract_user_from_request
 from knowledgebase_ingestion.utils.logging import get_otel_logger
 from knowledgebase_ingestion.service.fileupload_service import (
-    get_fileupload_dao, get_pending_files, get_file_by_id,
-    cancel_files, update_file_status, delete_file,
-    validate_file_upload, delete_all_knowledge
+    get_fileupload_dao,
+    get_pending_files,
+    get_file_by_id,
+    cancel_files,
+    update_file_status,
+    delete_file,
+    validate_file_upload,
+    delete_all_knowledge,
 )
 from knowledgebase_ingestion.service.file_service import get_file_service
-from knowledgebase_ingestion.service.upload_constraints_service import get_upload_constraints_service
+from knowledgebase_ingestion.service.upload_constraints_service import (
+    get_upload_constraints_service,
+)
 from knowledgebase_ingestion.dao.webcrawl_dao import WebCrawlDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery
@@ -30,19 +38,19 @@ async def _invalidate_kb_cache():
     """Invalidate all KB file cache keys in Redis DB7."""
     try:
         from shared.redis_ui_cache import cache_invalidate_pattern, KB_FILES_KEY_PREFIX
-        
+
         # Aggressive multi-pattern invalidation to catch all tenant/global variants
         patterns = [
-            f"{KB_FILES_KEY_PREFIX}*",       # Standard: ui_cache:kb_files:*
-            f"*{KB_FILES_KEY_PREFIX}*",      # Prefixed: *ui_cache:kb_files:*
-            "*kb_files*"                     # Broad: *kb_files*
+            f"{KB_FILES_KEY_PREFIX}*",  # Standard: ui_cache:kb_files:*
+            f"*{KB_FILES_KEY_PREFIX}*",  # Prefixed: *ui_cache:kb_files:*
+            "*kb_files*",  # Broad: *kb_files*
         ]
-        
+
         total_deleted = 0
         for pattern in patterns:
             count = await cache_invalidate_pattern(pattern)
             total_deleted += count
-            
+
         logger.info(f"🗑️ [CACHE_INVALIDATE] Purged {total_deleted} KB cache keys")
     except Exception as e:
         logger.warning(f"⚠️ Failed to invalidate KB caches: {e}")
@@ -56,6 +64,7 @@ def get_mime_type_fallback(filename: str, db_mime_type: Optional[str] = None) ->
     mime_type, _ = mimetypes.guess_type(filename)
     return mime_type or "application/octet-stream"
 
+
 # NOTE: Prefix is provided by include_router() in main.py
 # Do NOT include full path here to avoid double prefix (prefix=/api/v1/knowledgebase in include_router)
 router = APIRouter(tags=["file-upload"])
@@ -63,6 +72,7 @@ router = APIRouter(tags=["file-upload"])
 # =================================
 # FILE UPLOAD CONSTRAINTS ENDPOINT
 # =================================
+
 
 @router.get("/upload/constraints")
 async def get_upload_constraints(request: Request = None):
@@ -86,7 +96,9 @@ async def get_upload_constraints(request: Request = None):
         # Extract authenticated user information (optional, just for logging)
         try:
             user_email, user_id = extract_user_from_request(request)
-            logger.info(f"👤 [USER] Requested by: user_hash={hash_pii(user_email)} user_id={user_id}")
+            logger.info(
+                f"👤 [USER] Requested by: user_hash={hash_pii(user_email)} user_id={user_id}"
+            )
         except Exception:
             logger.info(f"👤 [USER] Requested by: unauthenticated client")
 
@@ -96,12 +108,22 @@ async def get_upload_constraints(request: Request = None):
         constraints = constraints_service.get_constraints()
 
         logger.info("=" * 80)
-        logger.info("✅ [CONSTRAINTS_SUCCESS] Upload constraints retrieved successfully")
+        logger.info(
+            "✅ [CONSTRAINTS_SUCCESS] Upload constraints retrieved successfully"
+        )
         logger.info("=" * 80)
-        logger.info(f"📊 [DETAILS] Max file size: {constraints['constraints']['max_file_size_display']}")
-        logger.info(f"📊 [DETAILS] Allowed extensions: {len(constraints['constraints']['allowed_extensions'])}")
-        logger.info(f"📊 [DETAILS] Allowed MIME types: {len(constraints['constraints']['allowed_mime_types'])}")
-        logger.info(f"📊 [DETAILS] File categories: {', '.join(constraints['constraints']['file_categories'].keys())}")
+        logger.info(
+            f"📊 [DETAILS] Max file size: {constraints['constraints']['max_file_size_display']}"
+        )
+        logger.info(
+            f"📊 [DETAILS] Allowed extensions: {len(constraints['constraints']['allowed_extensions'])}"
+        )
+        logger.info(
+            f"📊 [DETAILS] Allowed MIME types: {len(constraints['constraints']['allowed_mime_types'])}"
+        )
+        logger.info(
+            f"📊 [DETAILS] File categories: {', '.join(constraints['constraints']['file_categories'].keys())}"
+        )
 
         return constraints
 
@@ -116,54 +138,73 @@ async def get_upload_constraints(request: Request = None):
 # FILE LISTING ENDPOINTS
 # =================================
 
+
 @router.get("/files")
-async def get_all_files(request: Request = None, status: Optional[str] = None):
+async def get_all_files(
+    request: Request = None, status: Optional[str] = None, _cb: Optional[str] = None
+):
     """
     Get all files and websites — Redis DB7 cache first (10min TTL), PG fallback
     """
     try:
-        # Check Redis cache first
-        from shared.redis_ui_cache import cache_get, cache_set, KB_FILES_KEY_PREFIX, TTL_MEDIUM
+        # Check Redis cache first (skip if _cb cache-buster param provided)
+        from shared.redis_ui_cache import (
+            cache_get,
+            cache_set,
+            KB_FILES_KEY_PREFIX,
+            TTL_MEDIUM,
+        )
+
         cache_key = f"{KB_FILES_KEY_PREFIX}{status or 'active'}"
-        cached = await cache_get(cache_key)
-        if cached:
-            return cached
+        if not _cb:
+            cached = await cache_get(cache_key)
+            if cached:
+                return cached
 
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
         # Get files based on status parameter
         from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
+
         fileupload_dao = FileUploadDAO()
 
-        if status == 'inactive':
+        if status == "inactive":
             files = await fileupload_dao.get_inactive_files()
         else:
             files = await fileupload_dao.get_active_files()
 
         # Get hierarchical websites based on status parameter
         webcrawl_dao = WebCrawlDAO()
-        if status == 'inactive':
-            websites = await webcrawl_dao.get_hierarchical_websites(include_inactive=True, user_role_id=user_id)
+        if status == "inactive":
+            websites = await webcrawl_dao.get_hierarchical_websites(
+                include_inactive=True, user_role_id=user_id
+            )
         else:
-            websites = await webcrawl_dao.get_hierarchical_websites(include_inactive=False, user_role_id=user_id)
+            websites = await webcrawl_dao.get_hierarchical_websites(
+                include_inactive=False, user_role_id=user_id
+            )
 
         # Format files for response
         files_list = [
             {
-                "id": str(f['id']),
+                "id": str(f["id"]),
                 "type": "file",
                 "source": "upload",  # Add source field for UI filtering
-                "name": f['original_filename'],
-                "file_extension": f.get('file_extension'),  # Include file extension
-                "mime_type": get_mime_type_fallback(f['original_filename'], f.get('mime_type')),  # Include MIME type with fallback
-                "processing_status": f['processing_status'],
-                "error_message": f['error_message'],
-                "size_bytes": f.get('file_size', 0),  # Map file_size to size_bytes for UI
-                "char_count": f.get('char_count', 0),
-                "processed_content_s3_key": f.get('processed_content_s3_key'),
-                "created_at": f['created_at'].isoformat() if f['created_at'] else None,
-                "updated_at": f['updated_at'].isoformat() if f['updated_at'] else None
+                "name": f["original_filename"],
+                "file_extension": f.get("file_extension"),  # Include file extension
+                "mime_type": get_mime_type_fallback(
+                    f["original_filename"], f.get("mime_type")
+                ),  # Include MIME type with fallback
+                "processing_status": f["processing_status"],
+                "error_message": f["error_message"],
+                "size_bytes": f.get(
+                    "file_size", 0
+                ),  # Map file_size to size_bytes for UI
+                "char_count": f.get("char_count", 0),
+                "processed_content_s3_key": f.get("processed_content_s3_key"),
+                "created_at": f["created_at"].isoformat() if f["created_at"] else None,
+                "updated_at": f["updated_at"].isoformat() if f["updated_at"] else None,
             }
             for f in files
         ]
@@ -173,10 +214,7 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
             "files": files_list,
             "websites": websites,
             "count": len(files_list),
-            "sources": {
-                "upload": len(files_list),
-                "scrape": len(websites)
-            }
+            "sources": {"upload": len(files_list), "scrape": len(websites)},
         }
         # Cache the response
         await cache_set(cache_key, response, TTL_MEDIUM)
@@ -192,7 +230,7 @@ async def get_file_processing_status(request: Request = None):
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+
         # Get all files with their current status
         files = await get_pending_files()
 
@@ -200,18 +238,24 @@ async def get_file_processing_status(request: Request = None):
             "success": True,
             "files": [
                 {
-                    "id": str(f['id']),
+                    "id": str(f["id"]),
                     "type": "file",
-                    "name": f['original_filename'],
-                    "file_extension": f.get('file_extension'),  # Include file extension
-                    "mime_type": get_mime_type_fallback(f['original_filename'], f.get('mime_type')),  # Include MIME type with fallback
-                    "processing_status": f['processing_status'],
-                    "error_message": f['error_message'],
-                    "created_at": f['created_at'].isoformat() if f['created_at'] else None,
-                    "updated_at": f['updated_at'].isoformat() if f['updated_at'] else None
+                    "name": f["original_filename"],
+                    "file_extension": f.get("file_extension"),  # Include file extension
+                    "mime_type": get_mime_type_fallback(
+                        f["original_filename"], f.get("mime_type")
+                    ),  # Include MIME type with fallback
+                    "processing_status": f["processing_status"],
+                    "error_message": f["error_message"],
+                    "created_at": f["created_at"].isoformat()
+                    if f["created_at"]
+                    else None,
+                    "updated_at": f["updated_at"].isoformat()
+                    if f["updated_at"]
+                    else None,
                 }
                 for f in files
-            ]
+            ],
         }
     except Exception as e:
         logger.error(f"Error getting file processing status: {e}")
@@ -224,19 +268,23 @@ async def get_file_item_processing_status(item_id: str, request: Request = None)
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+
         # Get file record
         file_record = await get_file_by_id(item_id)
         if file_record:
             return {
                 "success": True,
                 "type": "file",
-                "id": str(file_record['id']),
-                "name": file_record['original_filename'],
-                "processing_status": file_record['processing_status'],
-                "error_message": file_record['error_message'],
-                "created_at": file_record['created_at'].isoformat() if file_record['created_at'] else None,
-                "updated_at": file_record['updated_at'].isoformat() if file_record['updated_at'] else None
+                "id": str(file_record["id"]),
+                "name": file_record["original_filename"],
+                "processing_status": file_record["processing_status"],
+                "error_message": file_record["error_message"],
+                "created_at": file_record["created_at"].isoformat()
+                if file_record["created_at"]
+                else None,
+                "updated_at": file_record["updated_at"].isoformat()
+                if file_record["updated_at"]
+                else None,
             }
 
         raise HTTPException(status_code=404, detail=f"File {item_id} not found")
@@ -252,6 +300,7 @@ async def get_file_item_processing_status(item_id: str, request: Request = None)
 # TASK CANCELLATION ENDPOINTS
 # =================================
 
+
 @router.post("/cancel/{item_id}")
 async def cancel_file_task(item_id: str, request: Request = None):
     """
@@ -261,7 +310,7 @@ async def cancel_file_task(item_id: str, request: Request = None):
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+
         # Revoke queued Celery task (stops it before it starts)
         file_celery.control.revoke(item_id, terminate=False)
         logger.info(f"✅ Revoked Celery task {item_id} from queue")
@@ -277,7 +326,9 @@ async def cancel_file_task(item_id: str, request: Request = None):
             files_cancelled = await cancel_files()
 
             if files_cancelled > 0:
-                logger.info(f"✅ Marked {files_cancelled} file tasks as cancelled in database")
+                logger.info(
+                    f"✅ Marked {files_cancelled} file tasks as cancelled in database"
+                )
             else:
                 logger.warning(f"⚠️ File task {item_id} not found or already completed")
         else:
@@ -286,8 +337,10 @@ async def cancel_file_task(item_id: str, request: Request = None):
         await _invalidate_kb_cache()
         return {
             "success": success,
-            "message": "File task cancellation requested" if success else "Failed to cancel file task",
-            "item_id": item_id
+            "message": "File task cancellation requested"
+            if success
+            else "Failed to cancel file task",
+            "item_id": item_id,
         }
 
     except Exception as e:
@@ -304,7 +357,7 @@ async def cancel_all_file_tasks(request: Request = None):
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+
         # Purge all queued Celery tasks (prevents pending tasks from being picked up)
         file_celery.control.purge()
         logger.info("✅ Purged Celery file_processing queue")
@@ -318,13 +371,15 @@ async def cancel_all_file_tasks(request: Request = None):
         files_cancelled = await cancel_files()
 
         if files_cancelled > 0:
-            logger.info(f"✅ Marked {files_cancelled} file tasks as cancelled in database")
+            logger.info(
+                f"✅ Marked {files_cancelled} file tasks as cancelled in database"
+            )
 
         await _invalidate_kb_cache()
         return {
             "success": True,
             "message": f"Cancelled {files_cancelled} file tasks",
-            "cancelled_count": files_cancelled
+            "cancelled_count": files_cancelled,
         }
 
     except Exception as e:
@@ -336,8 +391,11 @@ async def cancel_all_file_tasks(request: Request = None):
 # DELETE ENDPOINTS
 # =================================
 
+
 @router.delete("/files/{file_id}")
-async def delete_file_endpoint(file_id: str, request: Request = None, hard_delete: bool = False):
+async def delete_file_endpoint(
+    file_id: str, request: Request = None, hard_delete: bool = False
+):
     """
     Delete an uploaded file with COMPLETE cleanup of all data points.
 
@@ -357,26 +415,32 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
-        logger.info(f"🗑️  [FILE_DELETE_REQUEST] Deleting file {file_id} (hard_delete={hard_delete})")
-        logger.info(f"   Requested by: user_hash={hash_pii(user_email)} user_id={user_id}")
+        logger.info(
+            f"🗑️  [FILE_DELETE_REQUEST] Deleting file {file_id} (hard_delete={hard_delete})"
+        )
+        logger.info(
+            f"   Requested by: user_hash={hash_pii(user_email)} user_id={user_id}"
+        )
 
         from knowledgebase_ingestion.service.comprehensive_deletion_service import (
             comprehensive_deletion_service,
-            ItemType
+            ItemType,
         )
 
         # Delete file with complete cleanup
         result = await comprehensive_deletion_service.delete_item(
-            item_id=file_id,
-            item_type=ItemType.FILE,
-            hard_delete=hard_delete
+            item_id=file_id, item_type=ItemType.FILE, hard_delete=hard_delete
         )
 
-        if result.get('success'):
+        if result.get("success"):
             logger.info(f"✅ [FILE_DELETE_SUCCESS] File {file_id} deleted completely")
             return result
         else:
-            error_msg = result.get('errors')[0].get('error') if result.get('errors') else 'Deletion failed'
+            error_msg = (
+                result.get("errors")[0].get("error")
+                if result.get("errors")
+                else "Deletion failed"
+            )
             logger.error(f"❌ [FILE_DELETE_FAILED] {error_msg}")
             raise HTTPException(status_code=500, detail=error_msg)
 
@@ -384,9 +448,12 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
         raise
     except Exception as e:
         import traceback
+
         error_msg = f"{type(e).__name__}: {str(e)}"
         error_traceback = traceback.format_exc()
-        logger.error(f"❌ [FILE_DELETE_ERROR] Error deleting file {file_id}: {error_msg}")
+        logger.error(
+            f"❌ [FILE_DELETE_ERROR] Error deleting file {file_id}: {error_msg}"
+        )
         logger.error(f"   Traceback: {error_traceback}")
         raise HTTPException(status_code=500, detail=error_msg)
 
@@ -412,14 +479,18 @@ async def delete_all_knowledge_endpoint(request: Request = None):
         # Safety check: require confirmation header
         confirm_header = request.headers.get("X-Confirm-Delete-All")
         if confirm_header != "true":
-            logger.warning(f"❌ [DELETE_ALL_DENIED] Delete all requested without confirmation header by user_hash={hash_pii(user_email)} user_id={user_id}")
+            logger.warning(
+                f"❌ [DELETE_ALL_DENIED] Delete all requested without confirmation header by user_hash={hash_pii(user_email)} user_id={user_id}"
+            )
             raise HTTPException(
                 status_code=400,
-                detail="Delete all operation requires X-Confirm-Delete-All: true header"
+                detail="Delete all operation requires X-Confirm-Delete-All: true header",
             )
 
         logger.info("=" * 80)
-        logger.info(f"🔴 [DELETE_ALL_REQUEST] Delete all knowledge base requested by user_hash={hash_pii(user_email)} user_id={user_id}")
+        logger.info(
+            f"🔴 [DELETE_ALL_REQUEST] Delete all knowledge base requested by user_hash={hash_pii(user_email)} user_id={user_id}"
+        )
         logger.info("=" * 80)
 
         # Call delete all service function
@@ -430,10 +501,18 @@ async def delete_all_knowledge_endpoint(request: Request = None):
             logger.info(f"✅ [DELETE_ALL_SUCCESS] Knowledge base cleared")
             logger.info("=" * 80)
             logger.info(f"   S3 files deleted: {result.get('s3_files_deleted')}")
-            logger.info(f"   Websites marked as deleted: {result.get('websites_marked_deleted')}")
-            logger.info(f"   Redis queues cleared: {result.get('redis_queues_cleared')}")
-            logger.info(f"   Database records retained with status='deleted' for audit trail")
-            logger.info(f"   Cleared by: user_hash={hash_pii(user_email)} user_id={user_id}")
+            logger.info(
+                f"   Websites marked as deleted: {result.get('websites_marked_deleted')}"
+            )
+            logger.info(
+                f"   Redis queues cleared: {result.get('redis_queues_cleared')}"
+            )
+            logger.info(
+                f"   Database records retained with status='deleted' for audit trail"
+            )
+            logger.info(
+                f"   Cleared by: user_hash={hash_pii(user_email)} user_id={user_id}"
+            )
 
             await _invalidate_kb_cache()
             return {
@@ -442,7 +521,7 @@ async def delete_all_knowledge_endpoint(request: Request = None):
                 "s3_files_deleted": result.get("s3_files_deleted"),
                 "websites_marked_deleted": result.get("websites_marked_deleted"),
                 "redis_queues_cleared": result.get("redis_queues_cleared"),
-                "note": "Database records retained with status='deleted' for audit trail and recovery. The pgvector-backed knowledge base is now cleared and ready for new content."
+                "note": "Database records retained with status='deleted' for audit trail and recovery. The pgvector-backed knowledge base is now cleared and ready for new content.",
             }
         else:
             logger.error("=" * 80)
@@ -455,7 +534,7 @@ async def delete_all_knowledge_endpoint(request: Request = None):
 
             raise HTTPException(
                 status_code=500,
-                detail=result.get("message", "Failed to delete knowledge base")
+                detail=result.get("message", "Failed to delete knowledge base"),
             )
 
     except HTTPException:
@@ -468,6 +547,7 @@ async def delete_all_knowledge_endpoint(request: Request = None):
 # =================================
 # DOWNLOAD ENDPOINT
 # =================================
+
 
 @router.get("/download/{file_id}")
 async def download_processed_content(file_id: str, request: Request = None):
@@ -504,38 +584,42 @@ async def download_processed_content(file_id: str, request: Request = None):
             if not record:
                 raise HTTPException(status_code=404, detail="File or website not found")
 
-            s3_key = record['processed_content_s3_key']
+            s3_key = record["processed_content_s3_key"]
             if not s3_key:
-                raise HTTPException(status_code=404, detail="No processed content available for this item")
+                raise HTTPException(
+                    status_code=404,
+                    detail="No processed content available for this item",
+                )
 
             # Generate presigned download URL
-            success, url = s3_file_storage.generate_presigned_url(s3_key, expiration=3600)
+            success, url = s3_file_storage.generate_presigned_url(
+                s3_key, expiration=3600
+            )
             if not success:
-                raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {url}")
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to generate download URL: {url}"
+                )
 
             # Derive the .md filename
             # For files: strip extension and add .md
             # For websites: use URL slug and add .md
-            original = record['name']
-            if '.' in original and not original.startswith('http'):
+            original = record["name"]
+            if "." in original and not original.startswith("http"):
                 # Likely a filename
-                md_filename = original.rsplit('.', 1)[0] + '.md'
-            elif original.startswith('http'):
+                md_filename = original.rsplit(".", 1)[0] + ".md"
+            elif original.startswith("http"):
                 # Likely a URL - extract domain/path
                 from urllib.parse import urlparse
+
                 parsed = urlparse(original)
-                path = parsed.path.strip('/').replace('/', '_')
-                domain = parsed.netloc.replace('www.', '')
+                path = parsed.path.strip("/").replace("/", "_")
+                domain = parsed.netloc.replace("www.", "")
                 md_filename = f"{domain}_{path}.md" if path else f"{domain}.md"
             else:
                 # Fallback
-                md_filename = original + '.md'
+                md_filename = original + ".md"
 
-            return {
-                "success": True,
-                "download_url": url,
-                "filename": md_filename
-            }
+            return {"success": True, "download_url": url, "filename": md_filename}
 
     except HTTPException:
         raise
@@ -548,17 +632,18 @@ async def download_processed_content(file_id: str, request: Request = None):
 # FILE UPLOAD ENDPOINTS
 # =================================
 
+
 @router.post("/upload/async")
 async def upload_file_async(
     file: UploadFile = Form(...),
     file_display_name: Optional[str] = Form(None),
     replace_existing: bool = Form(False),
     sha256_hash: Optional[str] = Form(None),
-    request: Request = None
+    request: Request = None,
 ):
     """
     Async file upload endpoint with Celery task queue - returns immediately with pending status.
-    
+
     Args:
         file: The file to upload
         file_display_name: Optional display name for the file
@@ -578,9 +663,10 @@ async def upload_file_async(
         tenant_id = getattr(request.state, "tenant_id", None)
         tenant_slug = getattr(request.state, "tenant_slug", None)
         logger.info(f"   User: user_hash={hash_pii(user_email)} user_id={user_id}")
-        
+
         # Look up user_role_id from database using email
         from knowledgebase_ingestion.utils.auth import get_user_role_id_from_email
+
         user_role_id = await get_user_role_id_from_email(user_email)
         logger.info(f"   User Role ID (from DB): {user_role_id}")
 
@@ -589,33 +675,41 @@ async def upload_file_async(
         file_size_initial = await get_file_size(file)
         logger.info(f"   File Size: {file_size_initial} bytes")
         if tenant_id:
-            await kb_quota_service.ensure_upload_within_quota(tenant_id, file_size_initial)
+            await kb_quota_service.ensure_upload_within_quota(
+                tenant_id, file_size_initial
+            )
 
-        validation_result = await validate_file_upload(file, file_size_initial, replace_existing)
-        if not validation_result['valid']:
+        validation_result = await validate_file_upload(
+            file, file_size_initial, replace_existing
+        )
+        if not validation_result["valid"]:
             # Check if it's a duplicate (409) or other validation error (400)
-            if validation_result.get('is_duplicate'):
-                logger.warning(f"⚠️  [DUPLICATE_DETECTED] {validation_result.get('error')}")
+            if validation_result.get("is_duplicate"):
+                logger.warning(
+                    f"⚠️  [DUPLICATE_DETECTED] {validation_result.get('error')}"
+                )
                 error_response = {
                     "success": False,
-                    "error": validation_result.get('error'),
-                    "reason": validation_result.get('reason'),
-                    "match_type": validation_result.get('match_type', 'filename'),
+                    "error": validation_result.get("error"),
+                    "reason": validation_result.get("reason"),
+                    "match_type": validation_result.get("match_type", "filename"),
                     "detail": f"File '{validation_result.get('existing_file_name')}' already exists (Status: {validation_result.get('existing_file_status')})",
-                    "existing_file_id": validation_result.get('existing_file_id'),
-                    "existing_file_name": validation_result.get('existing_file_name'),
+                    "existing_file_id": validation_result.get("existing_file_id"),
+                    "existing_file_name": validation_result.get("existing_file_name"),
                 }
                 logger.error(f"❌ [UPLOAD_REJECTED] {error_response}")
                 raise HTTPException(status_code=409, detail=error_response)
             else:
                 logger.error(f"❌ [VALIDATION_FAILED] {validation_result['error']}")
-                raise HTTPException(status_code=400, detail=validation_result['error'])
+                raise HTTPException(status_code=400, detail=validation_result["error"])
 
         logger.info(f"✅ [VALIDATION_SUCCESS] File validation passed")
         logger.info(f"   Original Name: {validation_result['original_filename']}")
         logger.info(f"   Display Name: {file_display_name}")
         logger.info(f"   MIME Type: {validation_result['mime_type']}")
-        logger.info(f"   File Extension: {validation_result.get('file_extension', 'unknown')}")
+        logger.info(
+            f"   File Extension: {validation_result.get('file_extension', 'unknown')}"
+        )
 
         # Read file into bytes and upload to S3, then dispatch to worker
         try:
@@ -629,41 +723,52 @@ async def upload_file_async(
             file_sha256 = None
             try:
                 from knowledgebase_ingestion.utils.hash import calculate_file_hash
+
                 file_sha256 = await calculate_file_hash(file_bytes)
                 logger.info(f"✅ [HASH_CALCULATED] SHA256: {file_sha256}")
                 if not file_sha256:
-                    logger.warning(f"⚠️ [HASH_CALCULATION] Hash calculation returned empty/None value")
+                    logger.warning(
+                        f"⚠️ [HASH_CALCULATION] Hash calculation returned empty/None value"
+                    )
             except Exception as hash_err:
-                logger.error(f"❌ [HASH_CALCULATION] Failed to calculate hash: {hash_err}")
+                logger.error(
+                    f"❌ [HASH_CALCULATION] Failed to calculate hash: {hash_err}"
+                )
                 import traceback
+
                 logger.error(f"Traceback: {traceback.format_exc()}")
 
             # Check for duplicates (by filename and hash)
             logger.info("🔍 [DUPLICATE_CHECK] Checking for duplicate files...")
             from knowledgebase_ingestion.service.file_service import get_file_service
+
             file_service = get_file_service()
             duplicate_check = await file_service.handle_duplicate_check(
-                validation_result['original_filename'],
+                validation_result["original_filename"],
                 replace_existing=replace_existing,
-                sha256_hash=file_sha256
+                sha256_hash=file_sha256,
             )
 
-            if not duplicate_check['allow']:
-                logger.warning(f"⚠️  [DUPLICATE_DETECTED] {duplicate_check.get('detail', 'File duplicate detected')}")
+            if not duplicate_check["allow"]:
+                logger.warning(
+                    f"⚠️  [DUPLICATE_DETECTED] {duplicate_check.get('detail', 'File duplicate detected')}"
+                )
                 error_response = {
                     "success": False,
                     "error": "Duplicate file detected",
-                    "reason": duplicate_check.get('reason'),
-                    "match_type": duplicate_check.get('match_type', 'unknown'),
-                    "detail": duplicate_check.get('detail'),
-                    "existing_file_id": duplicate_check.get('existing_file_id'),
-                    "existing_file_name": duplicate_check.get('existing_file_name'),
-                    "existing_file_hash": duplicate_check.get('existing_file_hash'),
+                    "reason": duplicate_check.get("reason"),
+                    "match_type": duplicate_check.get("match_type", "unknown"),
+                    "detail": duplicate_check.get("detail"),
+                    "existing_file_id": duplicate_check.get("existing_file_id"),
+                    "existing_file_name": duplicate_check.get("existing_file_name"),
+                    "existing_file_hash": duplicate_check.get("existing_file_hash"),
                 }
                 logger.error(f"❌ [UPLOAD_REJECTED] {error_response}")
                 raise HTTPException(status_code=409, detail=error_response)
 
-            logger.info(f"✅ [DUPLICATE_CHECK_PASSED] No duplicates found, proceeding with upload")
+            logger.info(
+                f"✅ [DUPLICATE_CHECK_PASSED] No duplicates found, proceeding with upload"
+            )
 
             # Upload to S3
             logger.info(f"☁️  [S3_UPLOAD_START] Uploading to S3 storage")
@@ -671,16 +776,17 @@ async def upload_file_async(
             logger.info(f"   Size: {file_size} bytes")
             logger.info(f"   Type: upload")
 
-
             success, s3_result = await s3_file_storage.upload_file(
                 file_data=file_bytes,
-                original_filename=validation_result['filename'],
-                file_type="upload"
+                original_filename=validation_result["filename"],
+                file_type="upload",
             )
 
             if not success:
                 logger.error(f"❌ [S3_UPLOAD_FAILED] {s3_result}")
-                raise HTTPException(status_code=500, detail=f"File upload to S3 failed: {s3_result}")
+                raise HTTPException(
+                    status_code=500, detail=f"File upload to S3 failed: {s3_result}"
+                )
 
             s3_key = s3_result
             logger.info(f"✅ [S3_UPLOAD_SUCCESS] File uploaded to S3")
@@ -688,28 +794,32 @@ async def upload_file_async(
 
             # Create file record in database FIRST with placeholder task_id
             logger.info(f"💾 [DB_INSERT_START] Creating file record in database")
-            
+
             import uuid
+
             placeholder_task_id = str(uuid.uuid4())
             logger.info(f"   Placeholder Task ID: {placeholder_task_id}")
 
             # Extract file extension from filename
             import os
-            file_extension = os.path.splitext(validation_result['original_filename'])[1].lower()
-            if file_extension.startswith('.'):
+
+            file_extension = os.path.splitext(validation_result["original_filename"])[
+                1
+            ].lower()
+            if file_extension.startswith("."):
                 file_extension = file_extension[1:]  # Remove leading dot
 
             record_data = {
-                'user_role_id': user_role_id,  # Use user_role_id from database
-                'original_filename': validation_result['original_filename'],
-                'file_display_name': file_display_name or validation_result['filename'],
-                'size_bytes': file_size,
-                'mime_type': validation_result['mime_type'],
-                'file_extension': file_extension,
-                'processing_status': 'pending',
-                'sha256_hash': file_sha256,
-                's3_key': s3_key,
-                'celery_task_id': placeholder_task_id
+                "user_role_id": user_role_id,  # Use user_role_id from database
+                "original_filename": validation_result["original_filename"],
+                "file_display_name": file_display_name or validation_result["filename"],
+                "size_bytes": file_size,
+                "mime_type": validation_result["mime_type"],
+                "file_extension": file_extension,
+                "processing_status": "pending",
+                "sha256_hash": file_sha256,
+                "s3_key": s3_key,
+                "celery_task_id": placeholder_task_id,
             }
 
             logger.info(f"📝 [DB_INSERT_DATA] Record data:")
@@ -724,25 +834,34 @@ async def upload_file_async(
             logger.info(f"   s3_key: {record_data['s3_key']}")
             logger.info(f"   celery_task_id: {record_data['celery_task_id']}")
 
-            from knowledgebase_ingestion.service.fileupload_service import create_file_record
+            from knowledgebase_ingestion.service.fileupload_service import (
+                create_file_record,
+            )
+
             file_id = await create_file_record(record_data)
 
             if not file_id:
-                logger.error(f"❌ [DB_INSERT_FAILED] Failed to create file record in database")
-                raise HTTPException(status_code=500, detail="Failed to create file record")
+                logger.error(
+                    f"❌ [DB_INSERT_FAILED] Failed to create file record in database"
+                )
+                raise HTTPException(
+                    status_code=500, detail="Failed to create file record"
+                )
 
             logger.info(f"✅ [DB_INSERT_SUCCESS] File record created in database")
             logger.info(f"   File ID: {file_id}")
 
             # Dispatch to Celery worker — Celery assigns the task ID
-            logger.info(f"📤 [CELERY_DISPATCH_START] Dispatching file task to Celery worker")
+            logger.info(
+                f"📤 [CELERY_DISPATCH_START] Dispatching file task to Celery worker"
+            )
             logger.info(f"   Queue: file_processing")
             logger.info(f"   Task: tasks.process_file_upload_task")
             logger.info(f"   File ID: {file_id}")
 
             try:
                 result = file_celery.send_task(
-                    'tasks.process_file_upload_task',
+                    "tasks.process_file_upload_task",
                     args=[
                         file_id,  # Pass file_id instead of individual parameters
                         user_email,  # Keep user_email for logging context
@@ -750,12 +869,14 @@ async def upload_file_async(
                         tenant_slug,
                         user_role_id,
                     ],
-                    queue='file_processing'
+                    queue="file_processing",
                 )
                 celery_task_id = result.id
             except Exception as celery_err:
                 error_message = f"Failed to queue file processing task: {celery_err}"
-                logger.error(f"❌ [CELERY_DISPATCH_FAILED] {error_message}", exc_info=True)
+                logger.error(
+                    f"❌ [CELERY_DISPATCH_FAILED] {error_message}", exc_info=True
+                )
                 await update_file_status(file_id, "failed", error_message=error_message)
                 await _invalidate_kb_cache()
                 raise HTTPException(status_code=500, detail=error_message)
@@ -767,7 +888,9 @@ async def upload_file_async(
             logger.info(f"     - user_hash: {hash_pii(user_email)} user_id={user_id}")
 
             # Update DB record with the real Celery task ID
-            logger.info(f"💾 [DB_UPDATE] Updating DB with real Celery task ID: {celery_task_id}")
+            logger.info(
+                f"💾 [DB_UPDATE] Updating DB with real Celery task ID: {celery_task_id}"
+            )
             dao = get_fileupload_dao()
             try:
                 await dao.update_celery_task_id(file_id, celery_task_id)
@@ -775,22 +898,28 @@ async def upload_file_async(
                 logger.info(f"⏱️  [DB_COMMIT_WAIT] Waited for DB commit")
             except Exception as db_err:
                 import traceback
+
                 error_message = f"Failed to store file processing task id: {db_err}"
-                logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}")
+                logger.error(
+                    f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}"
+                )
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 await update_file_status(file_id, "failed", error_message=error_message)
                 await _invalidate_kb_cache()
                 raise HTTPException(status_code=500, detail=error_message)
 
-            logger.info("✨ [UPLOAD_COMPLETE] File upload process completed successfully")
+            logger.info(
+                "✨ [UPLOAD_COMPLETE] File upload process completed successfully"
+            )
             await _invalidate_kb_cache()
 
             # Fetch the complete file record for UI population (like webcrawl does)
             try:
                 from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
+
                 dao = FileUploadDAO()
                 full_file = await dao.get_file_by_id(file_id)
-                
+
                 if full_file:
                     logger.info(f"✅ [FILE_FETCH] Fetched full file record for UI")
                     return {
@@ -801,14 +930,22 @@ async def upload_file_async(
                         "id": str(file_id),
                         "type": "file",
                         "source": "upload",
-                        "name": full_file.get('original_filename'),
-                        "processing_status": full_file.get('processing_status', 'pending'),
-                        "error_message": full_file.get('error_message'),
-                        "size_bytes": full_file.get('file_size', 0),  # Map file_size to size_bytes for UI
-                        "char_count": full_file.get('char_count', 0),
-                        "created_at": full_file.get('created_at').isoformat() if full_file.get('created_at') else None,
-                        "updated_at": full_file.get('updated_at').isoformat() if full_file.get('updated_at') else None,
-                        "status": "Queued"
+                        "name": full_file.get("original_filename"),
+                        "processing_status": full_file.get(
+                            "processing_status", "pending"
+                        ),
+                        "error_message": full_file.get("error_message"),
+                        "size_bytes": full_file.get(
+                            "file_size", 0
+                        ),  # Map file_size to size_bytes for UI
+                        "char_count": full_file.get("char_count", 0),
+                        "created_at": full_file.get("created_at").isoformat()
+                        if full_file.get("created_at")
+                        else None,
+                        "updated_at": full_file.get("updated_at").isoformat()
+                        if full_file.get("updated_at")
+                        else None,
+                        "status": "Queued",
                     }
             except Exception as fetch_err:
                 logger.warning(f"⚠️ Could not fetch full file record: {fetch_err}")
@@ -822,14 +959,14 @@ async def upload_file_async(
                 "id": str(file_id),
                 "type": "file",
                 "source": "upload",
-                "name": validation_result['original_filename'],
+                "name": validation_result["original_filename"],
                 "processing_status": "pending",
                 "error_message": None,
                 "size_bytes": file_size,
                 "char_count": 0,
                 "created_at": None,
                 "updated_at": None,
-                "status": "Queued"
+                "status": "Queued",
             }
 
         except HTTPException:
@@ -849,13 +986,14 @@ async def upload_file_async(
 # HEALTH ENDPOINTS
 # =================================
 
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
         "service": "file-upload",
-        "timestamp": "2025-01-19T00:00:00Z"
+        "timestamp": "2025-01-19T00:00:00Z",
     }
 
 
@@ -876,4 +1014,5 @@ async def get_file_size(file: UploadFile) -> int:
 async def calculate_file_hash(file_bytes: bytes) -> str:
     """Calculate SHA256 hash of file bytes."""
     import hashlib
+
     return hashlib.sha256(file_bytes).hexdigest()
