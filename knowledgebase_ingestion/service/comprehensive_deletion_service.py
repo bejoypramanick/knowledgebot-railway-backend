@@ -320,7 +320,9 @@ class ComprehensiveDeletionService:
             async with get_db_connection() as conn:
                 async with conn.transaction():
                     # Step 1: LOOKUP
-                    logger.info(f"📍 [LOOKUP] Fetching website record...")
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=LOOKUP start=true"
+                    )
                     website_record = await conn.fetchrow(
                         """SELECT
                             id, original_url, domain, parent_id, depth, metadata,
@@ -329,6 +331,9 @@ class ComprehensiveDeletionService:
                         WHERE id = $1
                         FOR UPDATE""",
                         website_id,
+                    )
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=LOOKUP found={website_record is not None}"
                     )
 
                     if not website_record:
@@ -340,26 +345,24 @@ class ComprehensiveDeletionService:
                             }
                         )
                         deletion_report["completed_at"] = datetime.utcnow().isoformat()
+                        logger.info(
+                            f"[DELETE_WEBSITE] website_id={website_id} success=false error=NOT_FOUND"
+                        )
                         return deletion_report
 
                     is_parent = website_record["parent_id"] is None
                     deletion_report["url"] = website_record["original_url"]
                     deletion_report["is_parent"] = is_parent
-                    logger.info(f"✅ [LOOKUP] Found: {website_record['original_url']}")
                     logger.info(
-                        f"   Type: {'Parent Website' if is_parent else 'Child Page'}"
-                    )
-                    logger.info(
-                        f"   Current Status: {website_record['processing_status']}"
-                    )
-                    logger.info(
-                        f"   Website ID: {website_id} (type: {type(website_id).__name__})"
+                        f"[DELETE_WEBSITE] website_id={website_id} url={website_record['original_url']} is_parent={is_parent} status={website_record['processing_status']}"
                     )
 
                     # Get all child pages if this is a parent
                     child_pages = []
                     if is_parent:
-                        logger.info(f"📍 [LOOKUP_CHILDREN] Fetching child pages...")
+                        logger.info(
+                            f"[DELETE_WEBSITE] website_id={website_id} step=LOOKUP_CHILDREN start=true"
+                        )
                         child_pages = await conn.fetch(
                             """SELECT
                                 id, original_url, celery_task_id, processing_status
@@ -368,24 +371,30 @@ class ComprehensiveDeletionService:
                             FOR UPDATE""",
                             website_id,
                         )
-                        logger.info(f"   Found {len(child_pages)} child pages")
+                        logger.info(
+                            f"[DELETE_WEBSITE] website_id={website_id} step=LOOKUP_CHILDREN child_count={len(child_pages)}"
+                        )
+                        for cp in child_pages:
+                            logger.info(
+                                f"[DELETE_WEBSITE] website_id={website_id} child_id={cp['id']} child_status={cp['processing_status']}"
+                            )
                         deletion_report["child_pages_count"] = len(child_pages)
 
                     # Collect all pages to delete (parent + children)
                     all_pages = [website_record] + child_pages
 
                     # Step 2: CELERY REVOCATION
-                    logger.info(f"🔪 [CELERY_REVOKE] Terminating Celery tasks...")
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=CELERY_REVOKE start=true"
+                    )
                     celery_revoked = 0
 
-                    # Always revoke parent task
                     if website_record["celery_task_id"]:
                         if await self._revoke_celery_task(
                             website_record["celery_task_id"], "website"
                         ):
                             celery_revoked += 1
 
-                    # Revoke child tasks (only for parent deletion)
                     for child in child_pages:
                         if child["celery_task_id"]:
                             if await self._revoke_celery_task(
@@ -396,9 +405,14 @@ class ComprehensiveDeletionService:
                     deletion_report["cleanup_summary"]["celery_tasks_revoked"] = (
                         celery_revoked
                     )
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=CELERY_REVOKE celery_revoked={celery_revoked}"
+                    )
 
                     # Step 3: REDIS CLEANUP
-                    logger.info(f"🚩 [REDIS_CLEANUP] Cleaning Redis state...")
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=REDIS_CLEANUP start=true"
+                    )
                     redis_deleted = 0
                     for page in all_pages:
                         if page["celery_task_id"]:
@@ -409,9 +423,14 @@ class ComprehensiveDeletionService:
                     deletion_report["cleanup_summary"]["redis_keys_deleted"] = (
                         redis_deleted
                     )
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=REDIS_CLEANUP redis_deleted={redis_deleted}"
+                    )
 
                     # Step 4: VECTOR CHUNK CLEANUP
-                    logger.info(f"🧹 [VECTOR_CLEANUP] Deleting vector chunks...")
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=VECTOR_CLEANUP start=true"
+                    )
                     try:
                         from shared.vector_dao import vector_dao
 
@@ -423,101 +442,77 @@ class ComprehensiveDeletionService:
                             chunks_deleted
                         )
                         logger.info(
-                            f"   🧹 Deleted {chunks_deleted} vector chunks for {len(all_page_ids)} website pages"
+                            f"[DELETE_WEBSITE] website_id={website_id} step=VECTOR_CLEANUP chunks_deleted={chunks_deleted}"
                         )
                     except Exception as vec_err:
-                        logger.warning(f"   ⚠️ Vector chunk cleanup failed: {vec_err}")
+                        logger.warning(
+                            f"[DELETE_WEBSITE] website_id={website_id} step=VECTOR_CLEANUP error={vec_err}"
+                        )
                         deletion_report["warnings"].append(
                             f"Vector cleanup failed: {vec_err}"
                         )
 
                     # Step 5: DATABASE TRANSACTION (atomic - parent + children together)
                     logger.info(
-                        f"💾 [DB_TRANSACTION] Updating database ({len(all_pages)} records)..."
+                        f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION start=true hard_delete={hard_delete} page_count={len(all_pages)}"
                     )
 
                     if hard_delete:
-                        # Hard delete: remove all pages
-                        logger.info(
-                            f"   🗑️ Executing hard delete for website_id={website_id}"
-                        )
-                        status1 = await conn.execute(
-                            "DELETE FROM scraped_websites WHERE id = $1",
+                        status = await conn.execute(
+                            "DELETE FROM scraped_websites WHERE id = $1 OR parent_id = $1",
                             website_id,
                         )
-                        affected = int(status1.split()[-1])
+                        affected = int(status.split()[-1])
                         logger.info(
-                            f"   🗑️ Hard delete result: {status1}, affected={affected}"
+                            f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION operation=DELETE affected={affected}"
                         )
-
-                        if child_pages:
-                            status2 = await conn.execute(
-                                "DELETE FROM scraped_websites WHERE parent_id = $1",
-                                website_id,
-                            )
-                            affected += int(status2.split()[-1])
-
                         deletion_report["cleanup_summary"]["db_records_affected"] = (
                             affected
-                        )
-                        logger.info(
-                            f"   🗑️  Hard deleted from database ({affected} rows affected)"
                         )
                     else:
-                        # Soft delete: mark as deleted
-                        logger.info(
-                            f"   📝 Executing soft delete for website_id={website_id}"
-                        )
-                        status1 = await conn.execute(
+                        status = await conn.execute(
                             """UPDATE scraped_websites
-                            SET processing_status = 'deleted',
-                                updated_at = NOW(),
-                                error_message = 'Comprehensively deleted'
-                            WHERE id = $1""",
+                            SET processing_status = 'deleted', updated_at = NOW()
+                            WHERE id = $1 OR parent_id = $1""",
                             website_id,
                         )
-                        affected = int(status1.split()[-1])
+                        affected = int(status.split()[-1])
                         logger.info(
-                            f"   📝 Soft delete result for parent: {status1}, affected={affected}"
+                            f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION operation=UPDATE affected={affected}"
                         )
 
-                        if child_pages:
+                        verify = await conn.fetch(
+                            "SELECT processing_status FROM scraped_websites WHERE id = $1",
+                            website_id,
+                        )
+                        if verify:
+                            new_status = verify[0]["processing_status"]
                             logger.info(
-                                f"   📝 Soft deleting {len(child_pages)} child pages"
+                                f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION verify_status={new_status}"
                             )
-                            status2 = await conn.execute(
-                                """UPDATE scraped_websites
-                                SET processing_status = 'deleted',
-                                    updated_at = NOW(),
-                                    error_message = 'Comprehensively deleted'
-                                WHERE parent_id = $1""",
-                                website_id,
-                            )
-                            affected += int(status2.split()[-1])
+                        else:
                             logger.info(
-                                f"   📝 Soft delete result for children: {status2}"
+                                f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION verify=NOT_FOUND"
                             )
 
                         deletion_report["cleanup_summary"]["db_records_affected"] = (
                             affected
                         )
-                        logger.info(
-                            f"   📌 Soft deleted in database ({affected} rows affected)"
-                        )
 
-                    # Transaction committed successfully
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION success=true affected={affected}"
+                    )
                     deletion_report["success"] = True
                     deletion_report["completed_at"] = datetime.utcnow().isoformat()
-                    logger.info(
-                        f"✅ [COMPREHENSIVE_DELETION] Website/pages deleted completely"
-                    )
                     return deletion_report
 
         except Exception as e:
             import traceback
 
-            logger.error(f"❌ [WEBSITE_DELETION_ERROR] {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(
+                f"[DELETE_WEBSITE] website_id={website_id} step=ERROR error={str(e)}"
+            )
+            logger.error(f"[DELETE_WEBSITE] traceback={traceback.format_exc()}")
             deletion_report["success"] = False
             deletion_report["errors"].append(
                 {"step": DeletionStep.DB_TRANSACTION.value, "error": str(e)}
