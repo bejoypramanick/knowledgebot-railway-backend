@@ -575,20 +575,42 @@ class KBQuotaService:
                 WHERE tenant_id = :tenant_id
                   AND cycle_start_at = :cycle_start_at
             ),
+            file_chunk_usage AS (
+                SELECT
+                    dc.document_id,
+                    COALESCE(SUM(pg_column_size(dc.content)), 0) AS chunk_bytes
+                FROM document_chunks dc
+                WHERE dc.document_type = 'file'
+                GROUP BY dc.document_id
+            ),
+            website_chunk_usage AS (
+                SELECT
+                    dc.document_id,
+                    COALESCE(SUM(pg_column_size(dc.content)), 0) AS chunk_bytes
+                FROM document_chunks dc
+                WHERE dc.document_type = 'website'
+                GROUP BY dc.document_id
+            ),
             file_usage AS (
-                SELECT COALESCE(SUM(char_count), 0) AS total_bytes
-                FROM file_uploads, usage_window
-                WHERE tenant_id = :tenant_id
-                  AND created_at >= usage_window.reset_usage_at
-                  AND created_at < usage_window.cycle_end_at
+                SELECT COALESCE(SUM(COALESCE(fcu.chunk_bytes, fu.char_count, 0)), 0) AS total_bytes
+                FROM file_uploads fu
+                CROSS JOIN usage_window
+                LEFT JOIN file_chunk_usage fcu ON fcu.document_id = fu.id
+                WHERE fu.tenant_id = :tenant_id
+                  AND fu.processing_status IN ('completed', 'deleted')
+                  AND COALESCE(fu.completed_at, fu.updated_at, fu.created_at) >= usage_window.reset_usage_at
+                  AND COALESCE(fu.completed_at, fu.updated_at, fu.created_at) < usage_window.cycle_end_at
             ),
             website_usage AS (
-                SELECT COALESCE(SUM(char_count), 0) AS total_bytes
-                FROM scraped_websites, usage_window
-                WHERE tenant_id = :tenant_id
-                  AND created_at >= usage_window.reset_usage_at
-                  AND created_at < usage_window.cycle_end_at
-                  AND parent_id IS NULL
+                SELECT COALESCE(SUM(COALESCE(wcu.chunk_bytes, sw.char_count, 0)), 0) AS total_bytes
+                FROM scraped_websites sw
+                CROSS JOIN usage_window
+                LEFT JOIN website_chunk_usage wcu ON wcu.document_id = sw.id
+                WHERE sw.tenant_id = :tenant_id
+                  AND sw.processing_status IN ('completed', 'deleted')
+                  AND COALESCE(sw.completed_at, sw.updated_at, sw.created_at) >= usage_window.reset_usage_at
+                  AND COALESCE(sw.completed_at, sw.updated_at, sw.created_at) < usage_window.cycle_end_at
+                  AND sw.parent_id IS NULL
             )
             SELECT COALESCE((SELECT total_bytes FROM file_usage), 0) + COALESCE((SELECT total_bytes FROM website_usage), 0) AS total_bytes
             """
@@ -606,22 +628,22 @@ class KBQuotaService:
         query = text(
             """
             WITH file_usage AS (
-                SELECT COALESCE(SUM(octet_length(dc.content)), 0) AS total_bytes
+                SELECT COALESCE(SUM(pg_column_size(dc.content)), 0) AS total_bytes
                 FROM file_uploads fu
                 JOIN document_chunks dc
                   ON dc.document_id = fu.id
                  AND dc.document_type = 'file'
                 WHERE fu.tenant_id = :tenant_id
-                  AND fu.processing_status IN ('pending', 'queued', 'processing', 'completed')
+                  AND fu.processing_status = 'completed'
             ),
             website_usage AS (
-                SELECT COALESCE(SUM(octet_length(dc.content)), 0) AS total_bytes
+                SELECT COALESCE(SUM(pg_column_size(dc.content)), 0) AS total_bytes
                 FROM scraped_websites sw
                 JOIN document_chunks dc
                   ON dc.document_id = sw.id
                  AND dc.document_type = 'website'
                 WHERE sw.tenant_id = :tenant_id
-                  AND sw.processing_status IN ('pending', 'queued', 'processing', 'completed')
+                  AND sw.processing_status = 'completed'
                   AND sw.parent_id IS NULL
             )
             SELECT COALESCE((SELECT total_bytes FROM file_usage), 0) + COALESCE((SELECT total_bytes FROM website_usage), 0) AS total_bytes
