@@ -403,8 +403,16 @@ class ProcessingService:
                         f"   ⚠️ Chunk batch insert failed, skipping this page"
                     )
                     return None
+                chunk_metrics = await vector_dao.get_document_chunk_metrics(
+                    job_context.website_id,
+                    "website",
+                )
+                stored_chunk_size_bytes = chunk_metrics["size_bytes"]
+                stored_chunk_char_count = chunk_metrics["char_count"]
                 logger.info(
                     f"   ✅ Uploaded {len(chunks)} chunks with OpenAI embeddings to vector DB"
+                    f" | stored_size_bytes={stored_chunk_size_bytes}"
+                    f" | stored_char_count={stored_chunk_char_count}"
                 )
             else:
                 logger.error(
@@ -468,7 +476,8 @@ class ProcessingService:
                 job_context,
                 crawl_config,
                 processed_content_s3_key,
-                embedded_content_bytes=content_bytes,
+                chunk_size_bytes=stored_chunk_size_bytes,
+                chunk_char_count=stored_chunk_char_count,
             )
 
             # Metrics
@@ -476,8 +485,8 @@ class ProcessingService:
             processing_time = time.time() - start_time
 
             return PageMetrics(
-                file_size_bytes=metrics.get("file_size_bytes", 0),
-                char_count=content_bytes,
+                file_size_bytes=stored_chunk_size_bytes,
+                char_count=stored_chunk_char_count,
                 processing_time_seconds=processing_time,
             )
         except HTTPException:
@@ -1811,7 +1820,8 @@ class ProcessingService:
         job_context: JobContext,
         crawl_config: CrawlConfig,
         processed_content_s3_key: Optional[str] = None,
-        embedded_content_bytes: Optional[int] = None,
+        chunk_size_bytes: Optional[int] = None,
+        chunk_char_count: Optional[int] = None,
     ) -> Optional[str]:
         """Record single page in database"""
         storage_backend_state = (
@@ -1834,9 +1844,11 @@ class ProcessingService:
                 website_id=job_context.website_id,
                 page_data=page_data,
                 upload_result=upload_result,
-                file_size=metrics.get("file_size_bytes", 0),
-                char_count=embedded_content_bytes
-                if embedded_content_bytes is not None
+                file_size=chunk_size_bytes
+                if chunk_size_bytes is not None
+                else metrics.get("file_size_bytes", 0),
+                char_count=chunk_char_count
+                if chunk_char_count is not None
                 else metrics.get("char_count", 0),
                 mark_completed=True,  # Single-page mode - mark as completed
                 processed_content_s3_key=processed_content_s3_key,
@@ -1876,9 +1888,11 @@ class ProcessingService:
                 website_id=job_context.website_id,
                 page_data=page_data,
                 upload_result=upload_result,
-                file_size=metrics.get("file_size_bytes", 0),
-                char_count=embedded_content_bytes
-                if embedded_content_bytes is not None
+                file_size=chunk_size_bytes
+                if chunk_size_bytes is not None
+                else metrics.get("file_size_bytes", 0),
+                char_count=chunk_char_count
+                if chunk_char_count is not None
                 else metrics.get("char_count", 0),
                 mark_completed=False,  # Multi-page mode - keep status as 'processing'
                 processed_content_s3_key=processed_content_s3_key,
@@ -1912,9 +1926,11 @@ class ProcessingService:
             storage_document_uri=upload_result.storage_document_uri,
             storage_metadata=upload_result.storage_metadata,
             user_role_id=job_context.user_role_id,
-            file_size=metrics.get("file_size_bytes", 0),
-            char_count=embedded_content_bytes
-            if embedded_content_bytes is not None
+            file_size=chunk_size_bytes
+            if chunk_size_bytes is not None
+            else metrics.get("file_size_bytes", 0),
+            char_count=chunk_char_count
+            if chunk_char_count is not None
             else metrics.get("char_count", 0),
             title=page_data.title,
             description=page_data.description,

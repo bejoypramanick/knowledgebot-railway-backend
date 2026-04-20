@@ -592,7 +592,7 @@ class KBQuotaService:
                 GROUP BY dc.document_id
             ),
             file_usage AS (
-                SELECT COALESCE(SUM(COALESCE(fcu.chunk_bytes, fu.char_count, 0)), 0) AS total_bytes
+                SELECT COALESCE(SUM(COALESCE(fcu.chunk_bytes, fu.file_size, 0)), 0) AS total_bytes
                 FROM file_uploads fu
                 CROSS JOIN usage_window
                 LEFT JOIN file_chunk_usage fcu ON fcu.document_id = fu.id
@@ -602,7 +602,7 @@ class KBQuotaService:
                   AND COALESCE(fu.completed_at, fu.updated_at, fu.created_at) < usage_window.cycle_end_at
             ),
             website_usage AS (
-                SELECT COALESCE(SUM(COALESCE(wcu.chunk_bytes, sw.char_count, 0)), 0) AS total_bytes
+                SELECT COALESCE(SUM(COALESCE(wcu.chunk_bytes, sw.file_size, 0)), 0) AS total_bytes
                 FROM scraped_websites sw
                 CROSS JOIN usage_window
                 LEFT JOIN website_chunk_usage wcu ON wcu.document_id = sw.id

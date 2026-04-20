@@ -417,8 +417,16 @@ async def process_file_content(
                         )
                         final_state = "failed"
                     else:
+                        chunk_metrics = await vector_dao.get_document_chunk_metrics(
+                            file_id,
+                            "file",
+                        )
+                        file_size = chunk_metrics["size_bytes"]
+                        char_count = chunk_metrics["char_count"]
                         logger.info(
                             f"✅ Uploaded {len(chunks_to_insert)} chunks with OpenAI embeddings to vector DB"
+                            f" | stored_size_bytes={file_size}"
+                            f" | stored_char_count={char_count}"
                         )
                 else:
                     raise Exception(f"No chunks produced for file {file_id}")
@@ -436,7 +444,7 @@ async def process_file_content(
                         with open(markdown_tmp_path, "r", encoding="utf-8") as f:
                             markdown_file_content = f.read()
                         logger.info(
-                            f"📊 [METRICS] Calculated for {original_filename}: {len(markdown_file_content):,} markdown characters; {char_count:,} embedded chunk bytes"
+                            f"📊 [METRICS] Calculated for {original_filename}: {len(markdown_file_content):,} markdown characters; {file_size:,} stored chunk bytes; {char_count:,} stored chunk characters"
                         )
                     except Exception as me:
                         logger.warning(

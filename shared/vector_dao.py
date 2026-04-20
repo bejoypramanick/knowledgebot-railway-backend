@@ -115,6 +115,34 @@ class VectorDAO:
         return await VectorDAO.delete_chunks_for_documents([document_id], document_type)
 
     @staticmethod
+    async def get_document_chunk_metrics(document_id: str, document_type: str) -> Dict[str, int]:
+        """Return stored chunk size and character count for a document."""
+        if document_type not in ("file", "website"):
+            raise ValueError("document_type must be 'file' or 'website'")
+
+        async with get_db_session() as db:
+            row = (
+                await db.execute(
+                    text(
+                        """
+                        SELECT
+                            COALESCE(SUM(pg_column_size(content)), 0) AS size_bytes,
+                            COALESCE(SUM(char_length(content)), 0) AS char_count
+                        FROM document_chunks
+                        WHERE document_id = :document_id
+                          AND document_type = :document_type
+                        """
+                    ),
+                    {"document_id": document_id, "document_type": document_type},
+                )
+            ).mappings().first()
+
+        return {
+            "size_bytes": int(row["size_bytes"] or 0) if row else 0,
+            "char_count": int(row["char_count"] or 0) if row else 0,
+        }
+
+    @staticmethod
     async def clear_all_chunks() -> int:
         """HARD DELETE all records from the document_chunks table. Use with caution!"""
         try:
