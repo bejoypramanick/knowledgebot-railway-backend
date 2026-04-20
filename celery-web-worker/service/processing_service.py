@@ -18,7 +18,6 @@ import mimetypes
 from shared.otel_logger import get_otel_logger
 from urllib.parse import urljoin, urlparse
 from shared.file_metrics import calculate_metrics
-from shared.html_cleaner import clean_html_preserving_images
 from shared.kreuzberg_integration import process_with_kreuzberg
 from shared.s3_file_storage import s3_file_storage
 from shared.kb_quota_service import kb_quota_service
@@ -941,14 +940,12 @@ class ProcessingService:
         """
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
 
-        # Step 1: Clean HTML - remove nav, menus, ads before sending to Kreuzberg
-        cleaned_html = clean_html_preserving_images(html_content, page_url)
+        # Send the fetched HTML directly to Kreuzberg, but strip inline data
+        # images first so huge base64 blobs do not poison extraction.
+        html_no_data_urls = self._stripDataUrlImagesFromHtml(html_content)
 
-        # Step 2: Strip data:image URLs from HTML BEFORE Kreuzberg
-        # This ensures both markdown and chunks come from the same clean source
-        html_no_data_urls = self._stripDataUrlImagesFromHtml(cleaned_html)
-
-        # Step 3: OCR images in cleaned HTML (without data URLs)
+        # OCR page images before Kreuzberg so image text is embedded into the
+        # HTML that gets extracted.
         html_with_image_text = await self._replacePageImagesWithOCRText(
             html_no_data_urls, page_url, website_id
         )
@@ -1013,11 +1010,24 @@ class ProcessingService:
                     f"Kreuzberg processing failed for {page_url}: {error_detail}"
                 )
 
-            # Use cleaned content directly from Kreuzberg (all cleaning done before sending to Kreuzberg)
-            markdown_content = kreuzberg_markdown
+            markdown_content = self._sanitizeExtractedMarkdown(
+                kreuzberg_markdown,
+                page_url,
+            )
             chunks = kreuzberg_metadata.get("chunks") or []
             if not chunks:
                 raise Exception(f"Kreuzberg returned no chunks for {page_url}")
+            for chunk in chunks:
+                chunk_text = chunk.get("text") or chunk.get("content")
+                if chunk_text:
+                    sanitized_chunk_text = self._sanitizeExtractedMarkdown(
+                        chunk_text,
+                        page_url,
+                    )
+                    if "text" in chunk:
+                        chunk["text"] = sanitized_chunk_text
+                    else:
+                        chunk["content"] = sanitized_chunk_text
 
             # Use the same markdown for storage - it's the source that went to Kreuzberg
             final_markdown = markdown_content
@@ -1526,6 +1536,33 @@ class ProcessingService:
         )
         markdown_content = re.sub(
             r"\[\s*#\s*\]\(\s*#.*?\)",
+            "",
+            markdown_content,
+            flags=re.IGNORECASE,
+        )
+        return markdown_content
+
+    def _sanitizeExtractedMarkdown(self, markdown_content: str, page_url: str) -> str:
+        """Remove noisy URLs after extraction while preserving readable text."""
+        if not markdown_content:
+            return markdown_content
+
+        markdown_content = self._stripDataUrlImagesFromMarkdown(markdown_content)
+        markdown_content = self._sanitizeMarkdownForSource(markdown_content, page_url)
+        markdown_content = re.sub(
+            r"!\[([^\]]*)\]\(\s*[^)]*\)",
+            r"\1",
+            markdown_content,
+            flags=re.IGNORECASE,
+        )
+        markdown_content = re.sub(
+            r"\[([^\]]+)\]\(\s*[^)]*\)",
+            r"\1",
+            markdown_content,
+            flags=re.IGNORECASE,
+        )
+        markdown_content = re.sub(
+            r"\[\s*\]\(\s*[^)]*\)",
             "",
             markdown_content,
             flags=re.IGNORECASE,
