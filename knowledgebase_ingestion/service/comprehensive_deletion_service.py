@@ -148,7 +148,7 @@ class ComprehensiveDeletionService:
     ) -> Dict[str, Any]:
         """Complete deletion of uploaded file"""
 
-try:
+        try:
             async with get_db_connection() as conn:
                 async with conn.transaction():
                     # Step 1: LOOKUP
