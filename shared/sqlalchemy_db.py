@@ -407,8 +407,6 @@ async def get_db_connection():
     async with _engine.connect() as sa_conn:
         await _apply_request_context(sa_conn)
         raw_conn = await sa_conn.get_raw_connection()
-        conn_host = raw_conn.dbapi_connection.driver_connection.host
-        logger.info(f"[DB_CONNECTION] host={conn_host}")
         yield raw_conn.dbapi_connection.driver_connection
 
 
