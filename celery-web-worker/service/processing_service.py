@@ -348,7 +348,8 @@ class ProcessingService:
             if chunks:
                 # Calculate content size for quota check
                 content_bytes = sum(
-                    len(c.get("text") or c.get("content", "")) for c in chunks
+                    len((c.get("text") or c.get("content", "")).encode("utf-8"))
+                    for c in chunks
                 )
                 tenant_id = get_current_tenant_id()
                 if tenant_id:
@@ -467,6 +468,7 @@ class ProcessingService:
                 job_context,
                 crawl_config,
                 processed_content_s3_key,
+                embedded_content_bytes=content_bytes,
             )
 
             # Metrics
@@ -475,7 +477,7 @@ class ProcessingService:
 
             return PageMetrics(
                 file_size_bytes=metrics.get("file_size_bytes", 0),
-                char_count=metrics.get("char_count", 0),
+                char_count=content_bytes,
                 processing_time_seconds=processing_time,
             )
         except HTTPException:
@@ -1809,6 +1811,7 @@ class ProcessingService:
         job_context: JobContext,
         crawl_config: CrawlConfig,
         processed_content_s3_key: Optional[str] = None,
+        embedded_content_bytes: Optional[int] = None,
     ) -> Optional[str]:
         """Record single page in database"""
         storage_backend_state = (
@@ -1832,7 +1835,9 @@ class ProcessingService:
                 page_data=page_data,
                 upload_result=upload_result,
                 file_size=metrics.get("file_size_bytes", 0),
-                char_count=metrics.get("char_count", 0),
+                char_count=embedded_content_bytes
+                if embedded_content_bytes is not None
+                else metrics.get("char_count", 0),
                 mark_completed=True,  # Single-page mode - mark as completed
                 processed_content_s3_key=processed_content_s3_key,
                 storage_backend_state=storage_backend_state,
@@ -1872,7 +1877,9 @@ class ProcessingService:
                 page_data=page_data,
                 upload_result=upload_result,
                 file_size=metrics.get("file_size_bytes", 0),
-                char_count=metrics.get("char_count", 0),
+                char_count=embedded_content_bytes
+                if embedded_content_bytes is not None
+                else metrics.get("char_count", 0),
                 mark_completed=False,  # Multi-page mode - keep status as 'processing'
                 processed_content_s3_key=processed_content_s3_key,
                 storage_backend_state=storage_backend_state,
@@ -1906,7 +1913,9 @@ class ProcessingService:
             storage_metadata=upload_result.storage_metadata,
             user_role_id=job_context.user_role_id,
             file_size=metrics.get("file_size_bytes", 0),
-            char_count=metrics.get("char_count", 0),
+            char_count=embedded_content_bytes
+            if embedded_content_bytes is not None
+            else metrics.get("char_count", 0),
             title=page_data.title,
             description=page_data.description,
             crawl_session_id=page_data.session_id,

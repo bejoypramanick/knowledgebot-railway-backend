@@ -371,9 +371,10 @@ async def process_file_content(
                 if chunks_to_insert:
                     # Calculate content size for quota check
                     content_bytes = sum(
-                        len(c.get("text") or c.get("content", ""))
+                        len((c.get("text") or c.get("content", "")).encode("utf-8"))
                         for c in chunks_to_insert
                     )
+                    char_count = content_bytes
                     tenant_id = get_current_tenant_id()
                     if tenant_id:
                         logger.info(
@@ -434,9 +435,8 @@ async def process_file_content(
                     try:
                         with open(markdown_tmp_path, "r", encoding="utf-8") as f:
                             markdown_file_content = f.read()
-                        char_count = len(markdown_file_content)
                         logger.info(
-                            f"📊 [METRICS] Calculated for {original_filename}: {char_count:,} characters from markdown"
+                            f"📊 [METRICS] Calculated for {original_filename}: {len(markdown_file_content):,} markdown characters; {char_count:,} embedded chunk bytes"
                         )
                     except Exception as me:
                         logger.warning(
