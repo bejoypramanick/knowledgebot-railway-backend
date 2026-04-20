@@ -3043,29 +3043,13 @@ async def get_storage_breakdown(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Tenant context required")
 
     # Only COMPLETED items for active storage - use file_size from tables
-    query = text(
-        """
-        WITH file_stats AS (
-            SELECT
-                COUNT(*) AS file_count,
-                COALESCE(SUM(file_size), 0) AS total_bytes
-            FROM file_uploads fu
-            WHERE fu.tenant_id = :tenant_id AND fu.processing_status = 'completed'
-        ),
-        website_stats AS (
-            SELECT
-                COUNT(*) AS website_count,
-                COALESCE(SUM(file_size), 0) AS total_bytes
-            FROM scraped_websites sw
-            WHERE sw.tenant_id = :tenant_id AND sw.processing_status = 'completed' AND sw.parent_id IS NULL
-        )
-        SELECT
-            COALESCE((SELECT file_count FROM file_stats), 0) AS files_count,
-            COALESCE((SELECT total_bytes FROM file_stats), 0) AS files_bytes,
-            COALESCE((SELECT website_count FROM website_stats), 0) AS websites_count,
-            COALESCE((SELECT total_bytes FROM website_stats), 0) AS websites_bytes
-        """
-    )
+    query = text("""
+        SELECT 
+            (SELECT COUNT(*)::int FROM file_uploads WHERE tenant_id = :tenant_id AND processing_status = 'completed') AS files_count,
+            (SELECT COALESCE(SUM(file_size), 0)::bigint FROM file_uploads WHERE tenant_id = :tenant_id AND processing_status = 'completed') AS files_bytes,
+            (SELECT COUNT(*)::int FROM scraped_websites WHERE tenant_id = :tenant_id AND processing_status = 'completed' AND parent_id IS NULL) AS websites_count,
+            (SELECT COALESCE(SUM(file_size), 0)::bigint FROM scraped_websites WHERE tenant_id = :tenant_id AND processing_status = 'completed' AND parent_id IS NULL) AS websites_bytes
+    """)
 
     async with get_db_session() as session:
         result = await session.execute(query, {"tenant_id": tenant_id})
@@ -3102,7 +3086,7 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         tenant_id, tenant["created_at"], now, quota_cycle
     )
 
-    # Use file_size from tables with COMPLETED + DELETED items in cycle (gross quota)
+    # Use file_size from tables with COMPLETED + DELETED items in cycle (all websites - parent + child)
     query = text(
         """
         WITH reset_date AS (
@@ -3111,7 +3095,7 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         file_uploads_in_cycle AS (
             SELECT
                 COUNT(*) AS file_count,
-                COALESCE(SUM(file_size), 0) AS total_bytes
+                COALESCE(SUM(file_size), 0)::bigint AS total_bytes
             FROM file_uploads fu
             CROSS JOIN reset_date
             WHERE fu.tenant_id = :tenant_id
@@ -3121,12 +3105,11 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         websites_in_cycle AS (
             SELECT
                 COUNT(*) AS website_count,
-                COALESCE(SUM(file_size), 0) AS total_bytes
+                COALESCE(SUM(file_size), 0)::bigint AS total_bytes
             FROM scraped_websites sw
             CROSS JOIN reset_date
             WHERE sw.tenant_id = :tenant_id
               AND sw.processing_status IN ('completed', 'deleted')
-              AND sw.parent_id IS NULL
               AND COALESCE(sw.completed_at, sw.updated_at, sw.created_at) >= reset_date.cycle_start
         )
         SELECT
