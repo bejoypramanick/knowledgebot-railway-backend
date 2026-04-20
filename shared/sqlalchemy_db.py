@@ -405,9 +405,14 @@ async def get_db_connection():
 
     # Get raw asyncpg connection from SQLAlchemy's async engine pool
     async with _engine.connect() as sa_conn:
-        await _apply_request_context(sa_conn)
-        raw_conn = await sa_conn.get_raw_connection()
-        yield raw_conn.dbapi_connection.driver_connection
+        try:
+            await _apply_request_context(sa_conn)
+            raw_conn = await sa_conn.get_raw_connection()
+            yield raw_conn.dbapi_connection.driver_connection
+            await sa_conn.commit()
+        except Exception:
+            await sa_conn.rollback()
+            raise
 
 
 async def health_check() -> dict:

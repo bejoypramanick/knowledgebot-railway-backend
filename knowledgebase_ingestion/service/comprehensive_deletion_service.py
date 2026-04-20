@@ -501,35 +501,7 @@ class ComprehensiveDeletionService:
                             f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION executing_update=true"
                         )
 
-                        # Debug: show what records would match the WHERE clause
                         try:
-                            debug_match = await conn.fetch(
-                                "SELECT id, processing_status, parent_id FROM scraped_websites WHERE id = $1 OR parent_id = $1",
-                                website_id,
-                            )
-                            logger.info(
-                                f"[DELETE_WEBSITE] website_id={website_id} step=DEBUG matching_records_count={len(debug_match) if debug_match else 0}"
-                            )
-                            if debug_match:
-                                for dm in debug_match:
-                                    logger.info(
-                                        f"[DELETE_WEBSITE] website_id={website_id} step=DEBUG match_id={dm['id']} parent_id={dm['parent_id']} current_status={dm['processing_status']}"
-                                    )
-                        except Exception as debug_err:
-                            logger.error(
-                                f"[DELETE_WEBSITE] website_id={website_id} step=DEBUG error={str(debug_err)}"
-                            )
-
-                        try:
-                            # Before update - capture exact values
-                            before = await conn.fetchrow(
-                                "SELECT id, processing_status, updated_at FROM scraped_websites WHERE id = $1",
-                                website_id,
-                            )
-                            logger.info(
-                                f"[DELETE_WEBSITE] website_id={website_id} step=BEFORE_UPDATE id={before['id']} status={before['processing_status']} updated_at={before['updated_at']}"
-                            )
-
                             # Execute update
                             status = await conn.execute(
                                 """UPDATE scraped_websites
@@ -545,43 +517,36 @@ class ComprehensiveDeletionService:
                                 f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION operation=UPDATE affected={affected}"
                             )
 
-                            # After update - immediate verification
-                            after = await conn.fetchrow(
-                                "SELECT id, processing_status, updated_at FROM scraped_websites WHERE id = $1",
-                                website_id,
-                            )
-                            logger.info(
-                                f"[DELETE_WEBSITE] website_id={website_id} step=AFTER_UPDATE id={after['id']} status={after['processing_status']} updated_at={after['updated_at']}"
-                            )
-
                         except Exception as update_err:
                             logger.error(
                                 f"[DELETE_WEBSITE] website_id={website_id} step=UPDATE error={str(update_err)}"
                             )
                             raise
 
-                        # Verify the update worked - fetch after update within same transaction
+                        # Verify the update worked before committing the SQLAlchemy-wrapped raw connection.
                         try:
                             verify = await conn.fetch(
-                                "SELECT id, processing_status, parent_id FROM scraped_websites WHERE id = $1 OR parent_id = $1",
+                                """
+                                SELECT COUNT(*) AS non_deleted_count
+                                FROM scraped_websites
+                                WHERE (id = $1 OR parent_id = $1)
+                                  AND processing_status != 'deleted'
+                                """,
                                 website_id,
                             )
+                            non_deleted_count = verify[0]["non_deleted_count"] if verify else 0
                             logger.info(
-                                f"[DELETE_WEBSITE] website_id={website_id} step=VERIFY query_result_count={len(verify) if verify else 0}"
+                                f"[DELETE_WEBSITE] website_id={website_id} step=VERIFY non_deleted_count={non_deleted_count}"
                             )
-                            if verify:
-                                for v in verify:
-                                    logger.info(
-                                        f"[DELETE_WEBSITE] website_id={website_id} step=VERIFY id={v['id']} parent_id={v['parent_id']} status={v['processing_status']}"
-                                    )
-                            else:
-                                logger.info(
-                                    f"[DELETE_WEBSITE] website_id={website_id} step=VERIFY result=NOT_FOUND"
+                            if non_deleted_count:
+                                raise RuntimeError(
+                                    f"Soft delete verification failed: {non_deleted_count} rows still not deleted"
                                 )
                         except Exception as verify_err:
                             logger.error(
                                 f"[DELETE_WEBSITE] website_id={website_id} step=VERIFY error={str(verify_err)}"
                             )
+                            raise
 
                         deletion_report["cleanup_summary"]["db_records_affected"] = (
                             affected
