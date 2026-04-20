@@ -672,10 +672,14 @@ fn build_extraction_config() -> ExtractionConfig {
         hierarchy: pdf_hierarchy,
     });
 
+    let max_chunk_characters = parse_env_usize("KREUZBERG_CHUNK_MAX_CHARACTERS", 1200);
+    let chunk_overlap = parse_env_usize("KREUZBERG_CHUNK_OVERLAP", 0)
+        .min(max_chunk_characters.saturating_sub(1));
+
     ExtractionConfig {
         chunking: Some(ChunkingConfig {
-            max_characters: parse_env_usize("KREUZBERG_CHUNK_MAX_CHARACTERS", 1200),
-            overlap: parse_env_usize("KREUZBERG_CHUNK_OVERLAP", 150),
+            max_characters: max_chunk_characters,
+            overlap: chunk_overlap,
             chunker_type: ChunkerType::Markdown,
             ..Default::default()
         }),
