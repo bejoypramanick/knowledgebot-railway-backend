@@ -497,7 +497,20 @@ class ScrapingDAO:
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 await session.execute(text(query), params)
+
+                # Update file_size from document_chunks AFTER chunks are stored
+                size_query = text("""
+                    UPDATE scraped_websites
+                    SET file_size = (
+                        SELECT COALESCE(SUM(pg_column_size(dc.content)), 0)::bigint
+                        FROM document_chunks dc
+                        WHERE dc.document_id = :website_id AND dc.document_type = 'website'
+                    )
+                    WHERE id = :website_id
+                """)
+                await session.execute(size_query, {"website_id": website_id})
                 await session.commit()
+
                 logger.info(f"✅ [FINALIZE_SUCCESS] Website record updated")
                 logger.log_db_query(query, params, "UPDATE succeeded")
                 return True

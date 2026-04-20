@@ -135,7 +135,20 @@ class FileUploadDAO:
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 await session.execute(text(query), params)
+
+                # Update file_size from document_chunks AFTER chunks are stored
+                size_query = text("""
+                    UPDATE file_uploads
+                    SET file_size = (
+                        SELECT COALESCE(SUM(pg_column_size(dc.content)), 0)::bigint
+                        FROM document_chunks dc
+                        WHERE dc.document_id = :file_id AND dc.document_type = 'file'
+                    )
+                    WHERE id = :file_id
+                """)
+                await session.execute(size_query, {"file_id": file_id})
                 await session.commit()
+
                 logger.info(
                     f"✅ [UPDATE_FILE_DATA_SUCCESS] File record updated and marked as completed"
                 )
