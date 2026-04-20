@@ -1484,6 +1484,13 @@ async def generic_proxy_handler(request: Request, path: str):
             service_url = get_settings().configuration_service_url
             # Keep the service prefix - configuration service expects /api/v1/configuration/...
             logger.debug("Routing to configuration service")
+        elif backend_path in (
+            "knowledgebase/upload-breakdown",
+            "knowledgebase/storage-breakdown",
+        ):
+            service_url = get_settings().configuration_service_url
+            service_path = f"configuration/{backend_path}"
+            logger.debug("Routing knowledgebase breakdown endpoint to configuration service")
         elif backend_path.startswith("chatbot/"):
             service_url = get_settings().chatbot_orchestration_url
             # Keep the service prefix - chatbot service expects /api/v1/chatbot/...
