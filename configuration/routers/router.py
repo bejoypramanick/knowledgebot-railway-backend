@@ -3068,76 +3068,87 @@ async def get_storage_breakdown(user: dict = Depends(get_current_user)):
 
 @router.get("/knowledgebase/upload-breakdown")
 async def get_upload_breakdown(user: dict = Depends(get_current_user)):
+    import logging
+
+    logger = logging.getLogger("upload-breakdown")
     from shared.sqlalchemy_db import get_db_session
     from sqlalchemy import text
     from datetime import datetime, timezone
     from shared.kb_quota_service import kb_quota_service
 
     tenant_id = user.get("tenant_id")
+    logger.info(f"upload-breakdown called for tenant: {tenant_id}")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="Tenant context required")
 
-    config = await kb_quota_service._get_or_create_quota_config(tenant_id)
-    quota_cycle = kb_quota_service._normalize_quota_cycle(config.get("quota_cycle"))
+    try:
+        config = await kb_quota_service._get_or_create_quota_config(tenant_id)
+        quota_cycle = kb_quota_service._normalize_quota_cycle(config.get("quota_cycle"))
 
-    tenant = await kb_quota_service._get_tenant_row(tenant_id)
-    now = datetime.now(timezone.utc)
-    window = kb_quota_service._build_quota_window(
-        tenant_id, tenant["created_at"], now, quota_cycle
-    )
+        tenant = await kb_quota_service._get_tenant_row(tenant_id)
+        now = datetime.now(timezone.utc)
+        window = kb_quota_service._build_quota_window(
+            tenant_id, tenant["created_at"], now, quota_cycle
+        )
+        logger.info(f"window: {window.cycle_start_at} to {window.cycle_end_at}")
 
-    # Use file_size from tables with COMPLETED + DELETED items in cycle (all websites - parent + child)
-    query = text(
-        """
-        WITH reset_date AS (
-            SELECT :cycle_start_at::timestamptz AS cycle_start
-        ),
-        file_uploads_in_cycle AS (
-            SELECT
-                COUNT(*) AS file_count,
-                COALESCE(SUM(file_size), 0)::bigint AS total_bytes
+        # Simple query for files
+        files_query = text("""
+            SELECT COUNT(*)::int AS file_count,
+                   COALESCE(SUM(
+                       COALESCE(fu.file_size, 
+                           (SELECT COALESCE(SUM(pg_column_size(dc.content)), 0)::bigint 
+                           FROM document_chunks dc WHERE dc.document_id = fu.id AND dc.document_type = 'file')
+                   ), 0)::bigint AS files_bytes
             FROM file_uploads fu
-            CROSS JOIN reset_date
             WHERE fu.tenant_id = :tenant_id
               AND fu.processing_status IN ('completed', 'deleted')
-              AND COALESCE(fu.completed_at, fu.updated_at, fu.created_at) >= reset_date.cycle_start
-        ),
-        websites_in_cycle AS (
-            SELECT
-                COUNT(*) AS website_count,
-                COALESCE(SUM(file_size), 0)::bigint AS total_bytes
+              AND COALESCE(fu.completed_at, fu.updated_at, fu.created_at) >= :cycle_start_at
+        """)
+
+        websites_query = text("""
+            SELECT COUNT(*)::int AS website_count,
+                   COALESCE(SUM(
+                       COALESCE(sw.file_size, 
+                           (SELECT COALESCE(SUM(pg_column_size(dc.content)), 0)::bigint 
+                           FROM document_chunks dc WHERE dc.document_id = sw.id AND dc.document_type = 'website')
+                   ), 0)::bigint AS websites_bytes
             FROM scraped_websites sw
-            CROSS JOIN reset_date
             WHERE sw.tenant_id = :tenant_id
               AND sw.processing_status IN ('completed', 'deleted')
-              AND COALESCE(sw.completed_at, sw.updated_at, sw.created_at) >= reset_date.cycle_start
-        )
-        SELECT
-            COALESCE((SELECT file_count FROM file_uploads_in_cycle), 0) AS files_count,
-            COALESCE((SELECT total_bytes FROM file_uploads_in_cycle), 0) AS files_bytes,
-            COALESCE((SELECT website_count FROM websites_in_cycle), 0) AS websites_count,
-            COALESCE((SELECT total_bytes FROM websites_in_cycle), 0) AS websites_bytes
-        """
-    )
+              AND COALESCE(sw.completed_at, sw.updated_at, sw.created_at) >= :cycle_start_at
+        """)
 
-    async with get_db_session() as session:
-        result = await session.execute(
-            query, {"tenant_id": tenant_id, "cycle_start_at": window.cycle_start_at}
-        )
-        row = result.fetchone()
+        async with get_db_session() as session:
+            files_result = await session.execute(
+                files_query,
+                {"tenant_id": tenant_id, "cycle_start_at": window.cycle_start_at},
+            )
+            files_row = files_result.fetchone()
 
-    return {
-        "success": True,
-        "data": {
-            "files_count": row.files_count,
-            "files_bytes": row.files_bytes,
-            "websites_count": row.websites_count,
-            "websites_bytes": row.websites_bytes,
-            "cycle_start_at": window.cycle_start_at.isoformat(),
-            "cycle_end_at": window.cycle_end_at.isoformat(),
-            "quota_cycle": quota_cycle,
-        },
-    }
+            websites_result = await session.execute(
+                websites_query,
+                {"tenant_id": tenant_id, "cycle_start_at": window.cycle_start_at},
+            )
+            websites_row = websites_result.fetchone()
+
+        logger.info(f"files: {files_row}, websites: {websites_row}")
+
+        return {
+            "success": True,
+            "data": {
+                "files_count": files_row.file_count,
+                "files_bytes": files_row.files_bytes,
+                "websites_count": websites_row.website_count,
+                "websites_bytes": websites_row.websites_bytes,
+                "cycle_start_at": window.cycle_start_at.isoformat(),
+                "cycle_end_at": window.cycle_end_at.isoformat(),
+                "quota_cycle": quota_cycle,
+            },
+        }
+    except Exception as e:
+        logger.error(f"upload-breakdown error: {e}", exc_info=True)
+        raise
 
 
 @router.put("/superadmin/kb-usage/{tenant_id}")
