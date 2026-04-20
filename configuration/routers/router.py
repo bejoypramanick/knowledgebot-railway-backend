@@ -3042,22 +3042,26 @@ async def get_storage_breakdown(user: dict = Depends(get_current_user)):
     if not tenant_id:
         raise HTTPException(status_code=400, detail="Tenant context required")
 
-    # Only COMPLETED items for active storage
+    # Only COMPLETED items for active storage - use document_chunks for actual storage
     query = text(
         """
         WITH file_stats AS (
             SELECT
-                COUNT(*) AS file_count,
-                COALESCE(SUM(file_size), 0) AS total_bytes
-            FROM file_uploads fu
+                COUNT(DISTINCT dc.document_id) AS file_count,
+                COALESCE(SUM(pg_column_size(dc.content)), 0) AS total_bytes
+            FROM document_chunks dc
+            JOIN file_uploads fu ON fu.id = dc.document_id
             WHERE fu.tenant_id = :tenant_id AND fu.processing_status = 'completed'
+              AND dc.document_type = 'file'
         ),
         website_stats AS (
             SELECT
-                COUNT(DISTINCT sw.id) AS website_count,
-                COALESCE(SUM(sw.file_size), 0) AS total_bytes
-            FROM scraped_websites sw
-            WHERE sw.tenant_id = :tenant_id AND sw.processing_status = 'completed' AND sw.parent_id IS NULL
+                COUNT(DISTINCT dc.document_id) AS website_count,
+                COALESCE(SUM(pg_column_size(dc.content)), 0) AS total_bytes
+            FROM document_chunks dc
+            JOIN scraped_websites sw ON sw.id = dc.document_id
+            WHERE sw.tenant_id = :tenant_id AND sw.processing_status = 'completed'
+              AND sw.parent_id IS NULL AND dc.document_type = 'website'
         )
         SELECT
             COALESCE((SELECT file_count FROM file_stats), 0) AS files_count,
@@ -3102,7 +3106,7 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         tenant_id, tenant["created_at"], now, quota_cycle
     )
 
-    # Use original tables to include COMPLETED + DELETED items in cycle
+    # Use document_chunks to include COMPLETED + DELETED items in cycle (gross quota)
     query = text(
         """
         WITH reset_date AS (
@@ -3110,23 +3114,27 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         ),
         file_uploads_in_cycle AS (
             SELECT
-                COUNT(*) AS file_count,
-                COALESCE(SUM(file_size), 0) AS total_bytes
-            FROM file_uploads fu
+                COUNT(DISTINCT dc.document_id) AS file_count,
+                COALESCE(SUM(pg_column_size(dc.content)), 0) AS total_bytes
+            FROM document_chunks dc
+            JOIN file_uploads fu ON fu.id = dc.document_id
             CROSS JOIN reset_date
             WHERE fu.tenant_id = :tenant_id
               AND fu.processing_status IN ('completed', 'deleted')
+              AND dc.document_type = 'file'
               AND COALESCE(fu.completed_at, fu.updated_at, fu.created_at) >= reset_date.cycle_start
         ),
         websites_in_cycle AS (
             SELECT
-                COUNT(DISTINCT sw.id) AS website_count,
-                COALESCE(SUM(sw.file_size), 0) AS total_bytes
-            FROM scraped_websites sw
+                COUNT(DISTINCT dc.document_id) AS website_count,
+                COALESCE(SUM(pg_column_size(dc.content)), 0) AS total_bytes
+            FROM document_chunks dc
+            JOIN scraped_websites sw ON sw.id = dc.document_id
             CROSS JOIN reset_date
             WHERE sw.tenant_id = :tenant_id
               AND sw.processing_status IN ('completed', 'deleted')
               AND sw.parent_id IS NULL
+              AND dc.document_type = 'website'
               AND COALESCE(sw.completed_at, sw.updated_at, sw.created_at) >= reset_date.cycle_start
         )
         SELECT
