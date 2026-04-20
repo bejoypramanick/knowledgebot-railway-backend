@@ -2985,25 +2985,22 @@ async def get_upload_breakdown(user: dict = Depends(get_current_user)):
         file_uploads_in_cycle AS (
             SELECT 
                 COUNT(*) AS file_count,
-                COALESCE(SUM(pg_column_size(dc.content)), 0) AS content_bytes
+                COALESCE(SUM(fu.file_size), 0) AS content_bytes
             FROM file_uploads fu
-            JOIN document_chunks dc ON dc.document_id = fu.id AND dc.document_type = 'file'
             CROSS JOIN reset_date
             WHERE fu.tenant_id = :tenant_id 
               AND fu.processing_status IN ('completed', 'deleted')
-              AND COALESCE(fu.completed_at, fu.updated_at, fu.created_at) >= reset_date.cycle_start
+              AND COALESCE(fu.completed_at, fu.created_at) >= reset_date.cycle_start
         ),
         websites_in_cycle AS (
             SELECT 
-                COUNT(DISTINCT sw.id) AS website_count,
-                COALESCE(SUM(pg_column_size(dc.content)), 0) AS content_bytes
+                COUNT(*) AS website_count,
+                COALESCE(SUM(sw.file_size), 0) AS content_bytes
             FROM scraped_websites sw
-            JOIN document_chunks dc ON dc.document_id = sw.id AND dc.document_type = 'website'
             CROSS JOIN reset_date
             WHERE sw.tenant_id = :tenant_id 
               AND sw.processing_status IN ('completed', 'deleted')
-              AND sw.parent_id IS NULL
-              AND COALESCE(sw.completed_at, sw.updated_at, sw.created_at) >= reset_date.cycle_start
+              AND COALESCE(sw.completed_at, sw.created_at) >= reset_date.cycle_start
         )
         SELECT 
             COALESCE((SELECT file_count FROM file_uploads_in_cycle), 0) AS files_count,
