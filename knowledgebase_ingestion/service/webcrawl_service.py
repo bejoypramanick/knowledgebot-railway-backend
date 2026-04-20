@@ -5,6 +5,7 @@ Handles business logic for website scraping operations
 import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse, urlunparse
 
 from fastapi import HTTPException
 
@@ -47,6 +48,20 @@ def _redact_crawler_options(options: Dict[str, Any]) -> Dict[str, Any]:
     if redacted.get("crawler_headers"):
         redacted["crawler_headers"] = "[redacted]"
     return redacted
+
+
+def _normalize_url_for_duplicate_check(url: str) -> str:
+    """Normalize superficial URL differences so duplicate alerts are reliable."""
+    try:
+        parsed = urlparse((url or "").strip())
+        scheme = (parsed.scheme or "https").lower()
+        netloc = parsed.netloc.lower()
+        path = parsed.path.rstrip("/")
+        normalized = urlunparse((scheme, netloc, path, "", parsed.query, ""))
+        return normalized.lower()
+    except Exception:
+        return (url or "").strip().rstrip("/").lower()
+
 
 def get_webcrawl_dao() -> WebCrawlDAO:
     """Get singleton WebCrawlDAO instance."""
@@ -157,22 +172,39 @@ async def queue_website_for_scraping(
         from sqlalchemy import text
 
         # Check for duplicate URL (only active crawls)
-        logger.info(f"🔍 [DUPLICATE_CHECK] Checking for existing crawls of URL: {url}")
+        normalized_url = _normalize_url_for_duplicate_check(url)
+        logger.info(f"🔍 [DUPLICATE_CHECK] Checking for existing crawls of URL: {url} (normalized={normalized_url})")
         async with get_db_session() as session:
             # Get all websites with this URL
             result = await session.execute(
-                text("SELECT id, original_url, processing_status FROM scraped_websites WHERE original_url = :url ORDER BY id DESC"),
-                {"url": url}
+                text(
+                    """
+                    SELECT id, original_url, processing_status
+                    FROM scraped_websites
+                    WHERE lower(regexp_replace(original_url, '/+$', '')) = :normalized_url
+                    ORDER BY id DESC
+                    """
+                ),
+                {"normalized_url": normalized_url}
             )
             all_websites = result.mappings().all()
-            logger.info(f"🔍 [DUPLICATE_CHECK_ALL] Found {len(all_websites)} total websites with URL '{url}':")
+            logger.info(f"🔍 [DUPLICATE_CHECK_ALL] Found {len(all_websites)} total websites with normalized URL '{normalized_url}':")
             for w in all_websites:
-                logger.info(f"   - ID={w['id']}, status={w['processing_status']}")
+                logger.info(f"   - ID={w['id']}, url={w['original_url']}, status={w['processing_status']}")
 
             # Check for active crawls (exclude failed, deleted, cancelled)
             result = await session.execute(
-                text("SELECT id, original_url, processing_status FROM scraped_websites WHERE original_url = :url AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1"),
-                {"url": url}
+                text(
+                    """
+                    SELECT id, original_url, processing_status
+                    FROM scraped_websites
+                    WHERE lower(regexp_replace(original_url, '/+$', '')) = :normalized_url
+                      AND processing_status IN ('pending', 'processing', 'queued', 'completed')
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"normalized_url": normalized_url}
             )
             existing_active = result.mappings().first()
 
@@ -190,8 +222,11 @@ async def queue_website_for_scraping(
                     logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE crawl: ID={existing_active['id']}, url={existing_active['original_url']}, status={existing_active['processing_status']}")
                     return {
                         "success": False,
+                        "duplicate": True,
                         "error": f"Website is already being crawled or has been crawled (ID: {existing_active['id']}, Status: {existing_active['processing_status']}).",
-                        "duplicate_website_id": str(existing_active['id'])
+                        "duplicate_website_id": str(existing_active['id']),
+                        "existing_website_id": str(existing_active['id']),
+                        "where_exists": ["database"],
                     }
             else:
                 logger.info(f"🔍 [DUPLICATE_CHECK] No active crawl found for: {url}")

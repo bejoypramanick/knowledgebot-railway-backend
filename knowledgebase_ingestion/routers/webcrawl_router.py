@@ -378,8 +378,11 @@ async def scrape_website_async_endpoint(request: Request = None):
                     status_code=409,
                     detail={
                         "success": False,
+                        "duplicate": True,
                         "error": result.get("error"),
                         "duplicate_website_id": str(result.get("duplicate_website_id")),
+                        "existing_website_id": str(result.get("existing_website_id") or result.get("duplicate_website_id")),
+                        "where_exists": result.get("where_exists") or ["database"],
                         "reason": "website_duplicate",
                     },
                 )
