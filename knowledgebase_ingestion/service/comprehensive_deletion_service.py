@@ -119,9 +119,9 @@ class ComprehensiveDeletionService:
     async def _invalidate_kb_ui_cache(self, deletion_report: Dict[str, Any]) -> None:
         """Invalidate Redis UI cache after a successful individual KB delete."""
         try:
-            from shared.redis_ui_cache import invalidate_kb_caches
+            from shared.redis_ui_cache import invalidate_all_kb_caches
 
-            deleted = await invalidate_kb_caches()
+            deleted = await invalidate_all_kb_caches()
             deletion_report["cleanup_summary"]["kb_ui_cache_keys_deleted"] = deleted
             logger.info(f"🧹 [KB_UI_CACHE] Invalidated {deleted} KB UI cache keys")
         except Exception as cache_err:

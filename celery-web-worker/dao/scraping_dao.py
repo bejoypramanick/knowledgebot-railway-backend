@@ -637,10 +637,19 @@ class ScrapingDAO:
             logger.log_db_query(query, params, error=e)
             return False
 
-    async def check_and_update_parent_completion(self, parent_id: str) -> bool:
+    async def check_and_update_parent_completion(
+        self,
+        parent_id: str,
+        complete_when_no_children: bool = False,
+    ) -> bool:
         """
         Check if all child pages of a parent website/sitemap are completed.
         If all children are completed, update parent status to 'completed'.
+
+        When a multi-page crawl discovers only the root URL, the root page is
+        stored on the parent row and there are no child rows to wait for. In
+        that case, callers can set complete_when_no_children=True after the
+        crawl has finished successfully.
 
         This is called after each child page is recorded to ensure parent
         status is updated as soon as all children finish processing.
@@ -681,15 +690,22 @@ class ScrapingDAO:
                 logger.info(f"   Failed: {failed}")
                 logger.info(f"   In Progress: {total - completed - failed}")
 
-                # If no children yet, parent is still being processed
+                # If no children exist during an in-flight crawl, parent is
+                # still being processed. After a completed root-only crawl,
+                # the caller can explicitly allow completion.
                 if total == 0:
+                    if not complete_when_no_children:
+                        logger.info(
+                            f"ℹ️ [PARENT_CHECK] Parent {parent_id} has no children yet"
+                        )
+                        return False
+
                     logger.info(
-                        f"ℹ️ [PARENT_CHECK] Parent {parent_id} has no children yet"
+                        f"✅ [PARENT_CHECK] Parent {parent_id} has no child pages after crawl; marking root-only scrape completed"
                     )
-                    return False
 
                 # All children must be in a terminal state (completed or failed)
-                if completed + failed < total:
+                if total > 0 and completed + failed < total:
                     logger.info(
                         f"⏳ [PARENT_PENDING] Parent {parent_id} still has children in progress"
                     )
@@ -722,7 +738,14 @@ class ScrapingDAO:
                 await session.commit()
                 await _invalidate_kb_file_list_cache()
 
-                if completed == total:
+                if total == 0:
+                    logger.info(
+                        f"✅ [PARENT_COMPLETE] Root-only crawl completed for parent {parent_id}"
+                    )
+                    logger.info(
+                        f"✅ [PARENT_UPDATE] Parent {parent_id} status: {update_result.old_status} -> {update_result.new_status}"
+                    )
+                elif completed == total:
                     logger.info(
                         f"✅ [PARENT_COMPLETE] All {total} children completed for parent {parent_id}"
                     )

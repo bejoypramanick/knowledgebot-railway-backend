@@ -211,7 +211,8 @@ class ProcessingService:
             )
             parent_completed = (
                 await self.scraping_dao.check_and_update_parent_completion(
-                    job_context.website_id
+                    job_context.website_id,
+                    complete_when_no_children=pages_uploaded > 0,
                 )
             )
 
