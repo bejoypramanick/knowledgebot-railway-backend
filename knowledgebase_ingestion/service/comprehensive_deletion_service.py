@@ -99,6 +99,8 @@ class ComprehensiveDeletionService:
                 raise ValueError(f"Unknown item type: {item_type}")
 
             if result.get("success"):
+                # Global UI cache invalidation (DB7)
+                # This MUST happen after the DB transaction has committed
                 await self._invalidate_kb_ui_cache(result)
 
             return result

@@ -188,23 +188,31 @@ async def invalidate_kb_caches(tenant_id: Optional[str] = None) -> int:
 
 async def invalidate_all_kb_caches() -> int:
     """
-    Invalidate all knowledge base UI cache variants.
-
-    Some mutation paths run without tenant context, while the list endpoint
-    stores tenant-scoped keys. A broad purge keeps deletes from leaving stale
-    active/deleted rows visible until the cache TTL expires.
+    Invalidate all knowledge base UI cache variants across all tenants.
     """
+    # Broad patterns to catch both globally-scoped and tenant-scoped keys
     patterns = [
-        f"{KB_FILES_KEY_PREFIX}*",
-        f"*{KB_FILES_KEY_PREFIX}*",
-        "*kb_files*",
+        f"{KB_FILES_KEY_PREFIX}*",  # ui_cache:kb_files:*
+        f"*{KB_FILES_KEY_PREFIX}*", # *ui_cache:kb_files:*
+        "ui_cache:kb_files:*",      # Explicit prefix
     ]
     total = 0
     try:
+        client = await get_ui_cache_redis()
+        deleted_keys = []
+        
         for pattern in patterns:
-            total += await cache_invalidate_pattern(pattern)
+            async for key in client.scan_iter(match=pattern):
+                if await client.delete(key):
+                    deleted_keys.append(key)
+                    total += 1
+        
         if total:
-            logger.info(f"🧹 All knowledge base UI caches invalidated ({total} keys)")
+            logger.info(f"🧹 Broad KB cache purge: invalidated {total} keys")
+            logger.debug(f"🗑️ Deleted keys: {deleted_keys}")
+        else:
+            logger.debug("ℹ️ No KB cache keys found to invalidate")
+            
         return total
     except Exception as e:
         logger.warning(f"⚠️ Failed to invalidate all KB caches: {e}")
