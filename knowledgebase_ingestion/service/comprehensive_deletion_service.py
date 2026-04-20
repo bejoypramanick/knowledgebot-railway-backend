@@ -151,7 +151,6 @@ class ComprehensiveDeletionService:
 try:
             async with get_db_connection() as conn:
                 async with conn.transaction():
-                    logger.info(f"[DELETE_WEBSITE] website_id={website_id} step=TRANSACTION started")
                     # Step 1: LOOKUP
                     logger.info(
                         f"[DELETE_FILE] file_id={file_id} step=LOOKUP start=true"
@@ -338,10 +337,7 @@ try:
 
         try:
             async with get_db_connection() as conn:
-                async with conn.transaction() as tx:
-                    logger.info(
-                        f"[DELETE_WEBSITE] website_id={website_id} step=TRANSACTION started"
-                    )
+                async with conn.transaction():
                     # Step 1: LOOKUP
                     logger.info(
                         f"[DELETE_WEBSITE] website_id={website_id} step=LOOKUP start=true"
