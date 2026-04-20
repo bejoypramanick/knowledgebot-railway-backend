@@ -152,7 +152,9 @@ class ComprehensiveDeletionService:
             async with get_db_connection() as conn:
                 async with conn.transaction():
                     # Step 1: LOOKUP
-                    logger.info(f"📍 [LOOKUP] Fetching file record...")
+                    logger.info(
+                        f"[DELETE_FILE] file_id={file_id} step=LOOKUP start=true"
+                    )
                     file_record = await conn.fetchrow(
                         """SELECT
                             id, original_filename, storage_document_name, metadata,
@@ -172,20 +174,14 @@ class ComprehensiveDeletionService:
                             }
                         )
                         deletion_report["completed_at"] = datetime.utcnow().isoformat()
-                        logger.error(f"❌ File {file_id} not found")
+                        logger.error(
+                            f"[DELETE_FILE] file_id={file_id} step=LOOKUP found=false"
+                        )
                         return deletion_report
 
                     deletion_report["filename"] = file_record["original_filename"]
                     logger.info(
-                        f"✅ [LOOKUP] Found: {file_record['original_filename']}"
-                    )
-                    logger.info(
-                        f"   Processing Status: {file_record['processing_status']}"
-                    )
-                    logger.info(f"   Celery Task: {file_record['celery_task_id']}")
-                    logger.info(f"   S3 Raw: {file_record['s3_key']}")
-                    logger.info(
-                        f"   S3 Processed: {file_record['processed_content_s3_key']}"
+                        f"[DELETE_FILE] file_id={file_id} step=LOOKUP found=true filename={file_record['original_filename']} status={file_record['processing_status']}"
                     )
 
                     # Step 2: CELERY REVOCATION
@@ -244,55 +240,78 @@ class ComprehensiveDeletionService:
                         )
 
                     # Step 6: DATABASE TRANSACTION
-                    logger.info(f"💾 [DB_TRANSACTION] Updating database...")
+                    logger.info(
+                        f"[DELETE_FILE] file_id={file_id} step=DB_TRANSACTION start=true hard_delete={hard_delete}"
+                    )
                     if hard_delete:
                         # Hard delete: remove from database
-                        logger.info(f"   🗑️ Executing hard delete for file_id={file_id}")
                         status_str = await conn.execute(
                             "DELETE FROM file_uploads WHERE id = $1", file_id
                         )
-                        # status_str is e.g. "DELETE 1"
                         affected = int(status_str.split()[-1])
+                        logger.info(
+                            f"[DELETE_FILE] file_id={file_id} step=DB_TRANSACTION operation=DELETE affected={affected}"
+                        )
                         deletion_report["cleanup_summary"]["db_records_affected"] = (
                             affected
-                        )
-                        logger.info(
-                            f"   🗑️  Hard deleted from database ({affected} rows affected)"
                         )
                     else:
                         # Soft delete: mark as deleted with audit trail
                         logger.info(
-                            f"   📝 Executing soft delete for file_id={file_id}"
+                            f"[DELETE_FILE] file_id={file_id} step=DB_TRANSACTION executing_update=true"
                         )
-                        status_str = await conn.execute(
-                            """UPDATE file_uploads
-                            SET processing_status = 'deleted',
-                                storage_document_name = NULL,
-                                storage_document_uri = NULL,
-                                storage_backend_state = 'deleted',
-                                s3_key = NULL,
-                                processed_content_s3_key = NULL,
-                                updated_at = NOW(),
-                                error_message = 'Comprehensively deleted'
-                            WHERE id = $1""",
-                            file_id,
-                        )
-                        # status_str is e.g. "UPDATE 1" or "UPDATE 0"
-                        affected = int(status_str.split()[-1])
-                        logger.info(
-                            f"   📝 Soft delete result: {status_str}, affected={affected}"
-                        )
+                        try:
+                            status_str = await conn.execute(
+                                """UPDATE file_uploads
+                                SET processing_status = 'deleted',
+                                    storage_document_name = NULL,
+                                    storage_document_uri = NULL,
+                                    storage_backend_state = 'deleted',
+                                    s3_key = NULL,
+                                    processed_content_s3_key = NULL,
+                                    updated_at = NOW(),
+                                    error_message = 'Comprehensively deleted'
+                                WHERE id = $1""",
+                                file_id,
+                            )
+                            logger.info(
+                                f"[DELETE_FILE] file_id={file_id} step=UPDATE status_raw='{status_str}'"
+                            )
+                            affected = int(status_str.split()[-1])
+                            logger.info(
+                                f"[DELETE_FILE] file_id={file_id} step=DB_TRANSACTION operation=UPDATE affected={affected}"
+                            )
+
+                            # Verify
+                            verify = await conn.fetch(
+                                "SELECT id, processing_status FROM file_uploads WHERE id = $1",
+                                file_id,
+                            )
+                            if verify:
+                                for v in verify:
+                                    logger.info(
+                                        f"[DELETE_FILE] file_id={file_id} step=VERIFY id={v['id']} status={v['processing_status']}"
+                                    )
+                            else:
+                                logger.info(
+                                    f"[DELETE_FILE] file_id={file_id} step=VERIFY result=NOT_FOUND"
+                                )
+                        except Exception as update_err:
+                            logger.error(
+                                f"[DELETE_FILE] file_id={file_id} step=UPDATE error={str(update_err)}"
+                            )
+                            raise
+
                         deletion_report["cleanup_summary"]["db_records_affected"] = (
                             affected
-                        )
-                        logger.info(
-                            f"   📌 Soft deleted in database ({affected} rows affected)"
                         )
 
                     # Transaction committed successfully
                     deletion_report["success"] = True
                     deletion_report["completed_at"] = datetime.utcnow().isoformat()
-                    logger.info("✅ [COMPREHENSIVE_DELETION] File deleted completely")
+                    logger.info(
+                        f"[DELETE_FILE] file_id={file_id} step=DB_TRANSACTION success=true affected={affected}"
+                    )
                     return deletion_report
 
         except Exception as e:
