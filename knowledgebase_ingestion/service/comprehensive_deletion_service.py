@@ -338,7 +338,15 @@ class ComprehensiveDeletionService:
 
         try:
             async with get_db_connection() as conn:
-                async with conn.transaction():
+                tx = conn.transaction()
+                logger.info(
+                    f"[DELETE_WEBSITE] website_id={website_id} step=TRANSACTION starting=true"
+                )
+                async with tx:
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=TRANSACTION active=true"
+                    )
+
                     # Step 1: LOOKUP
                     logger.info(
                         f"[DELETE_WEBSITE] website_id={website_id} step=LOOKUP start=true"
@@ -514,6 +522,16 @@ class ComprehensiveDeletionService:
                             )
 
                         try:
+                            # Before update - capture exact values
+                            before = await conn.fetchrow(
+                                "SELECT id, processing_status, updated_at FROM scraped_websites WHERE id = $1",
+                                website_id,
+                            )
+                            logger.info(
+                                f"[DELETE_WEBSITE] website_id={website_id} step=BEFORE_UPDATE id={before['id']} status={before['processing_status']} updated_at={before['updated_at']}"
+                            )
+
+                            # Execute update
                             status = await conn.execute(
                                 """UPDATE scraped_websites
                                 SET processing_status = 'deleted', updated_at = NOW()
@@ -527,6 +545,16 @@ class ComprehensiveDeletionService:
                             logger.info(
                                 f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION operation=UPDATE affected={affected}"
                             )
+
+                            # After update - immediate verification
+                            after = await conn.fetchrow(
+                                "SELECT id, processing_status, updated_at FROM scraped_websites WHERE id = $1",
+                                website_id,
+                            )
+                            logger.info(
+                                f"[DELETE_WEBSITE] website_id={website_id} step=AFTER_UPDATE id={after['id']} status={after['processing_status']} updated_at={after['updated_at']}"
+                            )
+
                         except Exception as update_err:
                             logger.error(
                                 f"[DELETE_WEBSITE] website_id={website_id} step=UPDATE error={str(update_err)}"
