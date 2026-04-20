@@ -13,7 +13,6 @@ Handles:
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
-import asyncio
 import re
 
 from shared.otel_logger import get_otel_logger
@@ -594,41 +593,6 @@ class ComprehensiveDeletionService:
 
                     deletion_report["success"] = True
                     deletion_report["completed_at"] = datetime.utcnow().isoformat()
-
-                    # POST-TRANSACTION VERIFY - close pool, wait, and reconnect to force fresh connection
-                    logger.info(
-                        f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY start=true"
-                    )
-                    try:
-                        # Dispose connection pool to force new connection
-                        from shared.sqlalchemy_db import _engine
-
-                        if _engine:
-                            await _engine.dispose()
-                            logger.info(
-                                f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY disposed_pool=true"
-                            )
-
-                        # Wait a moment for any replication/sync
-                        await asyncio.sleep(0.5)
-
-                        async with get_db_connection() as post_conn:
-                            post_status = await post_conn.fetchrow(
-                                "SELECT id, processing_status FROM scraped_websites WHERE id = $1",
-                                website_id,
-                            )
-                            if post_status:
-                                logger.info(
-                                    f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY id={post_status['id']} status={post_status['processing_status']}"
-                                )
-                            else:
-                                logger.info(
-                                    f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY result=NOT_FOUND"
-                                )
-                    except Exception as post_err:
-                        logger.error(
-                            f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY error={str(post_err)}"
-                        )
 
                     logger.info(
                         f"[DELETE_WEBSITE] website_id={website_id} final_report success={deletion_report['success']} affected={deletion_report.get('cleanup_summary', {}).get('db_records_affected')} completed_at={deletion_report.get('completed_at')}"
