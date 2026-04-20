@@ -117,6 +117,9 @@ async def get_current_user(request: Request):
     user_email = request.headers.get("X-User-Email")
     user_name = request.headers.get("X-User-Name")
     user_role = request.headers.get("X-User-Role")
+    tenant_id = request.headers.get("X-Tenant-ID")
+    tenant_slug = request.headers.get("X-Tenant-Slug")
+    user_role_id = request.headers.get("X-User-Role-ID")
 
     logger.info(
         f"🔍 Headers - UID: {user_uid}, Email: {user_email}, Name: {user_name}, Role: {user_role}"
@@ -128,6 +131,9 @@ async def get_current_user(request: Request):
             "email": user_email,
             "name": user_name or user_email,
             "role": user_role,
+            "role_id": user_role_id,
+            "tenant_id": tenant_id,
+            "tenant_slug": tenant_slug,
             "picture": None,  # Not forwarded in headers
         }
         logger.info(f"🔍 Returning user from headers: {user_data}")
