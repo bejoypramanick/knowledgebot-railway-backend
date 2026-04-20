@@ -565,6 +565,30 @@ class ComprehensiveDeletionService:
 
                     deletion_report["success"] = True
                     deletion_report["completed_at"] = datetime.utcnow().isoformat()
+
+                    # POST-TRANSACTION VERIFY - fresh connection to check after commit
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY start=true"
+                    )
+                    try:
+                        async with get_db_connection() as post_conn:
+                            post_status = await post_conn.fetchrow(
+                                "SELECT id, processing_status FROM scraped_websites WHERE id = $1",
+                                website_id,
+                            )
+                            if post_status:
+                                logger.info(
+                                    f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY id={post_status['id']} status={post_status['processing_status']}"
+                                )
+                            else:
+                                logger.info(
+                                    f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY result=NOT_FOUND"
+                                )
+                    except Exception as post_err:
+                        logger.error(
+                            f"[DELETE_WEBSITE] website_id={website_id} step=POST_TRANSACTION_VERIFY error={str(post_err)}"
+                        )
+
                     logger.info(
                         f"[DELETE_WEBSITE] website_id={website_id} final_report success={deletion_report['success']} affected={deletion_report.get('cleanup_summary', {}).get('db_records_affected')} completed_at={deletion_report.get('completed_at')}"
                     )
