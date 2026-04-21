@@ -520,6 +520,68 @@ def _build_excel_style_usage_report(data, tenant_id=""):
             styles.append("num")
         return " ".join(styles)
 
+    display_col_indexes = [16] + list(range(1, 16))
+
+    def render_rows(start_row, end_row):
+        rendered_rows = []
+        for row_idx in range(start_row, end_row + 1):
+            cells = []
+            for col_idx in display_col_indexes:
+                value = rows[row_idx][col_idx - 1]
+                cell_id = f"{letters[col_idx - 1]}{row_idx}"
+                classes = style_for(cell_id)
+                cell_value = "" if value is None else str(value)
+                tooltip = html.escape(tooltip_for(cell_id, cell_value))
+                if cell_id in dropdowns:
+                    select_options = []
+                    selected_value = cell_value.replace(",", "")
+                    for option in dropdowns[cell_id]:
+                        selected = " selected" if option == selected_value else ""
+                        select_options.append(
+                            f'<option value="{html.escape(option)}"{selected}>{html.escape(option)}</option>'
+                        )
+                    cell_html = (
+                        f'<select data-dropdown-cell="{cell_id}" aria-label="{cell_id}">'
+                        f'{"".join(select_options)}</select>'
+                    )
+                    cells.append(f'<td data-cell="{cell_id}" class="{classes} dropdown-cell" title="{tooltip}">{cell_html}</td>')
+                else:
+                    cells.append(
+                        f'<td data-cell="{cell_id}" class="{classes}" title="{tooltip}" contenteditable="true" spellcheck="false">{html.escape(cell_value)}</td>'
+                    )
+            rendered_rows.append(f"<tr>{''.join(cells)}</tr>")
+        return "".join(rendered_rows)
+
+    sections = [
+        ("Base Rates", 6, 11),
+        ("Knowledgebase", 12, 16),
+        ("Chatbot", 17, 18),
+        ("API Gateway", 20, 21),
+        ("Postgres + PGVector", 23, 24),
+        ("Configuration", 26, 27),
+        ("Health Monitor", 29, 30),
+        ("Redis", 32, 34),
+        ("Conversation Assumptions", 36, 39),
+        ("Credit Calculation", 41, 63),
+        ("System Prompt Cache", 64, 67),
+        ("Credit System", 70, 72),
+    ]
+    table_sections = []
+    for title, start_row, end_row in sections:
+        table_sections.append(
+            f"""
+<section class="report-section">
+  <div class="section-title">{html.escape(title)}</div>
+  <div class="section-scroll">
+    <table class="sheet">
+      <tbody>
+        {render_rows(start_row, end_row)}
+      </tbody>
+    </table>
+  </div>
+</section>"""
+        )
+
     table_rows = []
     for row_idx in range(6, 73):
         cells = []
@@ -562,18 +624,21 @@ h1{{font-size:22px;margin:0 0 4px}}
 .tenant-picker{{margin-left:auto;text-align:right;font-size:12px;color:#4b5563}}
 .tenant-picker label{{display:block;font-weight:700;margin-bottom:4px}}
 .tenant-picker select{{min-width:240px;border:1px solid #9ca3af;border-radius:6px;background:#fff;padding:7px 9px;font-size:13px}}
-.sheet-shell{{position:relative;overflow:auto;border:1px solid #bfc7d7}}
+.sections{{display:flex;flex-direction:column;gap:18px}}
+.report-section{{border:1px solid #bfc7d7;background:#ffffff}}
+.section-title{{position:sticky;left:0;background:#111827;color:#ffffff;font-weight:700;padding:8px 10px;font-size:13px;letter-spacing:.01em}}
+.section-scroll{{overflow:auto;max-width:100%}}
 table.sheet{{border-collapse:collapse;width:2500px;font-size:13px;table-layout:fixed}}
 .sheet td{{border:1px solid #bfc7d7;background:#ffffff;padding:3px 5px;vertical-align:middle;height:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-.sheet td:nth-child(1){{width:256px}}
-.sheet td:nth-child(2){{width:161px}}
-.sheet td:nth-child(3),.sheet td:nth-child(5){{width:143px}}
-.sheet td:nth-child(4),.sheet td:nth-child(6),.sheet td:nth-child(8){{width:119px}}
-.sheet td:nth-child(7),.sheet td:nth-child(9){{width:132px}}
-.sheet td:nth-child(10),.sheet td:nth-child(11),.sheet td:nth-child(12),.sheet td:nth-child(15){{width:130px}}
-.sheet td:nth-child(13){{width:190px}}
-.sheet td:nth-child(14){{width:226px}}
-.sheet td:nth-child(16){{width:390px}}
+.sheet td:nth-child(1){{width:430px}}
+.sheet td:nth-child(2){{width:256px}}
+.sheet td:nth-child(3){{width:161px}}
+.sheet td:nth-child(4),.sheet td:nth-child(6){{width:143px}}
+.sheet td:nth-child(5),.sheet td:nth-child(7),.sheet td:nth-child(9){{width:119px}}
+.sheet td:nth-child(8),.sheet td:nth-child(10){{width:132px}}
+.sheet td:nth-child(11),.sheet td:nth-child(12),.sheet td:nth-child(13),.sheet td:nth-child(16){{width:130px}}
+.sheet td:nth-child(14){{width:190px}}
+.sheet td:nth-child(15){{width:226px}}
 .sheet .svc{{background:#a4c2f4}}
 .sheet .mem,.sheet .obj{{background:#d9ead3}}
 .sheet .cpu{{background:#d9d2e9}}
@@ -591,6 +656,7 @@ table.sheet{{border-collapse:collapse;width:2500px;font-size:13px;table-layout:f
 .sheet .pink2{{background:#f4cccc}}
 .sheet .green2{{background:#b6d7a8}}
 .sheet .formula-col{{background:#eef2ff;color:#1f2937;font-family:"SFMono-Regular",Consolas,monospace;font-size:12px;text-align:left;white-space:normal}}
+.sheet td.formula-col{{position:sticky;left:0;z-index:1;border-right:2px solid #94a3b8}}
 .sheet .warning{{background:#ff0000;color:#000000;font-weight:700}}
 .sheet .bold{{font-weight:700}}
 .sheet .num{{text-align:right;font-variant-numeric:tabular-nums}}
@@ -612,19 +678,15 @@ table.sheet{{border-collapse:collapse;width:2500px;font-size:13px;table-layout:f
     <h1>Cost calculation for AI chatbot</h1>
     <div class="meta">Tenant: {html.escape(tenant_name)} · Period: {html.escape(month_label)} month-to-date · Generated: {generated_at}</div>
   </div>
-  <form class="tenant-picker" method="get" action="/reports/usage">
+  <form class="tenant-picker" method="get" action="">
     <label for="tenant-select">Tenant</label>
     <select id="tenant-select" name="tenant" onchange="this.form.submit()">
       {''.join(tenant_options)}
     </select>
   </form>
 </div>
-<div class="sheet-shell">
-<table class="sheet">
-<tbody>
-{''.join(table_rows)}
-</tbody>
-</table>
+<div class="sections">
+{''.join(table_sections)}
 </div>
 <div class="note">
 Cells are editable in this browser view. Edits are local to the page and are not saved back to the database. Upload/ingestion size uses tenant-scoped <code>file_uploads.file_size</code> and <code>scraped_websites.file_size</code> for completed/deleted rows created or completed in this month. Those stored file_size counters are populated from <code>SUM(pg_column_size(document_chunks.content))</code> after chunk insertion.
