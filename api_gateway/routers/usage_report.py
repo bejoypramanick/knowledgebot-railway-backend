@@ -155,6 +155,16 @@ def _build_excel_style_usage_report(data, tenant_id=""):
     if tenant_id and tenant_id in tenants:
         tenant = tenants[tenant_id]
         tenant_name = tenant.get("name") or tenant.get("slug") or tenant_id
+    tenant_options = ['<option value="">All Tenants</option>']
+    for tid, tenant in sorted(
+        tenants.items(),
+        key=lambda item: (item[1].get("name") or item[1].get("slug") or item[0]).lower(),
+    ):
+        label = tenant.get("name") or tenant.get("slug") or tid
+        selected = " selected" if tid == tenant_id else ""
+        tenant_options.append(
+            f'<option value="{html.escape(tid)}"{selected}>{html.escape(label)}</option>'
+        )
 
     files = [
         row
@@ -305,6 +315,110 @@ def _build_excel_style_usage_report(data, tenant_id=""):
     put(72, 1, ["Total credits available in a month", ""])
 
     letters = "ABCDEFGHIJKLMNO"
+    service_dropdown_cells = {
+        "C12", "C13", "C14", "C15", "E12", "E13", "E14", "E15",
+        "C18", "E18", "C21", "E21", "C24", "E24", "C27", "E27",
+        "C33", "E33",
+    }
+    dropdowns = {
+        cell_id: [str(value) for value in range(1, 9)]
+        for cell_id in service_dropdown_cells
+    }
+    dropdowns["B55"] = [
+        "1000000", "2000000", "3000000", "8000000", "5000000", "6000000",
+        "7000000", "10000000", "12000000", "13000000", "11000000",
+        "500000", "300000", "5500000",
+    ]
+    formula_tooltips = {
+        "D12": "Memory cost = $D$10 * 18000 * C12",
+        "F12": "CPU cost = $F$10 * E12 * 18000",
+        "H12": "Volumes cost = $H$10 * G12 * 2592000",
+        "J12": "Egress cost = $J$10 * I12",
+        "L12": "Object storage cost = $L$10 * K12",
+        "M12": "LLM Tokens (M) = J43 from ingestion token calculation",
+        "N12": "Embedding cost = M12 * N10",
+        "O12": "Cost USD = D12 + F12 + H12 + J12 + N12 + L12",
+        "O16": "Knowledgebase total = SUM(O11:O15)",
+        "B17": "Chatbot total conversation time = B62",
+        "D18": "Memory cost = $D$10 * B62 * C18",
+        "F18": "CPU cost = $F$10 * E18 * B62",
+        "H18": "Volumes cost = $H$10 * G18 * 2592000",
+        "J18": "Egress cost = $J$10 * I18",
+        "L18": "Object storage cost = $L$10 * K18",
+        "N18": "LLM API cost = G58 from credit calculation",
+        "O18": "Cost USD = D18 + F18 + H18 + J18 + N18 + L18",
+        "B20": "API Gateway total time = B62 + 18000",
+        "B23": "Postgres+PGvector total time = B62 + 18000",
+        "O34": "Grand infrastructure total = SUM(O16,O18,O21,O24,O27,O30,O33)",
+        "K43": "Raw text bytes embedded (MB) = 2.8 * J43",
+        "L43": "Characters (M) = J43 * 2.8",
+        "M43": "Approx files = 170 * J43",
+        "N43": "Words (M) = J43 * 0.4",
+        "O43": "pg vector DB (MB) = K43 * 6",
+        "B44": "User token per conversation = 50 * 5",
+        "B45": "1st message input = B43 + 1500",
+        "B46": "2nd to 5th message tool call = 1500 * 4",
+        "B47": "Conversation history = (300+50)+2*(300+50)+3*(300+50)+4*(300+50)",
+        "B48": "Total input tokens = SUM(B44:B47)",
+        "B49": "Average input tokens per turn = B48 / 5",
+        "G50": "Input token cost = F50 * B58 / 1000000",
+        "G51": "Output token cost = F51 * B59 / 1000000",
+        "G52": "Context cache token cost = F52 * B67 / 1000000",
+        "B53": "Total output token per conversation = (B52 + B51) * 5",
+        "G53": "Total conversation token cost = SUM(G50:G52)",
+        "B56": "Average input+output tokens in one conversation = B53 + B48",
+        "B57": "Total conversations in a month = B55 / B56",
+        "B58": "Input tokens used in a month = B57 * B48",
+        "B59": "Output tokens used in a month = B57 * B53",
+        "B60": "Total output AI messages in a month = B57 * 5",
+        "B61": "Approx time per conversation = 5 * 60 seconds",
+        "B62": "Total time for all conversations = B61 * B57",
+        "C62": "Total conversation time in hours = B62 / (60 * 60)",
+        "B63": "Average input+output tokens in one turn = B49 + B52 + B51",
+        "B65": "System prompt tokens for caching = B43",
+        "B66": "Cached turns in month = B57 * 4",
+        "B67": "Cached system prompt token usage = B66 * B65",
+        "F56": "Total conversation time in hours = C62",
+        "G57": "Storage cost per month = F56 * F55 * B65 / 1000000",
+        "G58": "Grand total LLM cost = SUM(G57,G53)",
+        "M47": "Cost per customer = O34",
+        "N46": "Subscription price INR = M46 * M51",
+        "N47": "Cost per customer INR = M47 * M51",
+        "M48": "Profit per customer = M46 - M47",
+        "N48": "Profit per customer INR = M48 * M51",
+        "M50": "Total profit = M49 * M48",
+        "N50": "Total profit INR = M50 * M51",
+        "B72": "Total credits available in a month = B55 / B71",
+    }
+    for row_idx in [13, 14, 15, 21, 24, 27, 30, 33]:
+        formula_tooltips.update(
+            {
+                f"D{row_idx}": "Memory cost = base memory price * seconds used * GB memory",
+                f"F{row_idx}": "CPU cost = base CPU price * vCPU count * seconds used",
+                f"H{row_idx}": "Volumes cost = base volume price * stored GB * 2592000 seconds",
+                f"J{row_idx}": "Egress cost = base egress price * egress GB",
+                f"L{row_idx}": "Object storage cost = base object storage price * stored GB",
+                f"O{row_idx}": "Cost USD = memory + CPU + volume + egress + LLM/API + object storage",
+            }
+        )
+
+    def tooltip_for(cell_id, cell_value):
+        if cell_id in formula_tooltips:
+            return formula_tooltips[cell_id]
+        if cell_id in dropdowns:
+            return f"Excel dropdown input. Allowed values: {', '.join(dropdowns[cell_id])}."
+        row_idx = int(cell_id[1:])
+        col = letters.index(cell_id[0]) + 1
+        if row_idx in range(10, 35) and col in (3, 5, 7, 9, 11, 13):
+            return "Editable service usage input from the detailed calculation sheet."
+        if row_idx in range(10, 35) and col in (4, 6, 8, 10, 12, 14, 15):
+            return "Calculated cost field derived from the service input cells and base prices."
+        if row_idx in range(41, 73):
+            return "Credit and token calculation field from the detailed calculation sheet."
+        if cell_value:
+            return f"Workbook field: {cell_value}"
+        return f"Editable blank cell {cell_id} from the detailed calculation sheet."
+
     bold_cells = {
         "A1", "B1", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10",
         "A14", "B14", "A25", "B25", "M13", "M17", "M14", "M18",
@@ -358,9 +472,24 @@ def _build_excel_style_usage_report(data, tenant_id=""):
             cell_id = f"{letters[col_idx - 1]}{row_idx}"
             classes = style_for(cell_id)
             cell_value = "" if value is None else str(value)
-            cells.append(
-                f'<td data-cell="{cell_id}" class="{classes}" contenteditable="true" spellcheck="false">{html.escape(cell_value)}</td>'
-            )
+            tooltip = html.escape(tooltip_for(cell_id, cell_value))
+            if cell_id in dropdowns:
+                select_options = []
+                selected_value = cell_value.replace(",", "")
+                for option in dropdowns[cell_id]:
+                    selected = " selected" if option == selected_value else ""
+                    select_options.append(
+                        f'<option value="{html.escape(option)}"{selected}>{html.escape(option)}</option>'
+                    )
+                cell_html = (
+                    f'<select data-dropdown-cell="{cell_id}" aria-label="{cell_id}">'
+                    f'{"".join(select_options)}</select>'
+                )
+                cells.append(f'<td data-cell="{cell_id}" class="{classes} dropdown-cell" title="{tooltip}">{cell_html}</td>')
+            else:
+                cells.append(
+                    f'<td data-cell="{cell_id}" class="{classes}" title="{tooltip}" contenteditable="true" spellcheck="false">{html.escape(cell_value)}</td>'
+                )
         table_rows.append(f"<tr>{''.join(cells)}</tr>")
 
     return f"""<!DOCTYPE html>
@@ -372,8 +501,12 @@ def _build_excel_style_usage_report(data, tenant_id=""):
 <style>
 body{{font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#000000;margin:0;padding:24px}}
 .wrap{{max-width:1680px;margin:0 auto;background:#ffffff;padding:0}}
+.topbar{{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:10px}}
 h1{{font-size:22px;margin:0 0 4px}}
 .meta{{font-size:13px;color:#6b7280;margin-bottom:18px}}
+.tenant-picker{{margin-left:auto;text-align:right;font-size:12px;color:#4b5563}}
+.tenant-picker label{{display:block;font-weight:700;margin-bottom:4px}}
+.tenant-picker select{{min-width:240px;border:1px solid #9ca3af;border-radius:6px;background:#fff;padding:7px 9px;font-size:13px}}
 .sheet-shell{{position:relative;overflow:auto;border:1px solid #bfc7d7}}
 table.sheet{{border-collapse:collapse;width:2100px;font-size:13px;table-layout:fixed}}
 .sheet td{{border:1px solid #bfc7d7;background:#ffffff;padding:3px 5px;vertical-align:middle;height:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
@@ -410,13 +543,25 @@ table.sheet{{border-collapse:collapse;width:2100px;font-size:13px;table-layout:f
 .sheet td[contenteditable="true"]{{cursor:text}}
 .sheet td[contenteditable="true"]:hover{{outline:1px solid #a3a3a3;outline-offset:-1px}}
 .sheet td[contenteditable="true"]:focus{{outline:2px solid #1a73e8;outline-offset:-2px;overflow:visible;text-overflow:clip;white-space:normal}}
+.sheet select{{width:100%;height:100%;border:0;background:transparent;font:inherit;color:inherit;text-align:inherit;outline:0}}
+.sheet .dropdown-cell{{padding:0 4px}}
 .note{{margin-top:14px;font-size:12px;color:#6b7280;line-height:1.5}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>Cost calculation for AI chatbot</h1>
-<div class="meta">Tenant: {html.escape(tenant_name)} · Period: {html.escape(month_label)} month-to-date · Generated: {generated_at}</div>
+<div class="topbar">
+  <div>
+    <h1>Cost calculation for AI chatbot</h1>
+    <div class="meta">Tenant: {html.escape(tenant_name)} · Period: {html.escape(month_label)} month-to-date · Generated: {generated_at}</div>
+  </div>
+  <form class="tenant-picker" method="get" action="/reports/usage">
+    <label for="tenant-select">Tenant</label>
+    <select id="tenant-select" name="tenant" onchange="this.form.submit()">
+      {''.join(tenant_options)}
+    </select>
+  </form>
+</div>
 <div class="sheet-shell">
 <table class="sheet">
 <tbody>
@@ -430,7 +575,12 @@ Cells are editable in this browser view. Edits are local to the page and are not
 </div>
 <script>
 const cell = id => document.querySelector(`[data-cell="${{id}}"]`);
-const value = id => cell(id)?.textContent || "";
+const value = id => {{
+  const el = cell(id);
+  if (!el) return "";
+  const select = el.querySelector("select");
+  return select ? select.value : el.textContent;
+}};
 const num = id => {{
   const raw = value(id).replace(/,/g, "").replace(/\\$/g, "").trim();
   const match = raw.match(/-?\\d+(?:\\.\\d+)?/);
@@ -525,6 +675,7 @@ function recalc() {{
   set("B72", fixed(num("B55") / num("B71"), 2));
 }}
 document.querySelectorAll("[contenteditable=true]").forEach(el => el.addEventListener("input", recalc));
+document.querySelectorAll("[data-dropdown-cell]").forEach(el => el.addEventListener("change", recalc));
 recalc();
 </script>
 </body>
