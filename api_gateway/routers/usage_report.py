@@ -240,13 +240,18 @@ def _build_excel_style_usage_report(data, tenant_id=""):
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     month_label = datetime.now(timezone.utc).strftime("%B %Y")
 
+    row_number = 0
+
     def row(cells, cls=""):
+        nonlocal row_number
+        row_number += 1
         cells = (cells + [""] * 11)[:11]
+        letters = "ABCDEFGHIJK"
         return "<tr{}>{}</tr>".format(
             f' class="{cls}"' if cls else "",
             "".join(
-                f'<td contenteditable="true" spellcheck="false">{html.escape(str(cell)) if cell is not None else ""}</td>'
-                for cell in cells
+                f'<td data-cell="{letters[idx]}{row_number}" contenteditable="true" spellcheck="false">{html.escape(str(cell)) if cell is not None else ""}</td>'
+                for idx, cell in enumerate(cells)
             ),
         )
 
@@ -318,8 +323,19 @@ body{{font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#000000;ma
 .wrap{{max-width:1220px;margin:0 auto;background:#ffffff;padding:0}}
 h1{{font-size:22px;margin:0 0 4px}}
 .meta{{font-size:13px;color:#6b7280;margin-bottom:18px}}
+.sheet-shell{{position:relative}}
+.rate-banner{{position:absolute;left:49%;top:0;width:48%;height:86px;background:#11101c;color:#9b95a6;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font-weight:700;z-index:2}}
+.rate-banner .icon{{color:#9b4ade;font-size:16px;margin-bottom:4px}}
+.rate-banner .sub{{font-size:12px;color:#797486;margin-top:4px}}
 table.sheet{{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}}
-.sheet td{{border:1px solid #d9d9d9;background:#ffffff;padding:7px 8px;vertical-align:middle;height:28px;overflow:hidden;text-overflow:ellipsis}}
+.sheet td{{border:1px solid #bfc7d7;background:#ffffff;padding:7px 8px;vertical-align:middle;height:28px;overflow:hidden;text-overflow:ellipsis}}
+.sheet td[data-cell^="A"],.sheet td[data-cell^="B"],.sheet td[data-cell^="C"]{{font-size:15px}}
+.sheet td[data-cell="A1"],.sheet td[data-cell="B1"],.sheet td[data-cell="C1"],.sheet td[data-cell="A3"],.sheet td[data-cell="B3"],.sheet td[data-cell="C3"],.sheet td[data-cell="A4"],.sheet td[data-cell="B4"],.sheet td[data-cell="C4"],.sheet td[data-cell="A5"],.sheet td[data-cell="B5"],.sheet td[data-cell="C5"],.sheet td[data-cell="A6"],.sheet td[data-cell="B6"],.sheet td[data-cell="C6"],.sheet td[data-cell="A7"],.sheet td[data-cell="B7"],.sheet td[data-cell="C7"],.sheet td[data-cell="A8"],.sheet td[data-cell="B8"],.sheet td[data-cell="C8"],.sheet td[data-cell="A9"],.sheet td[data-cell="B9"],.sheet td[data-cell="C9"],.sheet td[data-cell="A10"],.sheet td[data-cell="B10"],.sheet td[data-cell="C10"]{{background:#f6dfd2}}
+.sheet td[data-cell="A15"],.sheet td[data-cell="B15"],.sheet td[data-cell="C15"],.sheet td[data-cell="A16"],.sheet td[data-cell="B16"],.sheet td[data-cell="C16"],.sheet td[data-cell="A17"],.sheet td[data-cell="B17"],.sheet td[data-cell="C17"],.sheet td[data-cell="A18"],.sheet td[data-cell="B18"],.sheet td[data-cell="C18"],.sheet td[data-cell="A19"],.sheet td[data-cell="B19"],.sheet td[data-cell="C19"],.sheet td[data-cell="A20"],.sheet td[data-cell="B20"],.sheet td[data-cell="C20"],.sheet td[data-cell="A21"],.sheet td[data-cell="B21"],.sheet td[data-cell="C21"],.sheet td[data-cell="A22"],.sheet td[data-cell="B22"],.sheet td[data-cell="C22"]{{background:#dff3d8}}
+.sheet td[data-cell="A25"],.sheet td[data-cell="B25"],.sheet td[data-cell="C25"],.sheet td[data-cell="A26"],.sheet td[data-cell="B26"],.sheet td[data-cell="C26"],.sheet td[data-cell="A27"],.sheet td[data-cell="B27"],.sheet td[data-cell="C27"],.sheet td[data-cell="A28"],.sheet td[data-cell="B28"],.sheet td[data-cell="C28"],.sheet td[data-cell="A29"],.sheet td[data-cell="B29"],.sheet td[data-cell="C29"],.sheet td[data-cell="A30"],.sheet td[data-cell="B30"],.sheet td[data-cell="C30"]{{background:#e6e6e6}}
+.sheet td[data-cell="D24"],.sheet td[data-cell="E24"],.sheet td[data-cell="F24"],.sheet td[data-cell="G24"],.sheet td[data-cell="H24"],.sheet td[data-cell="I24"],.sheet td[data-cell="D25"],.sheet td[data-cell="E25"],.sheet td[data-cell="F25"],.sheet td[data-cell="G25"],.sheet td[data-cell="H25"],.sheet td[data-cell="I25"],.sheet td[data-cell="D26"],.sheet td[data-cell="E26"],.sheet td[data-cell="F26"],.sheet td[data-cell="G26"],.sheet td[data-cell="H26"],.sheet td[data-cell="I26"],.sheet td[data-cell="D27"],.sheet td[data-cell="E27"],.sheet td[data-cell="F27"],.sheet td[data-cell="G27"],.sheet td[data-cell="H27"],.sheet td[data-cell="I27"],.sheet td[data-cell="D28"],.sheet td[data-cell="E28"],.sheet td[data-cell="F28"],.sheet td[data-cell="G28"],.sheet td[data-cell="H28"],.sheet td[data-cell="I28"],.sheet td[data-cell="D29"],.sheet td[data-cell="E29"],.sheet td[data-cell="F29"],.sheet td[data-cell="G29"],.sheet td[data-cell="H29"],.sheet td[data-cell="I29"],.sheet td[data-cell="D30"],.sheet td[data-cell="E30"],.sheet td[data-cell="F30"],.sheet td[data-cell="G30"],.sheet td[data-cell="H30"],.sheet td[data-cell="I30"]{{background:#f3c7ec}}
+.sheet td[data-cell="E12"],.sheet td[data-cell="F12"],.sheet td[data-cell="G12"],.sheet td[data-cell="H12"],.sheet td[data-cell="I12"],.sheet td[data-cell="J12"],.sheet td[data-cell="K12"],.sheet td[data-cell="E13"],.sheet td[data-cell="F13"],.sheet td[data-cell="G13"],.sheet td[data-cell="H13"],.sheet td[data-cell="I13"],.sheet td[data-cell="J13"],.sheet td[data-cell="K13"],.sheet td[data-cell="E14"],.sheet td[data-cell="F14"],.sheet td[data-cell="G14"],.sheet td[data-cell="H14"],.sheet td[data-cell="I14"],.sheet td[data-cell="J14"],.sheet td[data-cell="K14"],.sheet td[data-cell="E15"],.sheet td[data-cell="F15"],.sheet td[data-cell="G15"],.sheet td[data-cell="H15"],.sheet td[data-cell="I15"],.sheet td[data-cell="J15"],.sheet td[data-cell="K15"],.sheet td[data-cell="E16"],.sheet td[data-cell="F16"],.sheet td[data-cell="G16"],.sheet td[data-cell="H16"],.sheet td[data-cell="I16"],.sheet td[data-cell="J16"],.sheet td[data-cell="K16"],.sheet td[data-cell="E17"],.sheet td[data-cell="F17"],.sheet td[data-cell="G17"],.sheet td[data-cell="H17"],.sheet td[data-cell="I17"],.sheet td[data-cell="J17"],.sheet td[data-cell="K17"],.sheet td[data-cell="E18"],.sheet td[data-cell="F18"],.sheet td[data-cell="G18"],.sheet td[data-cell="H18"],.sheet td[data-cell="I18"],.sheet td[data-cell="J18"],.sheet td[data-cell="K18"],.sheet td[data-cell="E19"],.sheet td[data-cell="F19"],.sheet td[data-cell="G19"],.sheet td[data-cell="H19"],.sheet td[data-cell="I19"],.sheet td[data-cell="J19"],.sheet td[data-cell="K19"],.sheet td[data-cell="E20"],.sheet td[data-cell="F20"],.sheet td[data-cell="G20"],.sheet td[data-cell="H20"],.sheet td[data-cell="I20"],.sheet td[data-cell="J20"],.sheet td[data-cell="K20"]{{background:#dcecf7}}
+.sheet td[data-cell="A3"],.sheet td[data-cell="A4"],.sheet td[data-cell="A5"],.sheet td[data-cell="A6"],.sheet td[data-cell="A7"],.sheet td[data-cell="A8"],.sheet td[data-cell="A9"],.sheet td[data-cell="A10"],.sheet td[data-cell="A14"],.sheet td[data-cell="B14"],.sheet td[data-cell="A25"],.sheet td[data-cell="B25"],.sheet td[data-cell="K13"],.sheet td[data-cell="K17"],.sheet td[data-cell="K14"],.sheet td[data-cell="K18"],.sheet td[data-cell="J20"],.sheet td[data-cell="K20"]{{font-weight:700}}
 .sheet td[contenteditable="true"]{{cursor:text}}
 .sheet td[contenteditable="true"]:hover{{outline:1px solid #a3a3a3;outline-offset:-1px}}
 .sheet td[contenteditable="true"]:focus{{outline:2px solid #1a73e8;outline-offset:-2px;overflow:visible;text-overflow:clip;white-space:normal}}
@@ -337,15 +353,79 @@ table.sheet{{border-collapse:collapse;width:100%;font-size:13px;table-layout:fix
 <div class="wrap">
 <h1>Cost calculation for AI chatbot</h1>
 <div class="meta">Tenant: {html.escape(tenant_name)} · Period: {html.escape(month_label)} month-to-date · Generated: {generated_at}</div>
+<div class="sheet-shell">
+<div class="rate-banner">
+  <div><div class="icon">▣</div><div>Memory</div><div class="sub">$0.00000386 per GB / sec</div></div>
+  <div><div class="icon">⚙</div><div>CPU</div><div class="sub">$0.00000772 per vCPU / sec</div></div>
+  <div><div class="icon">▭</div><div>Volumes</div><div class="sub">$0.00000006 per GB / sec</div></div>
+  <div><div class="icon">♟</div><div>Egress</div><div class="sub">$0.05 per GB</div></div>
+</div>
 <table class="sheet">
 <tbody>
 {''.join(table_rows)}
 </tbody>
 </table>
+</div>
 <div class="note">
 Cells are editable in this browser view. Edits are local to the page and are not saved back to the database. Upload/ingestion size uses tenant-scoped <code>file_uploads.file_size</code> and <code>scraped_websites.file_size</code> for completed/deleted rows created or completed in this month. Those stored file_size counters are populated from <code>SUM(pg_column_size(document_chunks.content))</code> after chunk insertion.
 </div>
 </div>
+<script>
+const cell = id => document.querySelector(`[data-cell="${{id}}"]`);
+const value = id => cell(id)?.textContent || "";
+const num = id => {{
+  const raw = value(id).replace(/,/g, "").replace(/\\$/g, "").trim();
+  const match = raw.match(/-?\\d+(?:\\.\\d+)?/);
+  if (!match) return 0;
+  let n = Number(match[0]);
+  if (/\\bM\\b/i.test(raw)) n *= 1000000;
+  if (/\\bk\\b/i.test(raw)) n *= 1000;
+  if (/%/.test(raw)) n /= 100;
+  return Number.isFinite(n) ? n : 0;
+}};
+const money = n => Number(n || 0).toLocaleString(undefined, {{ minimumFractionDigits: 2, maximumFractionDigits: 4 }});
+const compact = n => Number(n || 0).toLocaleString(undefined, {{ maximumFractionDigits: 0 }});
+const set = (id, text) => {{ const el = cell(id); if (el && document.activeElement !== el) el.textContent = text; }};
+function recalc() {{
+  const monthSeconds = 2592000;
+  const ingestionSeconds = 36000;
+  const querySeconds = 180000;
+  const ingestionCpu = num("B9") || 8;
+  const ingestionVolume = num("B8") || 0;
+  const ingestionEgress = num("B3") || 0;
+  const ingestionTokenMillions = num("I14") / 1000000 || num("B5") / 1000000;
+  const queryCpu = num("B16") || 0;
+  const queryRam = num("B17") || 0;
+  const queryVolume = num("B18") || 0;
+  const queryEgress = num("B19") || 0;
+  const totalQueryTokens = num("E27") || num("B22");
+  const cacheHitRatio = num("H27");
+  const cacheHitTokens = totalQueryTokens * cacheHitRatio;
+  const cacheMissTokens = totalQueryTokens * cacheHitRatio;
+
+  set("E14", money(num("E12") * ingestionSeconds * ingestionCpu));
+  set("F14", money(num("F12") * ingestionCpu * ingestionSeconds));
+  set("G14", money(num("G12") * ingestionVolume * monthSeconds));
+  set("H14", money(num("H12") * ingestionEgress));
+  set("J14", money(ingestionTokenMillions * num("J12")));
+  set("K14", money(num("E14") + num("F14") + num("G14") + num("H14") + num("J14")));
+
+  set("E18", money(num("E12") * querySeconds * queryRam));
+  set("F18", money(num("F12") * querySeconds * queryCpu));
+  set("G18", money(num("G12") * queryVolume * monthSeconds));
+  set("H18", money(queryEgress * num("H12")));
+  set("E28", compact(cacheHitTokens));
+  set("F28", money(cacheHitTokens * 0.28 / 1000000));
+  set("E29", compact(cacheMissTokens));
+  set("F29", money(cacheMissTokens * 0.42 / 1000000));
+  set("F30", money(num("F28") + num("F29")));
+  set("J18", money(num("F30")));
+  set("K18", money(num("E18") + num("F18") + num("G18") + num("H18") + num("J18")));
+  set("K20", money(num("K18") + num("K14")));
+}}
+document.querySelectorAll("[contenteditable=true]").forEach(el => el.addEventListener("input", recalc));
+recalc();
+</script>
 </body>
 </html>"""
 
