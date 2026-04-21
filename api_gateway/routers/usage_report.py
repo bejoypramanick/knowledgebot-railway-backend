@@ -219,7 +219,7 @@ def _build_excel_style_usage_report(data, tenant_id=""):
         total_query_tokens / query_count if query_count else 1750
     )
     cache_hit_percent = cache_hit_ratio if prompt_tokens else 0.5
-    rows = {idx: [""] * 15 for idx in range(1, 73)}
+    rows = {idx: [""] * 16 for idx in range(1, 73)}
 
     def put(row_idx, col_idx, values):
         for offset, value in enumerate(values):
@@ -314,7 +314,51 @@ def _build_excel_style_usage_report(data, tenant_id=""):
     put(71, 1, ["1 credit", 10000, "conversation tokens"])
     put(72, 1, ["Total credits available in a month", ""])
 
-    letters = "ABCDEFGHIJKLMNO"
+    derivations = {
+        12: "D=$D$10*18000*C; F=$F$10*E*18000; H=$H$10*G*2592000; J=$J$10*I; L=$L$10*K; M=J43; N=M*N10; O=D+F+H+J+N+L",
+        13: "D=$D$10*18000*C; F=$F$10*E*18000; H=$H$10*G*2592000; J=$J$10*I; L=$L$10*K; O=D+F+H+J+N+L",
+        14: "D=$D$10*18000*C; F=$F$10*E*18000; H=$H$10*G*2592000; J=$J$10*I; L=$L$10*K; O=D+F+H+J+N+L",
+        15: "D=$D$10*18000*C; F=$F$10*E*18000; H=$H$10*G*2592000; J=$J$10*I; L=$L$10*K; O=D+F+H+J+N+L",
+        16: "O16=SUM(O11:O15)",
+        17: "B17=B62",
+        18: "D=$D$10*B62*C18; F=$F$10*E18*B62; H=$H$10*G18*2592000; J=$J$10*I18; L=$L$10*K18; N=G58; O=D+F+H+J+N+L",
+        20: "B20=B62+18000",
+        21: "D=$D$10*B20*C21; F=$F$10*E21*B20; H=$H$10*G21*2592000; J=$J$10*I21; L=$L$10*K21; O=D+F+H+J+N+L",
+        23: "B23=B62+18000",
+        24: "D=$D$10*B23*C24; F=$F$10*E24*B23; H=$H$10*G24*2592000; J=$J$10*I24; L=$L$10*K24; O=D+F+H+J+N+L",
+        27: "D=$D$10*18000*C27; F=$F$10*E27*18000; H=$H$10*G27*2592000; J=$J$10*I27; L=$L$10*K27; O=D+F+H+J+N+L",
+        30: "D=$D$10*435000*C30; H=$H$10*G30*2592000; O=D+F+H+J+N+L",
+        33: "D=$D$10*18000*C33; F=$F$10*E33*18000; H=$H$10*G33*2592000; J=$J$10*I33; L=$L$10*K33; O=D+F+H+J+N+L",
+        34: "O34=SUM(O16,O18,O21,O24,O27,O30,O33)",
+        43: "K=2.8*J43; L=J43*2.8; M=170*J43; N=J43*0.4; O=K43*6",
+        44: "B44=50*5",
+        45: "B45=B43+1500",
+        46: "B46=1500*4; N46=M46*M51",
+        47: "B47=(300+50)+2*(300+50)+3*(300+50)+4*(300+50); M47=O34; N47=M47*M51",
+        48: "B48=SUM(B44:B47); M48=M46-M47; N48=M48*M51",
+        49: "B49=B48/5; N49=M49",
+        50: "G50=F50*B58/1000000; M50=M49*M48; N50=M50*M51",
+        51: "G51=F51*B59/1000000; M51=USDINR rate",
+        52: "G52=F52*B67/1000000",
+        53: "B53=(B52+B51)*5; G53=SUM(G50:G52)",
+        56: "B56=B53+B48; F56=C62",
+        57: "B57=B55/B56; G57=F56*F55*B65/1000000",
+        58: "B58=B57*B48; G58=SUM(G57,G53)",
+        59: "B59=B57*B53",
+        60: "B60=B57*5",
+        61: "B61=5*60",
+        62: "B62=B61*B57; C62=B62/(60*60)",
+        63: "B63=B49+B52+B51",
+        65: "B65=B43",
+        66: "B66=B57*4",
+        67: "B67=B66*B65",
+        72: "B72=B55/B71",
+    }
+    put(10, 16, ["Derivation / mathematical formula"])
+    for row_idx, formula in derivations.items():
+        put(row_idx, 16, [formula])
+
+    letters = "ABCDEFGHIJKLMNOP"
     service_dropdown_cells = {
         "C12", "C13", "C14", "C15", "E12", "E13", "E14", "E15",
         "C18", "E18", "C21", "E21", "C24", "E24", "C27", "E27",
@@ -429,8 +473,10 @@ def _build_excel_style_usage_report(data, tenant_id=""):
         col = letters.index(cell_id[0]) + 1
         row_idx = int(cell_id[1:])
         styles = []
+        if col == 16:
+            styles.append("formula-col")
         if row_idx in range(10, 35):
-            palette = {1: "svc", 2: "svc", 3: "mem", 4: "mem", 5: "cpu", 6: "cpu", 7: "vol", 8: "vol", 9: "egress", 10: "egress", 11: "obj", 12: "obj", 13: "svc", 14: "svc", 15: "svc"}
+            palette = {1: "svc", 2: "svc", 3: "mem", 4: "mem", 5: "cpu", 6: "cpu", 7: "vol", 8: "vol", 9: "egress", 10: "egress", 11: "obj", 12: "obj", 13: "svc", 14: "svc", 15: "svc", 16: "formula-col"}
             if col in palette:
                 styles.append(palette[col])
         if cell_id in {"O16", "O18", "O21", "O24", "O27", "O30", "O33"}:
@@ -508,7 +554,7 @@ h1{{font-size:22px;margin:0 0 4px}}
 .tenant-picker label{{display:block;font-weight:700;margin-bottom:4px}}
 .tenant-picker select{{min-width:240px;border:1px solid #9ca3af;border-radius:6px;background:#fff;padding:7px 9px;font-size:13px}}
 .sheet-shell{{position:relative;overflow:auto;border:1px solid #bfc7d7}}
-table.sheet{{border-collapse:collapse;width:2100px;font-size:13px;table-layout:fixed}}
+table.sheet{{border-collapse:collapse;width:2500px;font-size:13px;table-layout:fixed}}
 .sheet td{{border:1px solid #bfc7d7;background:#ffffff;padding:3px 5px;vertical-align:middle;height:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .sheet td:nth-child(1){{width:256px}}
 .sheet td:nth-child(2){{width:161px}}
@@ -518,6 +564,7 @@ table.sheet{{border-collapse:collapse;width:2100px;font-size:13px;table-layout:f
 .sheet td:nth-child(10),.sheet td:nth-child(11),.sheet td:nth-child(12),.sheet td:nth-child(15){{width:130px}}
 .sheet td:nth-child(13){{width:190px}}
 .sheet td:nth-child(14){{width:226px}}
+.sheet td:nth-child(16){{width:390px}}
 .sheet .svc{{background:#a4c2f4}}
 .sheet .mem,.sheet .obj{{background:#d9ead3}}
 .sheet .cpu{{background:#d9d2e9}}
@@ -534,6 +581,7 @@ table.sheet{{border-collapse:collapse;width:2100px;font-size:13px;table-layout:f
 .sheet .gray{{background:#cccccc}}
 .sheet .pink2{{background:#f4cccc}}
 .sheet .green2{{background:#b6d7a8}}
+.sheet .formula-col{{background:#eef2ff;color:#1f2937;font-family:"SFMono-Regular",Consolas,monospace;font-size:12px;text-align:left;white-space:normal}}
 .sheet .warning{{background:#ff0000;color:#000000;font-weight:700}}
 .sheet .bold{{font-weight:700}}
 .sheet .num{{text-align:right;font-variant-numeric:tabular-nums}}
