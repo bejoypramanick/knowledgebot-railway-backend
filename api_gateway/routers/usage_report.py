@@ -520,7 +520,7 @@ def _build_excel_style_usage_report(data, tenant_id=""):
             styles.append("num")
         return " ".join(styles)
 
-    display_col_indexes = [16] + list(range(1, 16))
+    display_col_indexes = list(range(1, 16))
 
     def render_rows(start_row, end_row):
         rendered_rows = []
@@ -532,6 +532,15 @@ def _build_excel_style_usage_report(data, tenant_id=""):
                 classes = style_for(cell_id)
                 cell_value = "" if value is None else str(value)
                 tooltip = html.escape(tooltip_for(cell_id, cell_value))
+                if cell_id in formula_tooltips:
+                    formula_text = html.escape(formula_tooltips[cell_id])
+                    cells.append(
+                        f'<td data-derivation-for="{cell_id}" class="formula-col derivation-cell" '
+                        f'title="Derivation for {cell_id}" contenteditable="true" spellcheck="false">'
+                        f'<div class="derivation-formula"><span>Formula:</span> {formula_text}</div>'
+                        f'<div class="derivation-values"><span>Values:</span> calculated live from the adjacent value cell</div>'
+                        f'</td>'
+                    )
                 if cell_id in dropdowns:
                     select_options = []
                     selected_value = cell_value.replace(",", "")
@@ -628,7 +637,7 @@ h1{{font-size:22px;margin:0 0 4px}}
 .report-section{{border:1px solid #bfc7d7;background:#ffffff}}
 .section-title{{position:sticky;left:0;background:#111827;color:#ffffff;font-weight:700;padding:8px 10px;font-size:13px;letter-spacing:.01em}}
 .section-scroll{{overflow:auto;max-width:100%}}
-table.sheet{{border-collapse:collapse;width:2500px;font-size:13px;table-layout:fixed}}
+table.sheet{{border-collapse:collapse;width:3600px;font-size:13px;table-layout:fixed}}
 .sheet td{{border:1px solid #bfc7d7;background:#ffffff;padding:3px 5px;vertical-align:middle;height:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .sheet td:nth-child(1){{width:430px}}
 .sheet td:nth-child(2){{width:256px}}
@@ -656,7 +665,12 @@ table.sheet{{border-collapse:collapse;width:2500px;font-size:13px;table-layout:f
 .sheet .pink2{{background:#f4cccc}}
 .sheet .green2{{background:#b6d7a8}}
 .sheet .formula-col{{background:#eef2ff;color:#1f2937;font-family:"SFMono-Regular",Consolas,monospace;font-size:12px;text-align:left;white-space:normal}}
-.sheet td.formula-col{{position:sticky;left:0;z-index:1;border-right:2px solid #94a3b8}}
+.sheet td.formula-col{{border-right:2px solid #94a3b8}}
+.sheet .derivation-cell{{width:300px;min-width:300px}}
+.sheet .derivation-formula,.sheet .derivation-values{{display:block;line-height:1.35;white-space:normal}}
+.sheet .derivation-formula{{font-weight:700;color:#111827}}
+.sheet .derivation-values{{margin-top:3px;color:#374151}}
+.sheet .derivation-formula span,.sheet .derivation-values span{{font-weight:700;color:#475569}}
 .sheet .warning{{background:#ff0000;color:#000000;font-weight:700}}
 .sheet .bold{{font-weight:700}}
 .sheet .num{{text-align:right;font-variant-numeric:tabular-nums}}
@@ -716,6 +730,12 @@ const compact = n => safe(n).toLocaleString(undefined, {{ maximumFractionDigits:
 const set = (id, text) => {{ const el = cell(id); if (el && document.activeElement !== el) el.textContent = text; }};
 const fixed = (n, d = 4) => safe(n).toLocaleString(undefined, {{ minimumFractionDigits: d, maximumFractionDigits: d }});
 const usd = n => `$${{fixed(n)}}`;
+const escapeHtml = text => String(text ?? "").replace(/[&<>"']/g, ch => ({{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}}[ch]));
+const setDerivation = (id, formula, values) => {{
+  const el = document.querySelector(`[data-derivation-for="${{id}}"]`) || cell(id);
+  if (!el || document.activeElement === el) return;
+  el.innerHTML = `<div class="derivation-formula"><span>Formula:</span> ${{escapeHtml(formula)}}</div><div class="derivation-values"><span>Values:</span> ${{escapeHtml(values)}}</div>`;
+}};
 function updateDerivations() {{
   const serviceRow = (r, seconds) => {{
     const memGb = num(`C${{r}}`), memRate = num("D10"), mem = memRate * seconds * memGb;
@@ -725,43 +745,47 @@ function updateDerivations() {{
     const objGb = num(`K${{r}}`), objRate = num("L10"), obj = objRate * objGb;
     const llm = num(`N${{r}}`);
     const total = mem + cpu + vol + egress + obj + llm;
-    return `Total cost = memory cost + CPU cost + volume cost + egress cost + object storage cost + LLM/API cost. Memory = GB x memory rate x seconds = ${{memGb}} x ${{usd(memRate)}} x ${{compact(seconds)}} = ${{usd(mem)}}; CPU = vCPU x CPU rate x seconds = ${{cpuCount}} x ${{usd(cpuRate)}} x ${{compact(seconds)}} = ${{usd(cpu)}}; Volume = GB stored x volume rate x month seconds = ${{volGb}} x ${{usd(volRate)}} x 2,592,000 = ${{usd(vol)}}; Egress = GB egressed x egress rate = ${{egressGb}} x ${{usd(egressRate)}} = ${{usd(egress)}}; Object storage = GB stored x object rate = ${{objGb}} x ${{usd(objRate)}} = ${{usd(obj)}}; LLM/API = ${{usd(llm)}}. Total = ${{usd(mem)}} + ${{usd(cpu)}} + ${{usd(vol)}} + ${{usd(egress)}} + ${{usd(obj)}} + ${{usd(llm)}} = ${{usd(total)}}`;
+    return {{
+      formula: "Total cost = memory cost + CPU cost + volume cost + egress cost + object storage cost + LLM/API cost",
+      values: `Memory ${{memGb}} x ${{usd(memRate)}} x ${{compact(seconds)}} = ${{usd(mem)}}; CPU ${{cpuCount}} x ${{usd(cpuRate)}} x ${{compact(seconds)}} = ${{usd(cpu)}}; Volume ${{volGb}} x ${{usd(volRate)}} x 2,592,000 = ${{usd(vol)}}; Egress ${{egressGb}} x ${{usd(egressRate)}} = ${{usd(egress)}}; Object ${{objGb}} x ${{usd(objRate)}} = ${{usd(obj)}}; LLM/API = ${{usd(llm)}}; Total = ${{usd(mem)}} + ${{usd(cpu)}} + ${{usd(vol)}} + ${{usd(egress)}} + ${{usd(obj)}} + ${{usd(llm)}} = ${{usd(total)}}`
+    }};
   }};
-  for (const r of [12,13,14,15]) set(`P${{r}}`, serviceRow(r, 18000));
-  set("P16", `Knowledgebase total = sum of service totals = ${{usd(num("O12"))}} + ${{usd(num("O13"))}} + ${{usd(num("O14"))}} + ${{usd(num("O15"))}} = ${{usd(num("O16"))}}`);
-  set("P17", `Chatbot seconds = total conversation seconds = ${{compact(num("B62"))}} seconds`);
-  set("P18", serviceRow(18, num("B62")));
-  set("P20", `API Gateway seconds = conversation seconds + knowledgebase seconds = ${{compact(num("B62"))}} + 18,000 = ${{compact(num("B20"))}} seconds`);
-  set("P21", serviceRow(21, num("B20")));
-  set("P23", `Postgres seconds = conversation seconds + knowledgebase seconds = ${{compact(num("B62"))}} + 18,000 = ${{compact(num("B23"))}} seconds`);
-  set("P24", serviceRow(24, num("B23")));
-  set("P27", serviceRow(27, 18000));
-  set("P30", serviceRow(30, 435000));
-  set("P33", serviceRow(33, 18000));
-  set("P34", `Infrastructure total = knowledgebase + chatbot + API Gateway + Postgres + configuration + health monitor + Redis = ${{usd(num("O16"))}} + ${{usd(num("O18"))}} + ${{usd(num("O21"))}} + ${{usd(num("O24"))}} + ${{usd(num("O27"))}} + ${{usd(num("O30"))}} + ${{usd(num("O33"))}} = ${{usd(num("O34"))}}`);
-  set("P43", `Ingestion estimates: Raw text MB = token millions x 2.8 = ${{num("J43")}} x 2.8 = ${{fixed(num("K43"), 2)}}; Characters M = token millions x 2.8 = ${{num("J43")}} x 2.8 = ${{fixed(num("L43"), 2)}}; Approx files = token millions x 170 = ${{num("J43")}} x 170 = ${{fixed(num("M43"), 2)}}; Words M = token millions x 0.4 = ${{num("J43")}} x 0.4 = ${{fixed(num("N43"), 2)}}; pgvector MB = raw MB x 6 = ${{fixed(num("K43"), 2)}} x 6 = ${{fixed(num("O43"), 2)}}`);
-  set("P44", `User tokens per conversation = user tokens per message x user messages = 50 x 5 = ${{compact(num("B44"))}}`);
-  set("P45", `1st input = system prompt tokens + tool tokens = ${{compact(num("B43"))}} + 1,500 = ${{compact(num("B45"))}}`);
-  set("P46", `Follow-up tool tokens = tool tokens per follow-up x follow-up messages = 1,500 x 4 = ${{compact(num("B46"))}}. INR subscription = USD subscription x USD-INR = ${{usd(num("M46"))}} x ${{fixed(num("M51"), 2)}} = ${{fixed(num("N46"), 2)}}`);
-  set("P47", `History tokens = previous user/AI context per later turn = 350 + 700 + 1,050 + 1,400 = ${{compact(num("B47"))}}. Cost/customer = infrastructure total = ${{usd(num("M47"))}}. INR cost = USD cost x USD-INR = ${{usd(num("M47"))}} x ${{fixed(num("M51"), 2)}} = ${{fixed(num("N47"), 2)}}`);
-  set("P48", `Input tokens/conversation = user tokens + first input + follow-up tool tokens + history tokens = ${{compact(num("B44"))}} + ${{compact(num("B45"))}} + ${{compact(num("B46"))}} + ${{compact(num("B47"))}} = ${{compact(num("B48"))}}. Profit/customer = subscription - cost/customer = ${{usd(num("M46"))}} - ${{usd(num("M47"))}} = ${{usd(num("M48"))}}`);
-  set("P49", `Avg input tokens/turn = input tokens/conversation / turns = ${{compact(num("B48"))}} / 5 = ${{fixed(num("B49"), 2)}}. Customers = ${{compact(num("M49"))}}`);
-  set("P50", `Input token cost = input price per M x monthly input tokens / 1,000,000 = ${{usd(num("F50"))}} x ${{compact(num("B58"))}} / 1,000,000 = ${{usd(num("G50"))}}. Total profit = customers x profit/customer = ${{compact(num("M49"))}} x ${{usd(num("M48"))}} = ${{usd(num("M50"))}}`);
-  set("P51", `Output token cost = output price per M x monthly output tokens / 1,000,000 = ${{usd(num("F51"))}} x ${{compact(num("B59"))}} / 1,000,000 = ${{usd(num("G51"))}}. INR = USD x USD-INR = USD x ${{fixed(num("M51"), 2)}}`);
-  set("P52", `Context cache cost = cache price per M x cached prompt tokens / 1,000,000 = ${{usd(num("F52"))}} x ${{compact(num("B67"))}} / 1,000,000 = ${{usd(num("G52"))}}`);
-  set("P53", `Output tokens/conversation = (response tokens/turn + tool output tokens/turn) x turns = (${{compact(num("B52"))}} + ${{compact(num("B51"))}}) x 5 = ${{compact(num("B53"))}}. LLM token cost = input cost + output cost + cache cost = ${{usd(num("G50"))}} + ${{usd(num("G51"))}} + ${{usd(num("G52"))}} = ${{usd(num("G53"))}}`);
-  set("P56", `Avg tokens/conversation = output tokens/conversation + input tokens/conversation = ${{compact(num("B53"))}} + ${{compact(num("B48"))}} = ${{compact(num("B56"))}}. Conversation hours = total seconds / 3,600 = ${{compact(num("B62"))}} / 3,600 = ${{fixed(num("F56"), 2)}}`);
-  set("P57", `Conversations/month = monthly token budget / avg tokens/conversation = ${{compact(num("B55"))}} / ${{compact(num("B56"))}} = ${{fixed(num("B57"), 2)}}. Storage cost = hours x cache storage price x system prompt tokens / 1,000,000 = ${{fixed(num("F56"), 2)}} x ${{usd(num("F55"))}} x ${{compact(num("B65"))}} / 1,000,000 = ${{usd(num("G57"))}}`);
-  set("P58", `Monthly input tokens = conversations/month x input tokens/conversation = ${{fixed(num("B57"), 2)}} x ${{compact(num("B48"))}} = ${{compact(num("B58"))}}. Grand LLM = storage cost + token cost = ${{usd(num("G57"))}} + ${{usd(num("G53"))}} = ${{usd(num("G58"))}}`);
-  set("P59", `Monthly output tokens = conversations/month x output tokens/conversation = ${{fixed(num("B57"), 2)}} x ${{compact(num("B53"))}} = ${{compact(num("B59"))}}`);
-  set("P60", `AI output messages/month = conversations/month x outputs/conversation = ${{fixed(num("B57"), 2)}} x 5 = ${{compact(num("B60"))}}`);
-  set("P61", `Seconds/conversation = minutes x 60 = 5 x 60 = ${{compact(num("B61"))}}`);
-  set("P62", `Total seconds = seconds/conversation x conversations/month = ${{compact(num("B61"))}} x ${{fixed(num("B57"), 2)}} = ${{compact(num("B62"))}}. Total hours = seconds / 3,600 = ${{compact(num("B62"))}} / 3,600 = ${{fixed(num("C62"), 2)}}`);
-  set("P63", `Avg tokens/turn = avg input tokens/turn + response tokens/turn + tool output tokens/turn = ${{fixed(num("B49"), 2)}} + ${{compact(num("B52"))}} + ${{compact(num("B51"))}} = ${{fixed(num("B63"), 2)}}`);
-  set("P65", `Cached prompt tokens = system prompt tokens = ${{compact(num("B43"))}}`);
-  set("P66", `Cached turns = conversations/month x cached turns/conversation = ${{fixed(num("B57"), 2)}} x 4 = ${{compact(num("B66"))}}`);
-  set("P67", `Cached token usage = cached turns x system prompt tokens = ${{compact(num("B66"))}} x ${{compact(num("B65"))}} = ${{compact(num("B67"))}}`);
-  set("P72", `Total credits = monthly token budget / tokens per credit = ${{compact(num("B55"))}} / ${{compact(num("B71"))}} = ${{fixed(num("B72"), 2)}}`);
+  const setService = (id, r, seconds) => {{ const d = serviceRow(r, seconds); setDerivation(id, d.formula, d.values); }};
+  for (const r of [12,13,14,15]) setService(`O${{r}}`, r, 18000);
+  setDerivation("O16", "Knowledgebase total = sum of service totals", `${{usd(num("O12"))}} + ${{usd(num("O13"))}} + ${{usd(num("O14"))}} + ${{usd(num("O15"))}} = ${{usd(num("O16"))}}`);
+  setDerivation("B17", "Chatbot seconds = total conversation seconds", `${{compact(num("B62"))}} seconds`);
+  setService("O18", 18, num("B62"));
+  setDerivation("B20", "API Gateway seconds = conversation seconds + knowledgebase seconds", `${{compact(num("B62"))}} + 18,000 = ${{compact(num("B20"))}} seconds`);
+  setService("O21", 21, num("B20"));
+  setDerivation("B23", "Postgres seconds = conversation seconds + knowledgebase seconds", `${{compact(num("B62"))}} + 18,000 = ${{compact(num("B23"))}} seconds`);
+  setService("O24", 24, num("B23"));
+  setService("O27", 27, 18000);
+  setService("O30", 30, 435000);
+  setService("O33", 33, 18000);
+  setDerivation("O34", "Infrastructure total = knowledgebase + chatbot + API Gateway + Postgres + configuration + health monitor + Redis", `${{usd(num("O16"))}} + ${{usd(num("O18"))}} + ${{usd(num("O21"))}} + ${{usd(num("O24"))}} + ${{usd(num("O27"))}} + ${{usd(num("O30"))}} + ${{usd(num("O33"))}} = ${{usd(num("O34"))}}`);
+  setDerivation("K43", "Raw text MB = token M x 2.8; Characters M = token M x 2.8; Files = token M x 170; Words M = token M x 0.4; pgvector MB = raw MB x 6", `${{num("J43")}} x 2.8 = ${{fixed(num("K43"), 2)}}; ${{num("J43")}} x 2.8 = ${{fixed(num("L43"), 2)}}; ${{num("J43")}} x 170 = ${{fixed(num("M43"), 2)}}; ${{num("J43")}} x 0.4 = ${{fixed(num("N43"), 2)}}; ${{fixed(num("K43"), 2)}} x 6 = ${{fixed(num("O43"), 2)}}`);
+  setDerivation("B44", "User tokens per conversation = user tokens per message x user messages", `50 x 5 = ${{compact(num("B44"))}}`);
+  setDerivation("B45", "1st input = system prompt tokens + tool tokens", `${{compact(num("B43"))}} + 1,500 = ${{compact(num("B45"))}}`);
+  setDerivation("B46", "Follow-up tool tokens = tool tokens per follow-up x follow-up messages; INR subscription = USD subscription x USD-INR", `1,500 x 4 = ${{compact(num("B46"))}}; ${{usd(num("M46"))}} x ${{fixed(num("M51"), 2)}} = ${{fixed(num("N46"), 2)}}`);
+  setDerivation("B47", "History tokens = previous user/AI context per later turn; Cost/customer = infrastructure total; INR cost = USD cost x USD-INR", `350 + 700 + 1,050 + 1,400 = ${{compact(num("B47"))}}; ${{usd(num("M47"))}}; ${{usd(num("M47"))}} x ${{fixed(num("M51"), 2)}} = ${{fixed(num("N47"), 2)}}`);
+  setDerivation("B48", "Input tokens/conversation = user tokens + first input + follow-up tool tokens + history tokens; Profit/customer = subscription - cost/customer", `${{compact(num("B44"))}} + ${{compact(num("B45"))}} + ${{compact(num("B46"))}} + ${{compact(num("B47"))}} = ${{compact(num("B48"))}}; ${{usd(num("M46"))}} - ${{usd(num("M47"))}} = ${{usd(num("M48"))}}`);
+  setDerivation("B49", "Avg input tokens/turn = input tokens/conversation / turns; Customers = selected customer count", `${{compact(num("B48"))}} / 5 = ${{fixed(num("B49"), 2)}}; ${{compact(num("M49"))}}`);
+  setDerivation("G50", "Input token cost = input price per M x monthly input tokens / 1,000,000; Total profit = customers x profit/customer", `${{usd(num("F50"))}} x ${{compact(num("B58"))}} / 1,000,000 = ${{usd(num("G50"))}}; ${{compact(num("M49"))}} x ${{usd(num("M48"))}} = ${{usd(num("M50"))}}`);
+  setDerivation("G51", "Output token cost = output price per M x monthly output tokens / 1,000,000; INR = USD x USD-INR", `${{usd(num("F51"))}} x ${{compact(num("B59"))}} / 1,000,000 = ${{usd(num("G51"))}}; USD x ${{fixed(num("M51"), 2)}}`);
+  setDerivation("G52", "Context cache cost = cache price per M x cached prompt tokens / 1,000,000", `${{usd(num("F52"))}} x ${{compact(num("B67"))}} / 1,000,000 = ${{usd(num("G52"))}}`);
+  setDerivation("B53", "Output tokens/conversation = (response tokens/turn + tool output tokens/turn) x turns; LLM token cost = input cost + output cost + cache cost", `(${{compact(num("B52"))}} + ${{compact(num("B51"))}}) x 5 = ${{compact(num("B53"))}}; ${{usd(num("G50"))}} + ${{usd(num("G51"))}} + ${{usd(num("G52"))}} = ${{usd(num("G53"))}}`);
+  setDerivation("B56", "Avg tokens/conversation = output tokens/conversation + input tokens/conversation; Conversation hours = total seconds / 3,600", `${{compact(num("B53"))}} + ${{compact(num("B48"))}} = ${{compact(num("B56"))}}; ${{compact(num("B62"))}} / 3,600 = ${{fixed(num("F56"), 2)}}`);
+  setDerivation("B57", "Conversations/month = monthly token budget / avg tokens/conversation; Storage cost = hours x cache storage price x system prompt tokens / 1,000,000", `${{compact(num("B55"))}} / ${{compact(num("B56"))}} = ${{fixed(num("B57"), 2)}}; ${{fixed(num("F56"), 2)}} x ${{usd(num("F55"))}} x ${{compact(num("B65"))}} / 1,000,000 = ${{usd(num("G57"))}}`);
+  setDerivation("B58", "Monthly input tokens = conversations/month x input tokens/conversation; Grand LLM = storage cost + token cost", `${{fixed(num("B57"), 2)}} x ${{compact(num("B48"))}} = ${{compact(num("B58"))}}; ${{usd(num("G57"))}} + ${{usd(num("G53"))}} = ${{usd(num("G58"))}}`);
+  setDerivation("B59", "Monthly output tokens = conversations/month x output tokens/conversation", `${{fixed(num("B57"), 2)}} x ${{compact(num("B53"))}} = ${{compact(num("B59"))}}`);
+  setDerivation("B60", "AI output messages/month = conversations/month x outputs/conversation", `${{fixed(num("B57"), 2)}} x 5 = ${{compact(num("B60"))}}`);
+  setDerivation("B61", "Seconds/conversation = minutes x 60", `5 x 60 = ${{compact(num("B61"))}}`);
+  setDerivation("B62", "Total seconds = seconds/conversation x conversations/month; Total hours = seconds / 3,600", `${{compact(num("B61"))}} x ${{fixed(num("B57"), 2)}} = ${{compact(num("B62"))}}; ${{compact(num("B62"))}} / 3,600 = ${{fixed(num("C62"), 2)}}`);
+  setDerivation("B63", "Avg tokens/turn = avg input tokens/turn + response tokens/turn + tool output tokens/turn", `${{fixed(num("B49"), 2)}} + ${{compact(num("B52"))}} + ${{compact(num("B51"))}} = ${{fixed(num("B63"), 2)}}`);
+  setDerivation("B65", "Cached prompt tokens = system prompt tokens", `${{compact(num("B43"))}}`);
+  setDerivation("B66", "Cached turns = conversations/month x cached turns/conversation", `${{fixed(num("B57"), 2)}} x 4 = ${{compact(num("B66"))}}`);
+  setDerivation("B67", "Cached token usage = cached turns x system prompt tokens", `${{compact(num("B66"))}} x ${{compact(num("B65"))}} = ${{compact(num("B67"))}}`);
+  setDerivation("B72", "Total credits = monthly token budget / tokens per credit", `${{compact(num("B55"))}} / ${{compact(num("B71"))}} = ${{fixed(num("B72"), 2)}}`);
 }}
 function recalc() {{
   const monthlySeconds = 2592000;
