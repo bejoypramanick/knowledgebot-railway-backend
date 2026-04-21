@@ -228,9 +228,12 @@ def _build_excel_style_usage_report(data, tenant_id=""):
     query_volume_cost = VOLUME_GB_SEC_RATE * query_volume_gb * MONTH_SECONDS
     query_egress_cost = EGRESS_GB_RATE * egress_gb
     cache_hit_cost = cache_read_tokens * INPUT_CACHE_HIT_USD_PER_1M / 1_000_000
-    cache_miss_cost = cache_miss_tokens * INPUT_CACHE_MISS_USD_PER_1M / 1_000_000
-    output_cost = completion_tokens * OUTPUT_USD_PER_1M / 1_000_000
-    query_token_cost = cache_hit_cost + cache_miss_cost + output_cost
+    cache_miss_output_tokens = cache_miss_tokens + completion_tokens
+    cache_miss_output_cost = (
+        (cache_miss_tokens * INPUT_CACHE_MISS_USD_PER_1M)
+        + (completion_tokens * OUTPUT_USD_PER_1M)
+    ) / 1_000_000
+    query_token_cost = cache_hit_cost + cache_miss_output_cost
     query_total_cost = query_memory_cost + query_cpu_cost + query_volume_cost + query_egress_cost + query_token_cost
     total_monthly_cost = ingestion_total_cost + query_total_cost
 
@@ -297,8 +300,7 @@ def _build_excel_style_usage_report(data, tenant_id=""):
         row(["Compute (vCPU)", "Handles user queries, RAG orchestration, vector search API calls, document ingestion", "", "Scenario", "Total tokens", "Cost USD", "", "Cache hit % (input)", "Reasoner % of queries"], "hdr"),
         row(["Memory (RAM)", "Holds in-memory embeddings, retrieved context, and caching", "", "Low", f"{total_query_tokens:,}", "", "", f"{cache_hit_ratio:.2%}", f"{reasoner_percent:.0%}"]),
         row(["Volume Storage", "For app logs, caching embeddings, and configs, customer files persistently", "", "Cache hit", f"{cache_read_tokens:,}", _fmt_money(cache_hit_cost)]),
-        row(["Egress", "API responses + LLM API calls + DB calls + app responses (chat & KB)", "", "Cache miss", f"{cache_miss_tokens:,}", _fmt_money(cache_miss_cost)]),
-        row(["", "", "", "Output", f"{completion_tokens:,}", _fmt_money(output_cost)]),
+        row(["Egress", "API responses + LLM API calls + DB calls + app responses (chat & KB)", "", "Cache miss", f"{cache_miss_output_tokens:,}", _fmt_money(cache_miss_output_cost)]),
         row(["", "", "", "Total", "", _fmt_money(query_token_cost)], "total"),
     ]
 
