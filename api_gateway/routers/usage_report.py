@@ -6,7 +6,8 @@ Protected by session auth middleware.
 """
 
 import json
-from datetime import datetime, timedelta
+import html
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from shared.otel_logger import get_otel_logger
@@ -15,6 +16,18 @@ from sqlalchemy import text
 
 logger = get_otel_logger("usage_report", "api-gateway")
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+MEMORY_GB_SEC_RATE = 0.00000386
+CPU_VCPU_SEC_RATE = 0.00000772
+VOLUME_GB_SEC_RATE = 0.00000006
+EGRESS_GB_RATE = 0.05
+EMBEDDING_USD_PER_1M_TOKENS = 0.10
+INPUT_CACHE_HIT_USD_PER_1M = 0.028
+INPUT_CACHE_MISS_USD_PER_1M = 0.28
+OUTPUT_USD_PER_1M = 0.42
+MONTH_SECONDS = 30 * 24 * 60 * 60
+GB_BYTES = 1024 * 1024 * 1024
 
 
 def _row_to_dict(row):
@@ -71,6 +84,262 @@ def _is_stale_prepared_statement_error(exc: Exception) -> bool:
         or "cached statement plan is invalid" in error_text
         or "cached plan must not change result type" in error_text
     )
+
+
+def _parse_dt(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def _in_current_month(row, *fields):
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    for field in fields:
+        dt = _parse_dt(row.get(field))
+        if dt and dt >= month_start:
+            return True
+    return False
+
+
+def _meta(row):
+    value = row.get("request_metadata")
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _cache_tokens(row):
+    meta = _meta(row)
+    return int(meta.get("cache_read_tokens") or 0), int(meta.get("cache_write_tokens") or 0)
+
+
+def _fmt_num(value, decimals=2):
+    value = float(value or 0)
+    if abs(value) >= 1000:
+        return f"{value:,.{decimals}f}"
+    return f"{value:.{decimals}f}"
+
+
+def _fmt_money(value):
+    return f"${float(value or 0):,.4f}"
+
+
+def _fmt_tokens(value):
+    value = float(value or 0)
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.2f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}k"
+    return f"{int(value):,}"
+
+
+def _build_excel_style_usage_report(data, tenant_id=""):
+    tenants = data.get("tenants") or {}
+    tenant_name = "All Tenants"
+    if tenant_id and tenant_id in tenants:
+        tenant = tenants[tenant_id]
+        tenant_name = tenant.get("name") or tenant.get("slug") or tenant_id
+
+    files = [
+        row
+        for row in data.get("files", [])
+        if row.get("processing_status") in ("completed", "deleted")
+        and _in_current_month(row, "completed_at", "created_at")
+    ]
+    websites = [
+        row
+        for row in data.get("websites", [])
+        if row.get("processing_status") in ("completed", "deleted")
+        and _in_current_month(row, "completed_at", "created_at")
+    ]
+    messages = [row for row in data.get("chat_messages", []) if _in_current_month(row, "created_at")]
+    user_messages = [row for row in messages if row.get("role") == "user"]
+    assistant_messages = [row for row in messages if row.get("role") == "assistant"]
+    token_rows = [
+        row
+        for row in data.get("token_usage_log", [])
+        if _in_current_month(row, "created_at")
+    ]
+    embedding_rows = [row for row in token_rows if row.get("api_call_type") == "embedding"]
+    non_embedding_rows = [row for row in token_rows if row.get("api_call_type") != "embedding"]
+
+    uploaded_bytes = sum(int(row.get("file_size") or 0) for row in files + websites)
+    uploaded_gb = uploaded_bytes / GB_BYTES
+    ingestion_tokens = sum(int(row.get("total_tokens") or row.get("prompt_tokens") or 0) for row in embedding_rows)
+    ingestion_token_millions = ingestion_tokens / 1_000_000
+
+    query_count = len(user_messages) or len(non_embedding_rows)
+    prompt_tokens = sum(int(row.get("prompt_tokens") or 0) for row in non_embedding_rows)
+    completion_tokens = sum(int(row.get("completion_tokens") or 0) for row in non_embedding_rows)
+    total_query_tokens = sum(int(row.get("total_tokens") or 0) for row in non_embedding_rows) or (prompt_tokens + completion_tokens)
+    cache_read_tokens = 0
+    cache_write_tokens = 0
+    for row in non_embedding_rows:
+        cache_read, cache_write = _cache_tokens(row)
+        cache_read_tokens += cache_read
+        cache_write_tokens += cache_write
+    cache_hit_ratio = (cache_read_tokens / prompt_tokens) if prompt_tokens else 0
+    cache_miss_tokens = max(prompt_tokens - cache_read_tokens, 0)
+    avg_prompt_tokens = prompt_tokens / query_count if query_count else 0
+    avg_completion_tokens = completion_tokens / query_count if query_count else 0
+    response_bytes = sum(len((row.get("content") or "").encode("utf-8")) for row in assistant_messages)
+    egress_gb = response_bytes / GB_BYTES
+
+    ingestion_cpu = 8
+    ingestion_volume_gb = max(uploaded_gb, 0.01)
+    ingestion_seconds = 36000
+    query_cpu = 2
+    query_ram_gb = 2
+    query_volume_gb = 5
+    query_seconds = 180000
+    reasoner_percent = 0
+
+    ingestion_memory_cost = MEMORY_GB_SEC_RATE * ingestion_seconds * ingestion_cpu
+    ingestion_cpu_cost = CPU_VCPU_SEC_RATE * ingestion_cpu * ingestion_seconds
+    ingestion_volume_cost = VOLUME_GB_SEC_RATE * ingestion_volume_gb * MONTH_SECONDS
+    ingestion_egress_cost = EGRESS_GB_RATE * uploaded_gb
+    ingestion_embedding_cost = ingestion_token_millions * EMBEDDING_USD_PER_1M_TOKENS
+    ingestion_total_cost = (
+        ingestion_memory_cost
+        + ingestion_cpu_cost
+        + ingestion_volume_cost
+        + ingestion_egress_cost
+        + ingestion_embedding_cost
+    )
+
+    query_memory_cost = MEMORY_GB_SEC_RATE * query_seconds * query_ram_gb
+    query_cpu_cost = CPU_VCPU_SEC_RATE * query_seconds * query_cpu
+    query_volume_cost = VOLUME_GB_SEC_RATE * query_volume_gb * MONTH_SECONDS
+    query_egress_cost = EGRESS_GB_RATE * egress_gb
+    cache_hit_cost = cache_read_tokens * INPUT_CACHE_HIT_USD_PER_1M / 1_000_000
+    cache_miss_cost = cache_miss_tokens * INPUT_CACHE_MISS_USD_PER_1M / 1_000_000
+    output_cost = completion_tokens * OUTPUT_USD_PER_1M / 1_000_000
+    query_token_cost = cache_hit_cost + cache_miss_cost + output_cost
+    query_total_cost = query_memory_cost + query_cpu_cost + query_volume_cost + query_egress_cost + query_token_cost
+    total_monthly_cost = ingestion_total_cost + query_total_cost
+
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    month_label = datetime.now(timezone.utc).strftime("%B %Y")
+
+    def row(cells, cls=""):
+        cells = (cells + [""] * 11)[:11]
+        return "<tr{}>{}</tr>".format(
+            f' class="{cls}"' if cls else "",
+            "".join(f"<td>{html.escape(str(cell)) if cell is not None else ''}</td>" for cell in cells),
+        )
+
+    table_rows = [
+        row(["Ingestion assumption", "per month"]),
+        row([""]),
+        row(["Doc size or Egress", f"{uploaded_gb:.4f} GB"]),
+        row(["Avg tokens per GB", "~750k tokens (text)"]),
+        row(["Total tokens", _fmt_tokens(ingestion_tokens)]),
+        row(["Embedding model cost (DeepSeek)", "$0.10 / 1M tokens (approx., for embeddings)"]),
+        row(["volume price", "$0.0000006 per GB/sec"]),
+        row(["Volume", f"{ingestion_volume_gb:.4f} GB"]),
+        row(["CPU ", ingestion_cpu]),
+        row(["Ingestion usage", "10 hours (36000 secs) in a month "]),
+        row([""]),
+        row(["", "", "", "", MEMORY_GB_SEC_RATE, CPU_VCPU_SEC_RATE, VOLUME_GB_SEC_RATE, EGRESS_GB_RATE, "", EMBEDDING_USD_PER_1M_TOKENS, ""]),
+        row(["", "", "", "", "Memory", "CPU", "Volumes", "Egress", "Tokens", "Embedding API", "Cost USD"], "hdr"),
+        row([
+            "Query assumption",
+            "Per month",
+            "",
+            "Ingestion",
+            _fmt_money(ingestion_memory_cost),
+            _fmt_money(ingestion_cpu_cost),
+            _fmt_money(ingestion_volume_cost),
+            _fmt_money(ingestion_egress_cost),
+            _fmt_tokens(ingestion_tokens),
+            _fmt_money(ingestion_embedding_cost),
+            _fmt_money(ingestion_total_cost),
+        ]),
+        row(["Queries", f"appx {query_count:,}"]),
+        row(["CPU Load", f"{query_cpu} vCPU"]),
+        row(["RAM", f"{query_ram_gb} GB", "", "", "Memory", "CPU", "Volumes", "Egress", "Tokens", "Embedding API", "Cost USD"], "hdr"),
+        row([
+            "Volume",
+            f"{query_volume_gb} GB",
+            "",
+            "Query",
+            _fmt_money(query_memory_cost),
+            _fmt_money(query_cpu_cost),
+            _fmt_money(query_volume_cost),
+            _fmt_money(query_egress_cost),
+            _fmt_tokens(total_query_tokens),
+            _fmt_money(query_token_cost),
+            _fmt_money(query_total_cost),
+        ]),
+        row(["Egress", f"{egress_gb:.4f} GB"]),
+        row(["Usage hours", "50 hours (180000 secs)", "", "", "", "", "", "", "", "Total Cost /month", _fmt_money(total_monthly_cost)], "total"),
+        row(["Tokens per query (avg)", f"{avg_prompt_tokens:.0f} in/ {avg_completion_tokens:.0f} out"]),
+        row(["Total tokens", f"{total_query_tokens:,}"]),
+        row([""]),
+        row(["", "", "", "input cache-hit $0.028/M, input cache-miss $0.28/M, output $0.42/M"]),
+        row(["Component", "Description", "", "same rates shown for chat vs reasoner"]),
+        row(["Compute (vCPU)", "Handles user queries, RAG orchestration, vector search API calls, document ingestion", "", "Scenario", "Total tokens", "Cost USD", "", "Cache hit % (input)", "Reasoner % of queries"], "hdr"),
+        row(["Memory (RAM)", "Holds in-memory embeddings, retrieved context, and caching", "", "Low", f"{total_query_tokens:,}", "", "", f"{cache_hit_ratio:.2%}", f"{reasoner_percent:.0%}"]),
+        row(["Volume Storage", "For app logs, caching embeddings, and configs, customer files persistently", "", "Cache hit", f"{cache_read_tokens:,}", _fmt_money(cache_hit_cost)]),
+        row(["Egress", "API responses + LLM API calls + DB calls + app responses (chat & KB)", "", "Cache miss", f"{cache_miss_tokens:,}", _fmt_money(cache_miss_cost)]),
+        row(["", "", "", "Output", f"{completion_tokens:,}", _fmt_money(output_cost)]),
+        row(["", "", "", "Total", "", _fmt_money(query_token_cost)], "total"),
+    ]
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Usage Report</title>
+<style>
+body{{font-family:Arial,Helvetica,sans-serif;background:#f6f7fb;color:#111827;margin:0;padding:24px}}
+.wrap{{max-width:1220px;margin:0 auto;background:#fff;border:1px solid #d1d5db;border-radius:12px;padding:20px;box-shadow:0 8px 24px rgba(15,23,42,.08)}}
+h1{{font-size:22px;margin:0 0 4px}}
+.meta{{font-size:13px;color:#6b7280;margin-bottom:18px}}
+table.sheet{{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}}
+.sheet td{{border:1px solid #cfd6e4;padding:7px 8px;vertical-align:middle;height:28px;overflow:hidden;text-overflow:ellipsis}}
+.sheet tr:nth-child(1) td:first-child,.sheet tr:nth-child(15) td:first-child{{font-weight:700;background:#eef2ff}}
+.sheet .hdr td{{font-weight:700;background:#e5e7eb}}
+.sheet .total td{{font-weight:700;background:#fef3c7}}
+.sheet td:nth-child(1),.sheet td:nth-child(2){{width:190px}}
+.sheet td:nth-child(4){{font-weight:700;background:#f8fafc}}
+.sheet td:nth-child(n+5){{text-align:right}}
+.sheet td:nth-child(5),.sheet td:nth-child(6),.sheet td:nth-child(7),.sheet td:nth-child(8),.sheet td:nth-child(10),.sheet td:nth-child(11){{font-variant-numeric:tabular-nums}}
+.note{{margin-top:14px;font-size:12px;color:#6b7280;line-height:1.5}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Cost calculation for AI chatbot</h1>
+<div class="meta">Tenant: {html.escape(tenant_name)} · Period: {html.escape(month_label)} month-to-date · Generated: {generated_at}</div>
+<table class="sheet">
+<tbody>
+{''.join(table_rows)}
+</tbody>
+</table>
+<div class="note">
+Upload/ingestion size uses tenant-scoped <code>file_uploads.file_size</code> and <code>scraped_websites.file_size</code> for completed/deleted rows created or completed in this month. Those stored file_size counters are populated from <code>SUM(pg_column_size(document_chunks.content))</code> after chunk insertion.
+</div>
+</div>
+</body>
+</html>"""
 
 
 async def _fetch_all_data_once(tenant_id: str = None):
@@ -275,6 +544,9 @@ async def usage_report(request: Request, tenant: str = ""):
     data = await _fetch_all_data(tenant_id=tenant if tenant else None)
     print(
         f"[USAGE REPORT] returned {len(data.get('sessions', []))} sessions, {len(data.get('files', []))} files"
+    )
+    return HTMLResponse(
+        content=_build_excel_style_usage_report(data, tenant_id=tenant if tenant else "")
     )
     data_json = json.dumps(data, default=str)
 
