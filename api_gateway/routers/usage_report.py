@@ -209,71 +209,102 @@ def _build_excel_style_usage_report(data, tenant_id=""):
         total_query_tokens / query_count if query_count else 1750
     )
     cache_hit_percent = cache_hit_ratio if prompt_tokens else 0.5
-    rows = {idx: [""] * 13 for idx in range(1, 100)}
+    rows = {idx: [""] * 15 for idx in range(1, 73)}
 
     def put(row_idx, col_idx, values):
         for offset, value in enumerate(values):
             rows[row_idx][col_idx - 1 + offset] = value
 
-    put(1, 1, ["Ingestion assumption", "per month"])
-    put(3, 1, ["Doc size or Egress", f"{uploaded_display_gb:.4f} GB"])
-    put(4, 1, ["Avg tokens per GB", "~750k tokens (text)"])
-    put(5, 1, ["Total tokens", _fmt_tokens(ingestion_tokens)])
-    put(6, 1, ["Embedding model cost (Gemini File based search)", "$0.15 / 1M tokens (approx., for embeddings)", "Assuming 10 M tokens"])
     put(6, 11, ["DON'T MAKE ANY CHANGES IN VALUES IN ANY CELL BEFORE OUR CALL"])
-    put(7, 1, ["volume price", "$0.0000006 per GB/sec"])
-    put(8, 1, ["Volume", "5 GB"])
-    put(9, 1, ["CPU ", 8])
-    put(10, 1, ["Ingestion usage", "10 hours (36000 secs) in a month "])
-    put(11, 6, ["Max memory/service - 8 GB RAM", "Max CPU/service - 8 (per replica)", "Max 5/ service"])
-    put(11, 11, ["gemini-embedding-001"])
-    put(12, 4, ["Serices"])
-    put(12, 6, [0.00000386, 0.00000772, 0.00000006, 0.05, "", 0.15, 0.015])
-    put(13, 6, ["Memory", "CPU", "Volumes", "Egress", "LLM Tokens", "Embedding API", "Object storage", "Cost USD"])
-    put(14, 1, ["Query assumption", "Per month"])
-    put(14, 4, ["Knowledgebase prod"])
-    put(14, 6, ["", "", "", "", "10M", "", "", ""])
-    put(15, 1, ["Conversations", f"appx {query_count or 4500}"])
-    put(16, 1, ["CPU Load", "5 vCPU"])
-    put(17, 1, ["RAM", "5 GB"])
-    put(17, 6, ["Memory", "CPU", "Volumes", "Egress", "Tokens", "LLM API", "", "Cost USD"])
-    put(18, 1, ["Volume", "5 GB"])
-    put(18, 4, ["Query"])
-    put(18, 10, [_fmt_tokens(total_query_tokens)])
-    put(19, 1, ["Egress", f"{egress_gb:.4f} GB"])
-    put(20, 1, ["Usage hours", "50 hours (180000 secs)"])
-    put(20, 12, ["Total Cost /month", ""])
-    put(21, 1, ["Tokens per conversation (avg)", f"{avg_prompt_tokens:.0f} in/ {avg_completion_tokens:.0f} out"])
-    put(22, 1, ["Total tokens", f"assuming {_fmt_tokens(total_query_tokens)}"])
-    put(23, 4, ["Deepseek"])
-    put(24, 4, ["input cache-hit $0.028/M, input cache-miss $0.28/M, output $0.42/M"])
-    put(25, 1, ["Component", "Description"])
-    put(25, 4, ["same rates shown for chat vs reasoner"])
-    put(26, 1, ["Compute (vCPU)", "Handles user queries, RAG orchestration, vector search API calls, document ingestion"])
-    put(26, 4, ["Scenario", "Total tokens", "Cost USD", "", "Cache hit % (input)", "Reasoner % of queries"])
-    put(27, 1, ["Memory (RAM)", "Holds in-memory embeddings, retrieved context, and caching"])
-    put(27, 4, ["Low", total_conversation_tokens, "", "", f"{cache_hit_percent:.0%}", "20%"])
-    put(28, 1, ["Volume Storage", "For app logs, caching embeddings, and configs, customer files persistently"])
-    put(28, 4, ["Cache hit"])
-    put(29, 1, ["Egress", "API responses + LLM API calls + DB calls + app responses (chat & KB)"])
-    put(29, 4, ["Cache miss"])
-    put(30, 4, ["Total"])
-    put(33, 1, ["Total conversation tokens", total_conversation_tokens])
-    put(34, 1, ["Tokens/conversation", round(avg_tokens_per_conversation, 2)])
-    put(35, 1, ["Total conversations", ""])
-    put(36, 1, ["Total system prompt tokens (assuming system prompt is 1000 words)", ""])
-    put(85, 1, ["Credit calculation"])
-    put(86, 1, ["User token per message", 50, "Verify"])
-    put(87, 1, ["Response/chatbot tokens per message", 300, "Verify"])
-    put(88, 1, ["Total tokens per message", ""])
-    put(89, 1, ["Total messages per conversation", 5, "Verification possible after MVP launch"])
-    put(90, 1, ["Total tokens per coversation", "", "Verify"])
-    put(91, 1, ["Total tokens available in a month", total_conversation_tokens])
-    put(92, 1, ["Total conversations in a month", ""])
-    put(93, 1, ["Total credits per month ('total tokens' divided by 'total token per message')", ""])
-    put(99, 8, [""])
+    put(8, 1, ["Monthly cost calculation"])
+    put(9, 1, ["30 days ~ 2592000 secs"])
+    put(9, 4, ["Max memory/service - 8 GB RAM"])
+    put(9, 6, ["Max CPU/service - 8 (per replica)"])
+    put(9, 8, ["Max 5GB / service"])
+    put(10, 1, ["Services"])
+    put(10, 3, ["Base price ->", 0.00000386, "Base price ->", 0.00000772, "Base price ->", 0.00000006, "Base price ->", 0.05, "Base price ->", 0.015, "Base price ->", 0.02])
+    put(11, 3, ["GBs of memory used", "Memory cost", "No. of vCPUs used", "CPU cost", "GBs of data stored", "Volumes cost", "GBs of data egressed", "Egress cost", "GBs of data stored", "Object storage cost", "LLM Tokens (M)", "OpenAI text-embedding-3-small", "Cost USD"])
+    put(12, 1, ["Knowledgebase\nAssumptions:\n- 20 MB total raw embedding size limit\n- 5 hours (18000 secs) usage", "knowledge base", 2, "", 2, "", 0, "", 0.15, "", 0.05, "", "", "", ""])
+    put(13, 2, ["kruzberg service", 3, "", 3, "", 0, "", 0, "", 0.05, "", 0, 0, ""])
+    put(14, 2, ["celery file worker", 1, "", 2, "", 0, "", 0.6, "", 0, "", 0, 0, ""])
+    put(15, 2, ["celery web worker", 1, "", 2, "", 0, "", 0.4, "", 0, "", 0, 0, ""])
+    put(16, 14, ["Total->", ""])
+    put(17, 1, ["Chatbot\nAssumptions:\n- 294 conversations\n- 5 mins per conversation\n- Total conv time-  sec", ""])
+    put(17, 3, ["GBs of memory used", "Memory cost", "No. of vCPUs used", "CPU cost", "GBs of data stored", "Volumes cost", "GBs of data egressed", "Egress cost", "GBs of data stored", "Object storage cost", "LLM tokens", "Gemini 2.5 Flash-Lite LLM API cost", "Cost USD"])
+    put(18, 3, [3, "", 2, "", 0, "", 0.4, "", 0, "", "Check below in credit calculation table", "", ""])
+    put(20, 1, ["API Gateway\nAssumptions:\nTotal time - knowledgebase + chatbot", ""])
+    put(20, 3, ["GBs of memory used", "Memory cost", "No. of vCPUs used", "CPU cost", "GBs of data stored", "Volumes cost", "GBs of data egressed", "Egress cost", "GBs of data stored", "Object storage cost", "LLM tokens"])
+    put(21, 3, [1, "", 1, "", 0, "", 1, "", 0, "", 0, 0, ""])
+    put(23, 1, ["Postgres+PGvector\nAssumptions:\nTotal time - knowledgebase + chatbot", ""])
+    put(23, 3, ["GBs of memory used", "Memory cost", "No. of vCPUs used", "CPU cost", "GBs of data stored", "Volumes cost", "GBs of data egressed", "Egress cost", "GBs of data stored", "Object storage cost", "LLM tokens"])
+    put(24, 3, [1, "", 1, "", 1, "", 0.4, "", 0, "", 0, 0, ""])
+    put(26, 1, ["Configuration\nAssumptions:\n- knowledge base time: 5 hours (18000 secs) usage"])
+    put(26, 3, ["GBs of memory used", "Memory cost", "No. of vCPUs used", "CPU cost", "GBs of data stored", "Volumes cost", "GBs of data egressed", "Egress cost", "GBs of data stored", "Object storage cost", "LLM tokens"])
+    put(27, 3, [1, "", 1, "", 0, "", 0, "", 0, "", 0, 0, ""])
+    put(29, 1, ["healthmonitor (turned OFF)"])
+    put(29, 3, ["GBs of memory used", "Memory cost", "No. of vCPUs used", "CPU cost", "GBs of data stored", "Volumes cost", "GBs of data egressed", "Egress cost", "GBs of data stored", "Object storage cost", "LLM tokens"])
+    put(29, 15, ["health monitor is kept off"])
+    put(30, 3, [0, "", 0, "", 0, "", 0, "", 0, "", 0, 0, ""])
+    put(32, 1, ["Redis\nAssumptions:\n- 5 hours (18000 secs) usage"])
+    put(32, 3, ["GBs of memory used", "Memory cost", "No. of vCPUs used", "CPU cost", "GBs of data stored", "Volumes cost", "GBs of data egressed", "Egress cost", "GBs of data stored", "Object storage cost", "LLM tokens"])
+    put(33, 3, [1, "", 1, "", 0.5, "", 0, "", 0, "", 0, 0, ""])
+    put(34, 14, ["Total->", ""])
+    put(36, 1, ["1 conversation=", "5 turns (messages)"])
+    put(37, 1, ["1 turn (message)=", "1 user input + 1 AI output"])
+    put(38, 1, ["Average messages per conversation (assumption)", 5])
+    put(39, 1, ["avg conversation time ", "5 mins"])
+    put(41, 1, ["Credit calculation"])
+    put(41, 10, ["Ingestion token calculation"])
+    put(42, 1, ["INPUT TOKENS to Geminin per conversation"])
+    put(42, 10, ["Tokens (M)", "Raw text bytes embedded (MB)", "Characters (M)", "Appx files", "Words (M)", "pg vector DB (MB)"])
+    put(43, 1, ["System prompt tokens ", 2050])
+    put(43, 10, [round(ingestion_token_millions or 7, 2), "", "", "", "", ""])
+    put(44, 1, ["User token per conversation", "", "50 per user input"])
+    put(45, 1, ["1st: sys prompt + tool call", ""])
+    put(45, 13, ["USD", "INR"])
+    put(46, 1, ["2nd to 5th message: tool call", ""])
+    put(46, 12, ["Subcription price per customer", 25, ""])
+    put(47, 1, ["coversation history per conversation (2nd to 5th message)", "", "- 50 user input\n- 300 response"])
+    put(47, 12, ["Cost per customer", "", ""])
+    put(48, 1, ["total input tokens for conversation", ""])
+    put(48, 5, ["Gemini 2.5 flash-lite"])
+    put(48, 12, ["Profit per customer", "", ""])
+    put(49, 1, ["Average input tokens per turn", ""])
+    put(49, 6, ["Base price / M tokens", "Cost (USD)"])
+    put(49, 12, ["Total customers", 10, ""])
+    put(50, 1, ["OUTPUT TOKENs from Gemini per conversation"])
+    put(50, 5, ["Input tokens (user chat queries)", 0.1, ""])
+    put(50, 12, ["Total profit", "", ""])
+    put(51, 1, ["Tool call output token per input message", 60, "- 50 user input\n- tool definitions only for 1st call"])
+    put(51, 5, ["Output (Chatbot responses)", 0.4, ""])
+    put(51, 12, ["USD-INR convertion rate", 93.12345])
+    put(52, 1, ["Response/chatbot tokens per turn (assumption)", 300])
+    put(52, 5, ["Context cache tokens for system prompt", 0.01, ""])
+    put(53, 1, ["Total output token for conversation", ""])
+    put(53, 6, ["Total conv token cost", ""])
+    put(54, 1, ["Total messages per conversation", 5])
+    put(55, 1, ["Total conversation tokens in a month", total_conversation_tokens or 6000000])
+    put(55, 5, ["Context cache storage price per hour", 1])
+    put(56, 1, ["Average input+output tokens in 1 coversation", ""])
+    put(56, 5, ["Total conversation time in hours", ""])
+    put(57, 1, ["Total conversations in a month", ""])
+    put(57, 6, ["Total storage cost per month", ""])
+    put(58, 1, ["Input tokens used in a month", ""])
+    put(58, 6, ["Grand total", ""])
+    put(59, 1, ["Output tokens used in a month", ""])
+    put(60, 1, ["Total output AI messages in a month", ""])
+    put(61, 1, ["Appx time per conversation", "", "secs (5mins)"])
+    put(62, 1, ["Total time for all conversations in a month", "", "", "hours per month"])
+    put(63, 1, ["Average input+output tokens in 1 turn (message)", ""])
+    put(64, 1, ["System prompt tokens for caching usage"])
+    put(65, 1, ["System prompt tokens ", ""])
+    put(66, 1, ["Total turns (messages) where cached system prompt is referred", ""])
+    put(67, 1, ["Total cached system prompt token usage in a month", ""])
+    put(70, 1, ["Credit system"])
+    put(71, 1, ["1 credit", 10000, "conversation tokens"])
+    put(72, 1, ["Total credits available in a month", ""])
 
-    letters = "ABCDEFGHIJKLM"
+    letters = "ABCDEFGHIJKLMNO"
     bold_cells = {
         "A1", "B1", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10",
         "A14", "B14", "A25", "B25", "M13", "M17", "M14", "M18",
@@ -284,20 +315,34 @@ def _build_excel_style_usage_report(data, tenant_id=""):
         col = letters.index(cell_id[0]) + 1
         row_idx = int(cell_id[1:])
         styles = []
-        if row_idx in range(1, 11) and col in (1, 2):
-            styles.append("peach")
-        if row_idx in range(14, 23) and col in (1, 2):
-            styles.append("green")
-        if row_idx in range(12, 21) and col in range(4, 14):
-            styles.append("blue")
-        if row_idx in range(24, 31) and col in range(4, 10):
-            styles.append("pink")
-        if row_idx in range(25, 31) and col in (1, 2):
+        if row_idx in range(10, 35):
+            palette = {1: "svc", 2: "svc", 3: "mem", 4: "mem", 5: "cpu", 6: "cpu", 7: "vol", 8: "vol", 9: "egress", 10: "egress", 11: "obj", 12: "obj", 13: "svc", 14: "svc", 15: "svc"}
+            if col in palette:
+                styles.append(palette[col])
+        if cell_id in {"O16", "O18", "O21", "O24", "O27", "O30", "O33"}:
+            styles.append("yellow")
+        if cell_id in {"N34", "O34"}:
+            styles.append("cyan")
+        if row_idx in range(36, 40) and col in (1, 2):
+            styles.append("soft-yellow")
+        if row_idx == 41 and col == 1:
+            styles.append("orange")
+        if row_idx == 41 and col == 10:
+            styles.append("tan")
+        if row_idx in (42, 64, 65, 66, 67) and col in (1, 2):
+            styles.append("pale-blue")
+        if row_idx in range(43, 50) and col in (1, 2):
+            styles.append("blue2")
+        if row_idx in (42, 43) and col in range(10, 16):
             styles.append("gray")
-        if row_idx in range(33, 37) and col in (1, 2):
-            styles.append("gray-dark")
-        if row_idx in range(86, 94) and col in (1, 2):
+        if row_idx in range(46, 52) and col in range(12, 15):
+            styles.append("pink2")
+        if row_idx in range(54, 64) and col in (1, 2):
             styles.append("peach")
+        if row_idx in range(60, 63) and col in (1, 2):
+            styles.append("green2")
+        if row_idx in range(48, 59) and col in range(5, 8):
+            styles.append("soft-yellow")
         if cell_id == "K6":
             styles.append("warning")
         if cell_id in bold_cells:
@@ -307,7 +352,7 @@ def _build_excel_style_usage_report(data, tenant_id=""):
         return " ".join(styles)
 
     table_rows = []
-    for row_idx in range(1, 100):
+    for row_idx in range(6, 73):
         cells = []
         for col_idx, value in enumerate(rows[row_idx], start=1):
             cell_id = f"{letters[col_idx - 1]}{row_idx}"
@@ -330,26 +375,38 @@ body{{font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#000000;ma
 h1{{font-size:22px;margin:0 0 4px}}
 .meta{{font-size:13px;color:#6b7280;margin-bottom:18px}}
 .sheet-shell{{position:relative;overflow:auto;border:1px solid #bfc7d7}}
-.rate-banner{{position:absolute;left:48.5%;top:0;width:48%;height:86px;background:#11101c;color:#9b95a6;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font-weight:700;z-index:2}}
-.rate-banner .icon{{color:#9b4ade;font-size:16px;margin-bottom:4px}}
-.rate-banner .sub{{font-size:12px;color:#797486;margin-top:4px}}
-table.sheet{{border-collapse:collapse;width:1800px;font-size:15px;table-layout:fixed}}
+table.sheet{{border-collapse:collapse;width:2100px;font-size:13px;table-layout:fixed}}
 .sheet td{{border:1px solid #bfc7d7;background:#ffffff;padding:3px 5px;vertical-align:middle;height:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-.sheet td:nth-child(1){{width:245px}}
-.sheet td:nth-child(2){{width:500px}}
-.sheet td:nth-child(3){{width:80px}}
-.sheet td:nth-child(4){{width:130px}}
-.sheet td:nth-child(5),.sheet td:nth-child(6),.sheet td:nth-child(7),.sheet td:nth-child(8),.sheet td:nth-child(9),.sheet td:nth-child(10),.sheet td:nth-child(11),.sheet td:nth-child(12),.sheet td:nth-child(13){{width:132px}}
+.sheet td:nth-child(1){{width:256px}}
+.sheet td:nth-child(2){{width:161px}}
+.sheet td:nth-child(3),.sheet td:nth-child(5){{width:143px}}
+.sheet td:nth-child(4),.sheet td:nth-child(6),.sheet td:nth-child(8){{width:119px}}
+.sheet td:nth-child(7),.sheet td:nth-child(9){{width:132px}}
+.sheet td:nth-child(10),.sheet td:nth-child(11),.sheet td:nth-child(12),.sheet td:nth-child(15){{width:130px}}
+.sheet td:nth-child(13){{width:190px}}
+.sheet td:nth-child(14){{width:226px}}
+.sheet .svc{{background:#a4c2f4}}
+.sheet .mem,.sheet .obj{{background:#d9ead3}}
+.sheet .cpu{{background:#d9d2e9}}
+.sheet .vol{{background:#fff2cc}}
+.sheet .egress{{background:#f9cb9c}}
 .sheet .peach{{background:#fae2d5}}
-.sheet .green{{background:#d9f2d0}}
-.sheet .blue{{background:#dbe9f7}}
-.sheet .pink{{background:#f1ceee}}
-.sheet .gray{{background:#e8e8e8}}
-.sheet .gray-dark{{background:#d0d0d0}}
+.sheet .yellow{{background:#ffff00}}
+.sheet .cyan{{background:#00ffff}}
+.sheet .soft-yellow{{background:#ffe599}}
+.sheet .orange{{background:#ff9900}}
+.sheet .tan{{background:#f6b26b}}
+.sheet .pale-blue{{background:#cfe2f3}}
+.sheet .blue2{{background:#c9daf8}}
+.sheet .gray{{background:#cccccc}}
+.sheet .pink2{{background:#f4cccc}}
+.sheet .green2{{background:#b6d7a8}}
 .sheet .warning{{background:#ff0000;color:#000000;font-weight:700}}
 .sheet .bold{{font-weight:700}}
 .sheet .num{{text-align:right;font-variant-numeric:tabular-nums}}
-.sheet td[data-cell="D12"],.sheet td[data-cell="D14"],.sheet td[data-cell="D18"],.sheet td[data-cell="D23"],.sheet td[data-cell="D30"]{{font-weight:700}}
+.sheet td[data-cell="A8"],.sheet td[data-cell="A41"],.sheet td[data-cell="J41"],.sheet td[data-cell="A70"]{{font-weight:700}}
+.sheet td[data-cell^="A"]{{white-space:pre-line}}
+.sheet td[data-cell^="B"],.sheet td[data-cell^="C"]{{white-space:pre-line}}
 .sheet td[contenteditable="true"]{{cursor:text}}
 .sheet td[contenteditable="true"]:hover{{outline:1px solid #a3a3a3;outline-offset:-1px}}
 .sheet td[contenteditable="true"]:focus{{outline:2px solid #1a73e8;outline-offset:-2px;overflow:visible;text-overflow:clip;white-space:normal}}
@@ -361,12 +418,6 @@ table.sheet{{border-collapse:collapse;width:1800px;font-size:15px;table-layout:f
 <h1>Cost calculation for AI chatbot</h1>
 <div class="meta">Tenant: {html.escape(tenant_name)} · Period: {html.escape(month_label)} month-to-date · Generated: {generated_at}</div>
 <div class="sheet-shell">
-<div class="rate-banner">
-  <div><div class="icon">▣</div><div>Memory</div><div class="sub">$0.00000386 per GB / sec</div></div>
-  <div><div class="icon">⚙</div><div>CPU</div><div class="sub">$0.00000772 per vCPU / sec</div></div>
-  <div><div class="icon">▭</div><div>Volumes</div><div class="sub">$0.00000006 per GB / sec</div></div>
-  <div><div class="icon">♟</div><div>Egress</div><div class="sub">$0.05 per GB</div></div>
-</div>
 <table class="sheet">
 <tbody>
 {''.join(table_rows)}
@@ -390,39 +441,88 @@ const num = id => {{
   if (/%/.test(raw)) n /= 100;
   return Number.isFinite(n) ? n : 0;
 }};
-const money = n => Number(n || 0).toLocaleString(undefined, {{ minimumFractionDigits: 2, maximumFractionDigits: 4 }});
-const compact = n => Number(n || 0).toLocaleString(undefined, {{ maximumFractionDigits: 0 }});
+const safe = n => Number.isFinite(Number(n)) ? Number(n) : 0;
+const money = n => safe(n).toLocaleString(undefined, {{ minimumFractionDigits: 2, maximumFractionDigits: 4 }});
+const compact = n => safe(n).toLocaleString(undefined, {{ maximumFractionDigits: 0 }});
 const set = (id, text) => {{ const el = cell(id); if (el && document.activeElement !== el) el.textContent = text; }};
+const fixed = (n, d = 4) => safe(n).toLocaleString(undefined, {{ minimumFractionDigits: d, maximumFractionDigits: d }});
 function recalc() {{
-  set("F14", money(num("F12") * 36000 * 8));
-  set("G14", money(num("G12") * 5 * 36000));
-  set("H14", money(num("H12") * 0 * 2592000));
-  set("I14", money(num("I12") * 0.5));
-  set("K14", money(10 * num("K12")));
-  set("L14", money(num("L12") * 0.1));
-  set("M14", money(num("F14") + num("G14") + num("H14") + num("I14") + num("K14") + num("L14")));
+  const monthlySeconds = 2592000;
+  for (const r of [12,13,14,15]) {{
+    set(`D${{r}}`, fixed(num("D10") * 18000 * num(`C${{r}}`)));
+    set(`F${{r}}`, fixed(num("F10") * num(`E${{r}}`) * 18000));
+    set(`H${{r}}`, fixed(num("H10") * num(`G${{r}}`) * monthlySeconds));
+    set(`J${{r}}`, fixed(num("J10") * num(`I${{r}}`)));
+    set(`L${{r}}`, fixed(num("L10") * num(`K${{r}}`)));
+    if (r !== 12) set(`O${{r}}`, fixed(num(`D${{r}}`) + num(`F${{r}}`) + num(`H${{r}}`) + num(`J${{r}}`) + num(`N${{r}}`) + num(`L${{r}}`)));
+  }}
+  set("M12", fixed(num("J43"), 2));
+  set("N12", fixed(num("M12") * num("N10")));
+  set("O12", fixed(num("D12") + num("F12") + num("H12") + num("J12") + num("N12") + num("L12")));
+  set("O16", fixed(num("O11") + num("O12") + num("O13") + num("O14") + num("O15")));
 
-  set("F18", money(num("F12") * 180000 * 2));
-  set("G18", money(num("G12") * 180000 * 2));
-  set("H18", money(num("H12") * 5 * 2592000));
-  set("I18", money(20 * num("I12")));
-  set("K18", money(num("E38")));
-  set("M18", money(num("F18") + num("G18") + num("H18") + num("I18") + num("K18")));
-  set("M20", money(num("M18") + num("M14")));
+  set("B17", fixed(num("B62"), 2));
+  set("D18", fixed(num("D10") * num("B62") * num("C18")));
+  set("F18", fixed(num("F10") * num("E18") * num("B62")));
+  set("H18", fixed(num("H10") * num("G18") * monthlySeconds));
+  set("J18", fixed(num("J10") * num("I18")));
+  set("L18", fixed(num("L10") * num("K18")));
+  set("N18", fixed(num("G58")));
+  set("O18", fixed(num("D18") + num("F18") + num("H18") + num("J18") + num("N18") + num("L18")));
 
-  set("E28", compact(num("H27") * num("E27")));
-  set("F28", money(num("E28") * 0.28 / 1000000));
-  set("E29", compact(num("H27") * num("E27")));
-  set("F29", money(num("E29") * 0.42 / 1000000));
-  set("F30", money(num("F28") + num("F29")));
+  for (const [r, secondsCell] of [[21, "B20"], [24, "B23"], [27, null], [30, null], [33, null]]) {{
+    const seconds = r === 27 || r === 33 ? 18000 : r === 30 ? 435000 : num(secondsCell);
+    set(`D${{r}}`, fixed(num("D10") * seconds * num(`C${{r}}`)));
+    if (r !== 30) set(`F${{r}}`, fixed(num("F10") * num(`E${{r}}`) * seconds));
+    set(`H${{r}}`, fixed(num("H10") * num(`G${{r}}`) * monthlySeconds));
+    if (r !== 30) set(`J${{r}}`, fixed(num("J10") * num(`I${{r}}`)));
+    if (r !== 30) set(`L${{r}}`, fixed(num("L10") * num(`K${{r}}`)));
+    set(`O${{r}}`, fixed(num(`D${{r}}`) + num(`F${{r}}`) + num(`H${{r}}`) + num(`J${{r}}`) + num(`N${{r}}`) + num(`L${{r}}`)));
+  }}
+  set("B20", fixed(num("B62") + 18000, 2));
+  set("B23", fixed(num("B62") + 18000, 2));
+  set("O34", fixed(num("O16") + num("O18") + num("O21") + num("O24") + num("O27") + num("O30") + num("O33")));
 
-  set("B35", compact(num("B33") / num("B34")));
-  set("B36", compact(1000 * num("B35")));
-  set("B88", compact(num("B87") + num("B86")));
-  set("B90", compact(num("B89") * num("B88")));
-  set("B92", compact(num("B91") / num("B90")));
-  set("B93", compact(num("B91") / num("B88")));
-  set("H99", money(180 / 20));
+  set("K43", fixed(2.8 * num("J43"), 2));
+  set("L43", fixed(num("J43") * 2.8, 2));
+  set("M43", fixed(170 * num("J43"), 2));
+  set("N43", fixed(num("J43") * 0.4, 2));
+  set("O43", fixed(num("K43") * 6, 2));
+  set("B44", compact(50 * 5));
+  set("B45", compact(num("B43") + 1500));
+  set("B46", compact(1500 * 4));
+  set("B47", compact((300 + 50) + 2 * (300 + 50) + 3 * (300 + 50) + 4 * (300 + 50)));
+  set("B48", compact(num("B44") + num("B45") + num("B46") + num("B47")));
+  set("B49", fixed(num("B48") / 5, 2));
+  set("G50", fixed(num("F50") * num("B58") / 1000000));
+  set("G51", fixed(num("F51") * num("B59") / 1000000));
+  set("G52", fixed(num("F52") * num("B67") / 1000000));
+  set("B53", compact((num("B52") + num("B51")) * 5));
+  set("G53", fixed(num("G50") + num("G51") + num("G52")));
+  set("B56", compact(num("B53") + num("B48")));
+  set("B57", fixed(num("B55") / num("B56"), 2));
+  set("B58", compact(num("B57") * num("B48")));
+  set("B59", compact(num("B57") * num("B53")));
+  set("B60", compact(num("B57") * 5));
+  set("B61", compact(5 * 60));
+  set("B62", fixed(num("B61") * num("B57"), 2));
+  set("C62", fixed(num("B62") / (60 * 60), 2));
+  set("B63", fixed(num("B49") + num("B52") + num("B51"), 2));
+  set("B65", compact(num("B43")));
+  set("B66", compact(num("B57") * 4));
+  set("B67", compact(num("B66") * num("B65")));
+  set("F56", fixed(num("C62"), 2));
+  set("G57", fixed(num("F56") * num("F55") * num("B65") / 1000000));
+  set("G58", fixed(num("G57") + num("G53")));
+  set("M47", fixed(num("O34")));
+  set("N46", fixed(num("M46") * num("M51")));
+  set("N47", fixed(num("M47") * num("M51")));
+  set("M48", fixed(num("M46") - num("M47")));
+  set("N48", fixed(num("M48") * num("M51")));
+  set("N49", fixed(num("M49")));
+  set("M50", fixed(num("M49") * num("M48")));
+  set("N50", fixed(num("M50") * num("M51")));
+  set("B72", fixed(num("B55") / num("B71"), 2));
 }}
 document.querySelectorAll("[contenteditable=true]").forEach(el => el.addEventListener("input", recalc));
 recalc();
