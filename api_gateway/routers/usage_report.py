@@ -311,17 +311,17 @@ def _build_excel_style_usage_report(data, tenant_id=""):
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Usage Report</title>
 <style>
-body{{font-family:Arial,Helvetica,sans-serif;background:#f6f7fb;color:#111827;margin:0;padding:24px}}
-.wrap{{max-width:1220px;margin:0 auto;background:#fff;border:1px solid #d1d5db;border-radius:12px;padding:20px;box-shadow:0 8px 24px rgba(15,23,42,.08)}}
+body{{font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#000000;margin:0;padding:24px}}
+.wrap{{max-width:1220px;margin:0 auto;background:#ffffff;padding:0}}
 h1{{font-size:22px;margin:0 0 4px}}
 .meta{{font-size:13px;color:#6b7280;margin-bottom:18px}}
 table.sheet{{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}}
-.sheet td{{border:1px solid #cfd6e4;padding:7px 8px;vertical-align:middle;height:28px;overflow:hidden;text-overflow:ellipsis}}
-.sheet tr:nth-child(1) td:first-child,.sheet tr:nth-child(15) td:first-child{{font-weight:700;background:#eef2ff}}
-.sheet .hdr td{{font-weight:700;background:#e5e7eb}}
-.sheet .total td{{font-weight:700;background:#fef3c7}}
+.sheet td{{border:1px solid #d9d9d9;background:#ffffff;padding:7px 8px;vertical-align:middle;height:28px;overflow:hidden;text-overflow:ellipsis}}
+.sheet tr:nth-child(1) td:first-child,.sheet tr:nth-child(15) td:first-child{{font-weight:700}}
+.sheet .hdr td{{font-weight:700}}
+.sheet .total td{{font-weight:700}}
 .sheet td:nth-child(1),.sheet td:nth-child(2){{width:190px}}
-.sheet td:nth-child(4){{font-weight:700;background:#f8fafc}}
+.sheet td:nth-child(4){{font-weight:700}}
 .sheet td:nth-child(n+5){{text-align:right}}
 .sheet td:nth-child(5),.sheet td:nth-child(6),.sheet td:nth-child(7),.sheet td:nth-child(8),.sheet td:nth-child(10),.sheet td:nth-child(11){{font-variant-numeric:tabular-nums}}
 .note{{margin-top:14px;font-size:12px;color:#6b7280;line-height:1.5}}
