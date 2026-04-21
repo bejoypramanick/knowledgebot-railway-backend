@@ -244,7 +244,10 @@ def _build_excel_style_usage_report(data, tenant_id=""):
         cells = (cells + [""] * 11)[:11]
         return "<tr{}>{}</tr>".format(
             f' class="{cls}"' if cls else "",
-            "".join(f"<td>{html.escape(str(cell)) if cell is not None else ''}</td>" for cell in cells),
+            "".join(
+                f'<td contenteditable="true" spellcheck="false">{html.escape(str(cell)) if cell is not None else ""}</td>'
+                for cell in cells
+            ),
         )
 
     table_rows = [
@@ -317,6 +320,9 @@ h1{{font-size:22px;margin:0 0 4px}}
 .meta{{font-size:13px;color:#6b7280;margin-bottom:18px}}
 table.sheet{{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}}
 .sheet td{{border:1px solid #d9d9d9;background:#ffffff;padding:7px 8px;vertical-align:middle;height:28px;overflow:hidden;text-overflow:ellipsis}}
+.sheet td[contenteditable="true"]{{cursor:text}}
+.sheet td[contenteditable="true"]:hover{{outline:1px solid #a3a3a3;outline-offset:-1px}}
+.sheet td[contenteditable="true"]:focus{{outline:2px solid #1a73e8;outline-offset:-2px;overflow:visible;text-overflow:clip;white-space:normal}}
 .sheet tr:nth-child(1) td:first-child,.sheet tr:nth-child(15) td:first-child{{font-weight:700}}
 .sheet .hdr td{{font-weight:700}}
 .sheet .total td{{font-weight:700}}
@@ -337,7 +343,7 @@ table.sheet{{border-collapse:collapse;width:100%;font-size:13px;table-layout:fix
 </tbody>
 </table>
 <div class="note">
-Upload/ingestion size uses tenant-scoped <code>file_uploads.file_size</code> and <code>scraped_websites.file_size</code> for completed/deleted rows created or completed in this month. Those stored file_size counters are populated from <code>SUM(pg_column_size(document_chunks.content))</code> after chunk insertion.
+Cells are editable in this browser view. Edits are local to the page and are not saved back to the database. Upload/ingestion size uses tenant-scoped <code>file_uploads.file_size</code> and <code>scraped_websites.file_size</code> for completed/deleted rows created or completed in this month. Those stored file_size counters are populated from <code>SUM(pg_column_size(document_chunks.content))</code> after chunk insertion.
 </div>
 </div>
 </body>
