@@ -715,6 +715,54 @@ const money = n => safe(n).toLocaleString(undefined, {{ minimumFractionDigits: 2
 const compact = n => safe(n).toLocaleString(undefined, {{ maximumFractionDigits: 0 }});
 const set = (id, text) => {{ const el = cell(id); if (el && document.activeElement !== el) el.textContent = text; }};
 const fixed = (n, d = 4) => safe(n).toLocaleString(undefined, {{ minimumFractionDigits: d, maximumFractionDigits: d }});
+const usd = n => `$${{fixed(n)}}`;
+function updateDerivations() {{
+  const serviceRow = (r, seconds) => {{
+    const mem = num("D10") * seconds * num(`C${{r}}`);
+    const cpu = num("F10") * num(`E${{r}}`) * seconds;
+    const vol = num("H10") * num(`G${{r}}`) * 2592000;
+    const egress = num("J10") * num(`I${{r}}`);
+    const obj = num("L10") * num(`K${{r}}`);
+    const llm = num(`N${{r}}`);
+    const total = mem + cpu + vol + egress + obj + llm;
+    return `Mem ${{num(`C${{r}}`)}}GB x ${{usd(num("D10"))}} x ${{compact(seconds)}}s = ${{usd(mem)}}; CPU ${{num(`E${{r}}`)}} x ${{usd(num("F10"))}} x ${{compact(seconds)}}s = ${{usd(cpu)}}; Vol ${{num(`G${{r}}`)}}GB x ${{usd(num("H10"))}} x 2,592,000s = ${{usd(vol)}}; Egress ${{num(`I${{r}}`)}}GB x ${{usd(num("J10"))}} = ${{usd(egress)}}; Obj ${{num(`K${{r}}`)}}GB x ${{usd(num("L10"))}} = ${{usd(obj)}}; LLM/API = ${{usd(llm)}}; Total = ${{usd(total)}}`;
+  }};
+  for (const r of [12,13,14,15]) set(`P${{r}}`, serviceRow(r, 18000));
+  set("P16", `${{usd(num("O12"))}} + ${{usd(num("O13"))}} + ${{usd(num("O14"))}} + ${{usd(num("O15"))}} = ${{usd(num("O16"))}}`);
+  set("P17", `Chatbot seconds = total conversation seconds = ${{compact(num("B62"))}}s`);
+  set("P18", serviceRow(18, num("B62")));
+  set("P20", `${{compact(num("B62"))}} conversation seconds + 18,000s = ${{compact(num("B20"))}}s`);
+  set("P21", serviceRow(21, num("B20")));
+  set("P23", `${{compact(num("B62"))}} conversation seconds + 18,000s = ${{compact(num("B23"))}}s`);
+  set("P24", serviceRow(24, num("B23")));
+  set("P27", serviceRow(27, 18000));
+  set("P30", serviceRow(30, 435000));
+  set("P33", serviceRow(33, 18000));
+  set("P34", `${{usd(num("O16"))}} + ${{usd(num("O18"))}} + ${{usd(num("O21"))}} + ${{usd(num("O24"))}} + ${{usd(num("O27"))}} + ${{usd(num("O30"))}} + ${{usd(num("O33"))}} = ${{usd(num("O34"))}}`);
+  set("P43", `Raw MB ${{num("J43")}} x 2.8 = ${{fixed(num("K43"), 2)}}; Chars M ${{num("J43")}} x 2.8 = ${{fixed(num("L43"), 2)}}; Files ${{num("J43")}} x 170 = ${{fixed(num("M43"), 2)}}; Words M ${{num("J43")}} x 0.4 = ${{fixed(num("N43"), 2)}}; pgvector ${{fixed(num("K43"), 2)}} x 6 = ${{fixed(num("O43"), 2)}}MB`);
+  set("P44", `50 tokens/user message x 5 messages = ${{compact(num("B44"))}}`);
+  set("P45", `${{compact(num("B43"))}} system prompt + 1,500 tool tokens = ${{compact(num("B45"))}}`);
+  set("P46", `1,500 tool tokens x 4 follow-up messages = ${{compact(num("B46"))}}; INR ${{usd(num("M46"))}} x ${{fixed(num("M51"), 2)}} = ${{fixed(num("N46"), 2)}}`);
+  set("P47", `History = 350 + 700 + 1,050 + 1,400 = ${{compact(num("B47"))}}; Cost/customer = infra total ${{usd(num("M47"))}}; INR = ${{usd(num("M47"))}} x ${{fixed(num("M51"), 2)}} = ${{fixed(num("N47"), 2)}}`);
+  set("P48", `${{compact(num("B44"))}} + ${{compact(num("B45"))}} + ${{compact(num("B46"))}} + ${{compact(num("B47"))}} = ${{compact(num("B48"))}} input tokens; Profit = ${{usd(num("M46"))}} - ${{usd(num("M47"))}} = ${{usd(num("M48"))}}`);
+  set("P49", `${{compact(num("B48"))}} / 5 turns = ${{fixed(num("B49"), 2)}} input tokens/turn; customers = ${{compact(num("M49"))}}`);
+  set("P50", `$${{num("F50")}}/M x ${{compact(num("B58"))}} / 1,000,000 = ${{usd(num("G50"))}}; Profit ${{compact(num("M49"))}} x ${{usd(num("M48"))}} = ${{usd(num("M50"))}}`);
+  set("P51", `$${{num("F51")}}/M x ${{compact(num("B59"))}} / 1,000,000 = ${{usd(num("G51"))}}; INR = USD x ${{fixed(num("M51"), 2)}}`);
+  set("P52", `$${{num("F52")}}/M x ${{compact(num("B67"))}} / 1,000,000 = ${{usd(num("G52"))}}`);
+  set("P53", `(${{compact(num("B52"))}} response + ${{compact(num("B51"))}} tool output) x 5 = ${{compact(num("B53"))}}; LLM cost = ${{usd(num("G50"))}} + ${{usd(num("G51"))}} + ${{usd(num("G52"))}} = ${{usd(num("G53"))}}`);
+  set("P56", `${{compact(num("B53"))}} output + ${{compact(num("B48"))}} input = ${{compact(num("B56"))}} tokens/conversation; hours = ${{compact(num("B62"))}} / 3,600 = ${{fixed(num("F56"), 2)}}`);
+  set("P57", `${{compact(num("B55"))}} / ${{compact(num("B56"))}} = ${{fixed(num("B57"), 2)}} conversations; storage = ${{fixed(num("F56"), 2)}}h x $${{num("F55")}} x ${{compact(num("B65"))}} / 1,000,000 = ${{usd(num("G57"))}}`);
+  set("P58", `${{fixed(num("B57"), 2)}} conversations x ${{compact(num("B48"))}} input tokens = ${{compact(num("B58"))}}; Grand LLM = ${{usd(num("G57"))}} + ${{usd(num("G53"))}} = ${{usd(num("G58"))}}`);
+  set("P59", `${{fixed(num("B57"), 2)}} conversations x ${{compact(num("B53"))}} output tokens = ${{compact(num("B59"))}}`);
+  set("P60", `${{fixed(num("B57"), 2)}} conversations x 5 AI outputs = ${{compact(num("B60"))}}`);
+  set("P61", `5 minutes x 60 = ${{compact(num("B61"))}}s`);
+  set("P62", `${{compact(num("B61"))}}s x ${{fixed(num("B57"), 2)}} conversations = ${{compact(num("B62"))}}s; / 3,600 = ${{fixed(num("C62"), 2)}}h`);
+  set("P63", `${{fixed(num("B49"), 2)}} input + ${{compact(num("B52"))}} response + ${{compact(num("B51"))}} tool = ${{fixed(num("B63"), 2)}} tokens/turn`);
+  set("P65", `Cached prompt tokens = system prompt tokens = ${{compact(num("B65"))}}`);
+  set("P66", `${{fixed(num("B57"), 2)}} conversations x 4 cached turns = ${{compact(num("B66"))}}`);
+  set("P67", `${{compact(num("B66"))}} cached turns x ${{compact(num("B65"))}} prompt tokens = ${{compact(num("B67"))}}`);
+  set("P72", `${{compact(num("B55"))}} monthly tokens / ${{compact(num("B71"))}} tokens per credit = ${{fixed(num("B72"), 2)}} credits`);
+}}
 function recalc() {{
   const monthlySeconds = 2592000;
   for (const r of [12,13,14,15]) {{
@@ -792,6 +840,7 @@ function recalc() {{
   set("M50", fixed(num("M49") * num("M48")));
   set("N50", fixed(num("M50") * num("M51")));
   set("B72", fixed(num("B55") / num("B71"), 2));
+  updateDerivations();
 }}
 document.querySelectorAll("[contenteditable=true]").forEach(el => el.addEventListener("input", recalc));
 document.querySelectorAll("[data-dropdown-cell]").forEach(el => el.addEventListener("change", recalc));
