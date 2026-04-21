@@ -201,116 +201,122 @@ def _build_excel_style_usage_report(data, tenant_id=""):
     response_bytes = sum(len((row.get("content") or "").encode("utf-8")) for row in assistant_messages)
     egress_gb = response_bytes / GB_BYTES
 
-    ingestion_cpu = 8
-    ingestion_volume_gb = max(uploaded_gb, 0.01)
-    ingestion_seconds = 36000
-    query_cpu = 2
-    query_ram_gb = 2
-    query_volume_gb = 5
-    query_seconds = 180000
-    reasoner_percent = 0
-
-    ingestion_memory_cost = MEMORY_GB_SEC_RATE * ingestion_seconds * ingestion_cpu
-    ingestion_cpu_cost = CPU_VCPU_SEC_RATE * ingestion_cpu * ingestion_seconds
-    ingestion_volume_cost = VOLUME_GB_SEC_RATE * ingestion_volume_gb * MONTH_SECONDS
-    ingestion_egress_cost = EGRESS_GB_RATE * uploaded_gb
-    ingestion_embedding_cost = ingestion_token_millions * EMBEDDING_USD_PER_1M_TOKENS
-    ingestion_total_cost = (
-        ingestion_memory_cost
-        + ingestion_cpu_cost
-        + ingestion_volume_cost
-        + ingestion_egress_cost
-        + ingestion_embedding_cost
-    )
-
-    query_memory_cost = MEMORY_GB_SEC_RATE * query_seconds * query_ram_gb
-    query_cpu_cost = CPU_VCPU_SEC_RATE * query_seconds * query_cpu
-    query_volume_cost = VOLUME_GB_SEC_RATE * query_volume_gb * MONTH_SECONDS
-    query_egress_cost = EGRESS_GB_RATE * egress_gb
-    cache_hit_cost = cache_read_tokens * INPUT_CACHE_HIT_USD_PER_1M / 1_000_000
-    cache_miss_output_tokens = cache_miss_tokens + completion_tokens
-    cache_miss_output_cost = (
-        (cache_miss_tokens * INPUT_CACHE_MISS_USD_PER_1M)
-        + (completion_tokens * OUTPUT_USD_PER_1M)
-    ) / 1_000_000
-    query_token_cost = cache_hit_cost + cache_miss_output_cost
-    query_total_cost = query_memory_cost + query_cpu_cost + query_volume_cost + query_egress_cost + query_token_cost
-    total_monthly_cost = ingestion_total_cost + query_total_cost
-
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     month_label = datetime.now(timezone.utc).strftime("%B %Y")
+    uploaded_display_gb = max(uploaded_gb, 0)
+    total_conversation_tokens = total_query_tokens or 2_500_000
+    avg_tokens_per_conversation = (
+        total_query_tokens / query_count if query_count else 1750
+    )
+    cache_hit_percent = cache_hit_ratio if prompt_tokens else 0.5
+    rows = {idx: [""] * 13 for idx in range(1, 100)}
 
-    row_number = 0
+    def put(row_idx, col_idx, values):
+        for offset, value in enumerate(values):
+            rows[row_idx][col_idx - 1 + offset] = value
 
-    def row(cells, cls=""):
-        nonlocal row_number
-        row_number += 1
-        cells = (cells + [""] * 11)[:11]
-        letters = "ABCDEFGHIJK"
-        return "<tr{}>{}</tr>".format(
-            f' class="{cls}"' if cls else "",
-            "".join(
-                f'<td data-cell="{letters[idx]}{row_number}" contenteditable="true" spellcheck="false">{html.escape(str(cell)) if cell is not None else ""}</td>'
-                for idx, cell in enumerate(cells)
-            ),
-        )
+    put(1, 1, ["Ingestion assumption", "per month"])
+    put(3, 1, ["Doc size or Egress", f"{uploaded_display_gb:.4f} GB"])
+    put(4, 1, ["Avg tokens per GB", "~750k tokens (text)"])
+    put(5, 1, ["Total tokens", _fmt_tokens(ingestion_tokens)])
+    put(6, 1, ["Embedding model cost (Gemini File based search)", "$0.15 / 1M tokens (approx., for embeddings)", "Assuming 10 M tokens"])
+    put(6, 11, ["DON'T MAKE ANY CHANGES IN VALUES IN ANY CELL BEFORE OUR CALL"])
+    put(7, 1, ["volume price", "$0.0000006 per GB/sec"])
+    put(8, 1, ["Volume", "5 GB"])
+    put(9, 1, ["CPU ", 8])
+    put(10, 1, ["Ingestion usage", "10 hours (36000 secs) in a month "])
+    put(11, 6, ["Max memory/service - 8 GB RAM", "Max CPU/service - 8 (per replica)", "Max 5/ service"])
+    put(11, 11, ["gemini-embedding-001"])
+    put(12, 4, ["Serices"])
+    put(12, 6, [0.00000386, 0.00000772, 0.00000006, 0.05, "", 0.15, 0.015])
+    put(13, 6, ["Memory", "CPU", "Volumes", "Egress", "LLM Tokens", "Embedding API", "Object storage", "Cost USD"])
+    put(14, 1, ["Query assumption", "Per month"])
+    put(14, 4, ["Knowledgebase prod"])
+    put(14, 6, ["", "", "", "", "10M", "", "", ""])
+    put(15, 1, ["Conversations", f"appx {query_count or 4500}"])
+    put(16, 1, ["CPU Load", "5 vCPU"])
+    put(17, 1, ["RAM", "5 GB"])
+    put(17, 6, ["Memory", "CPU", "Volumes", "Egress", "Tokens", "LLM API", "", "Cost USD"])
+    put(18, 1, ["Volume", "5 GB"])
+    put(18, 4, ["Query"])
+    put(18, 10, [_fmt_tokens(total_query_tokens)])
+    put(19, 1, ["Egress", f"{egress_gb:.4f} GB"])
+    put(20, 1, ["Usage hours", "50 hours (180000 secs)"])
+    put(20, 12, ["Total Cost /month", ""])
+    put(21, 1, ["Tokens per conversation (avg)", f"{avg_prompt_tokens:.0f} in/ {avg_completion_tokens:.0f} out"])
+    put(22, 1, ["Total tokens", f"assuming {_fmt_tokens(total_query_tokens)}"])
+    put(23, 4, ["Deepseek"])
+    put(24, 4, ["input cache-hit $0.028/M, input cache-miss $0.28/M, output $0.42/M"])
+    put(25, 1, ["Component", "Description"])
+    put(25, 4, ["same rates shown for chat vs reasoner"])
+    put(26, 1, ["Compute (vCPU)", "Handles user queries, RAG orchestration, vector search API calls, document ingestion"])
+    put(26, 4, ["Scenario", "Total tokens", "Cost USD", "", "Cache hit % (input)", "Reasoner % of queries"])
+    put(27, 1, ["Memory (RAM)", "Holds in-memory embeddings, retrieved context, and caching"])
+    put(27, 4, ["Low", total_conversation_tokens, "", "", f"{cache_hit_percent:.0%}", "20%"])
+    put(28, 1, ["Volume Storage", "For app logs, caching embeddings, and configs, customer files persistently"])
+    put(28, 4, ["Cache hit"])
+    put(29, 1, ["Egress", "API responses + LLM API calls + DB calls + app responses (chat & KB)"])
+    put(29, 4, ["Cache miss"])
+    put(30, 4, ["Total"])
+    put(33, 1, ["Total conversation tokens", total_conversation_tokens])
+    put(34, 1, ["Tokens/conversation", round(avg_tokens_per_conversation, 2)])
+    put(35, 1, ["Total conversations", ""])
+    put(36, 1, ["Total system prompt tokens (assuming system prompt is 1000 words)", ""])
+    put(85, 1, ["Credit calculation"])
+    put(86, 1, ["User token per message", 50, "Verify"])
+    put(87, 1, ["Response/chatbot tokens per message", 300, "Verify"])
+    put(88, 1, ["Total tokens per message", ""])
+    put(89, 1, ["Total messages per conversation", 5, "Verification possible after MVP launch"])
+    put(90, 1, ["Total tokens per coversation", "", "Verify"])
+    put(91, 1, ["Total tokens available in a month", total_conversation_tokens])
+    put(92, 1, ["Total conversations in a month", ""])
+    put(93, 1, ["Total credits per month ('total tokens' divided by 'total token per message')", ""])
+    put(99, 8, [""])
 
-    table_rows = [
-        row(["Ingestion assumption", "per month"]),
-        row([""]),
-        row(["Doc size or Egress", f"{uploaded_gb:.4f} GB"]),
-        row(["Avg tokens per GB", "~750k tokens (text)"]),
-        row(["Total tokens", _fmt_tokens(ingestion_tokens)]),
-        row(["Embedding model cost (DeepSeek)", "$0.10 / 1M tokens (approx., for embeddings)"]),
-        row(["volume price", "$0.0000006 per GB/sec"]),
-        row(["Volume", f"{ingestion_volume_gb:.4f} GB"]),
-        row(["CPU ", ingestion_cpu]),
-        row(["Ingestion usage", "10 hours (36000 secs) in a month "]),
-        row([""]),
-        row(["", "", "", "", MEMORY_GB_SEC_RATE, CPU_VCPU_SEC_RATE, VOLUME_GB_SEC_RATE, EGRESS_GB_RATE, "", EMBEDDING_USD_PER_1M_TOKENS, ""]),
-        row(["", "", "", "", "Memory", "CPU", "Volumes", "Egress", "Tokens", "Embedding API", "Cost USD"], "hdr"),
-        row([
-            "Query assumption",
-            "Per month",
-            "",
-            "Ingestion",
-            _fmt_money(ingestion_memory_cost),
-            _fmt_money(ingestion_cpu_cost),
-            _fmt_money(ingestion_volume_cost),
-            _fmt_money(ingestion_egress_cost),
-            _fmt_tokens(ingestion_tokens),
-            _fmt_money(ingestion_embedding_cost),
-            _fmt_money(ingestion_total_cost),
-        ]),
-        row(["Queries", f"appx {query_count:,}"]),
-        row(["CPU Load", f"{query_cpu} vCPU"]),
-        row(["RAM", f"{query_ram_gb} GB", "", "", "Memory", "CPU", "Volumes", "Egress", "Tokens", "Embedding API", "Cost USD"], "hdr"),
-        row([
-            "Volume",
-            f"{query_volume_gb} GB",
-            "",
-            "Query",
-            _fmt_money(query_memory_cost),
-            _fmt_money(query_cpu_cost),
-            _fmt_money(query_volume_cost),
-            _fmt_money(query_egress_cost),
-            _fmt_tokens(total_query_tokens),
-            _fmt_money(query_token_cost),
-            _fmt_money(query_total_cost),
-        ]),
-        row(["Egress", f"{egress_gb:.4f} GB"]),
-        row(["Usage hours", "50 hours (180000 secs)", "", "", "", "", "", "", "", "Total Cost /month", _fmt_money(total_monthly_cost)], "total"),
-        row(["Tokens per query (avg)", f"{avg_prompt_tokens:.0f} in/ {avg_completion_tokens:.0f} out"]),
-        row(["Total tokens", f"{total_query_tokens:,}"]),
-        row([""]),
-        row(["", "", "", "input cache-hit $0.028/M, input cache-miss $0.28/M, output $0.42/M"]),
-        row(["Component", "Description", "", "same rates shown for chat vs reasoner"]),
-        row(["Compute (vCPU)", "Handles user queries, RAG orchestration, vector search API calls, document ingestion", "", "Scenario", "Total tokens", "Cost USD", "", "Cache hit % (input)", "Reasoner % of queries"], "hdr"),
-        row(["Memory (RAM)", "Holds in-memory embeddings, retrieved context, and caching", "", "Low", f"{total_query_tokens:,}", "", "", f"{cache_hit_ratio:.2%}", f"{reasoner_percent:.0%}"]),
-        row(["Volume Storage", "For app logs, caching embeddings, and configs, customer files persistently", "", "Cache hit", f"{cache_read_tokens:,}", _fmt_money(cache_hit_cost)]),
-        row(["Egress", "API responses + LLM API calls + DB calls + app responses (chat & KB)", "", "Cache miss", f"{cache_miss_output_tokens:,}", _fmt_money(cache_miss_output_cost)]),
-        row(["", "", "", "Total", "", _fmt_money(query_token_cost)], "total"),
-    ]
+    letters = "ABCDEFGHIJKLM"
+    bold_cells = {
+        "A1", "B1", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10",
+        "A14", "B14", "A25", "B25", "M13", "M17", "M14", "M18",
+        "L20", "M20", "A85", "A88", "B88", "A91", "B91", "A93", "B93",
+    }
+
+    def style_for(cell_id):
+        col = letters.index(cell_id[0]) + 1
+        row_idx = int(cell_id[1:])
+        styles = []
+        if row_idx in range(1, 11) and col in (1, 2):
+            styles.append("peach")
+        if row_idx in range(14, 23) and col in (1, 2):
+            styles.append("green")
+        if row_idx in range(12, 21) and col in range(4, 14):
+            styles.append("blue")
+        if row_idx in range(24, 31) and col in range(4, 10):
+            styles.append("pink")
+        if row_idx in range(25, 31) and col in (1, 2):
+            styles.append("gray")
+        if row_idx in range(33, 37) and col in (1, 2):
+            styles.append("gray-dark")
+        if row_idx in range(86, 94) and col in (1, 2):
+            styles.append("peach")
+        if cell_id == "K6":
+            styles.append("warning")
+        if cell_id in bold_cells:
+            styles.append("bold")
+        if col >= 6 or cell_id in {"B33", "B34", "B35", "B36", "B86", "B87", "B88", "B89", "B90", "B91", "B92", "B93"}:
+            styles.append("num")
+        return " ".join(styles)
+
+    table_rows = []
+    for row_idx in range(1, 100):
+        cells = []
+        for col_idx, value in enumerate(rows[row_idx], start=1):
+            cell_id = f"{letters[col_idx - 1]}{row_idx}"
+            classes = style_for(cell_id)
+            cell_value = "" if value is None else str(value)
+            cells.append(
+                f'<td data-cell="{cell_id}" class="{classes}" contenteditable="true" spellcheck="false">{html.escape(cell_value)}</td>'
+            )
+        table_rows.append(f"<tr>{''.join(cells)}</tr>")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -320,32 +326,33 @@ def _build_excel_style_usage_report(data, tenant_id=""):
 <title>Usage Report</title>
 <style>
 body{{font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#000000;margin:0;padding:24px}}
-.wrap{{max-width:1220px;margin:0 auto;background:#ffffff;padding:0}}
+.wrap{{max-width:1680px;margin:0 auto;background:#ffffff;padding:0}}
 h1{{font-size:22px;margin:0 0 4px}}
 .meta{{font-size:13px;color:#6b7280;margin-bottom:18px}}
-.sheet-shell{{position:relative}}
-.rate-banner{{position:absolute;left:49%;top:0;width:48%;height:86px;background:#11101c;color:#9b95a6;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font-weight:700;z-index:2}}
+.sheet-shell{{position:relative;overflow:auto;border:1px solid #bfc7d7}}
+.rate-banner{{position:absolute;left:48.5%;top:0;width:48%;height:86px;background:#11101c;color:#9b95a6;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;text-align:center;font-weight:700;z-index:2}}
 .rate-banner .icon{{color:#9b4ade;font-size:16px;margin-bottom:4px}}
 .rate-banner .sub{{font-size:12px;color:#797486;margin-top:4px}}
-table.sheet{{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}}
-.sheet td{{border:1px solid #bfc7d7;background:#ffffff;padding:7px 8px;vertical-align:middle;height:28px;overflow:hidden;text-overflow:ellipsis}}
-.sheet td[data-cell^="A"],.sheet td[data-cell^="B"],.sheet td[data-cell^="C"]{{font-size:15px}}
-.sheet td[data-cell="A1"],.sheet td[data-cell="B1"],.sheet td[data-cell="C1"],.sheet td[data-cell="A3"],.sheet td[data-cell="B3"],.sheet td[data-cell="C3"],.sheet td[data-cell="A4"],.sheet td[data-cell="B4"],.sheet td[data-cell="C4"],.sheet td[data-cell="A5"],.sheet td[data-cell="B5"],.sheet td[data-cell="C5"],.sheet td[data-cell="A6"],.sheet td[data-cell="B6"],.sheet td[data-cell="C6"],.sheet td[data-cell="A7"],.sheet td[data-cell="B7"],.sheet td[data-cell="C7"],.sheet td[data-cell="A8"],.sheet td[data-cell="B8"],.sheet td[data-cell="C8"],.sheet td[data-cell="A9"],.sheet td[data-cell="B9"],.sheet td[data-cell="C9"],.sheet td[data-cell="A10"],.sheet td[data-cell="B10"],.sheet td[data-cell="C10"]{{background:#f6dfd2}}
-.sheet td[data-cell="A15"],.sheet td[data-cell="B15"],.sheet td[data-cell="C15"],.sheet td[data-cell="A16"],.sheet td[data-cell="B16"],.sheet td[data-cell="C16"],.sheet td[data-cell="A17"],.sheet td[data-cell="B17"],.sheet td[data-cell="C17"],.sheet td[data-cell="A18"],.sheet td[data-cell="B18"],.sheet td[data-cell="C18"],.sheet td[data-cell="A19"],.sheet td[data-cell="B19"],.sheet td[data-cell="C19"],.sheet td[data-cell="A20"],.sheet td[data-cell="B20"],.sheet td[data-cell="C20"],.sheet td[data-cell="A21"],.sheet td[data-cell="B21"],.sheet td[data-cell="C21"],.sheet td[data-cell="A22"],.sheet td[data-cell="B22"],.sheet td[data-cell="C22"]{{background:#dff3d8}}
-.sheet td[data-cell="A25"],.sheet td[data-cell="B25"],.sheet td[data-cell="C25"],.sheet td[data-cell="A26"],.sheet td[data-cell="B26"],.sheet td[data-cell="C26"],.sheet td[data-cell="A27"],.sheet td[data-cell="B27"],.sheet td[data-cell="C27"],.sheet td[data-cell="A28"],.sheet td[data-cell="B28"],.sheet td[data-cell="C28"],.sheet td[data-cell="A29"],.sheet td[data-cell="B29"],.sheet td[data-cell="C29"],.sheet td[data-cell="A30"],.sheet td[data-cell="B30"],.sheet td[data-cell="C30"]{{background:#e6e6e6}}
-.sheet td[data-cell="D24"],.sheet td[data-cell="E24"],.sheet td[data-cell="F24"],.sheet td[data-cell="G24"],.sheet td[data-cell="H24"],.sheet td[data-cell="I24"],.sheet td[data-cell="D25"],.sheet td[data-cell="E25"],.sheet td[data-cell="F25"],.sheet td[data-cell="G25"],.sheet td[data-cell="H25"],.sheet td[data-cell="I25"],.sheet td[data-cell="D26"],.sheet td[data-cell="E26"],.sheet td[data-cell="F26"],.sheet td[data-cell="G26"],.sheet td[data-cell="H26"],.sheet td[data-cell="I26"],.sheet td[data-cell="D27"],.sheet td[data-cell="E27"],.sheet td[data-cell="F27"],.sheet td[data-cell="G27"],.sheet td[data-cell="H27"],.sheet td[data-cell="I27"],.sheet td[data-cell="D28"],.sheet td[data-cell="E28"],.sheet td[data-cell="F28"],.sheet td[data-cell="G28"],.sheet td[data-cell="H28"],.sheet td[data-cell="I28"],.sheet td[data-cell="D29"],.sheet td[data-cell="E29"],.sheet td[data-cell="F29"],.sheet td[data-cell="G29"],.sheet td[data-cell="H29"],.sheet td[data-cell="I29"],.sheet td[data-cell="D30"],.sheet td[data-cell="E30"],.sheet td[data-cell="F30"],.sheet td[data-cell="G30"],.sheet td[data-cell="H30"],.sheet td[data-cell="I30"]{{background:#f3c7ec}}
-.sheet td[data-cell="E12"],.sheet td[data-cell="F12"],.sheet td[data-cell="G12"],.sheet td[data-cell="H12"],.sheet td[data-cell="I12"],.sheet td[data-cell="J12"],.sheet td[data-cell="K12"],.sheet td[data-cell="E13"],.sheet td[data-cell="F13"],.sheet td[data-cell="G13"],.sheet td[data-cell="H13"],.sheet td[data-cell="I13"],.sheet td[data-cell="J13"],.sheet td[data-cell="K13"],.sheet td[data-cell="E14"],.sheet td[data-cell="F14"],.sheet td[data-cell="G14"],.sheet td[data-cell="H14"],.sheet td[data-cell="I14"],.sheet td[data-cell="J14"],.sheet td[data-cell="K14"],.sheet td[data-cell="E15"],.sheet td[data-cell="F15"],.sheet td[data-cell="G15"],.sheet td[data-cell="H15"],.sheet td[data-cell="I15"],.sheet td[data-cell="J15"],.sheet td[data-cell="K15"],.sheet td[data-cell="E16"],.sheet td[data-cell="F16"],.sheet td[data-cell="G16"],.sheet td[data-cell="H16"],.sheet td[data-cell="I16"],.sheet td[data-cell="J16"],.sheet td[data-cell="K16"],.sheet td[data-cell="E17"],.sheet td[data-cell="F17"],.sheet td[data-cell="G17"],.sheet td[data-cell="H17"],.sheet td[data-cell="I17"],.sheet td[data-cell="J17"],.sheet td[data-cell="K17"],.sheet td[data-cell="E18"],.sheet td[data-cell="F18"],.sheet td[data-cell="G18"],.sheet td[data-cell="H18"],.sheet td[data-cell="I18"],.sheet td[data-cell="J18"],.sheet td[data-cell="K18"],.sheet td[data-cell="E19"],.sheet td[data-cell="F19"],.sheet td[data-cell="G19"],.sheet td[data-cell="H19"],.sheet td[data-cell="I19"],.sheet td[data-cell="J19"],.sheet td[data-cell="K19"],.sheet td[data-cell="E20"],.sheet td[data-cell="F20"],.sheet td[data-cell="G20"],.sheet td[data-cell="H20"],.sheet td[data-cell="I20"],.sheet td[data-cell="J20"],.sheet td[data-cell="K20"]{{background:#dcecf7}}
-.sheet td[data-cell="A3"],.sheet td[data-cell="A4"],.sheet td[data-cell="A5"],.sheet td[data-cell="A6"],.sheet td[data-cell="A7"],.sheet td[data-cell="A8"],.sheet td[data-cell="A9"],.sheet td[data-cell="A10"],.sheet td[data-cell="A14"],.sheet td[data-cell="B14"],.sheet td[data-cell="A25"],.sheet td[data-cell="B25"],.sheet td[data-cell="K13"],.sheet td[data-cell="K17"],.sheet td[data-cell="K14"],.sheet td[data-cell="K18"],.sheet td[data-cell="J20"],.sheet td[data-cell="K20"]{{font-weight:700}}
+table.sheet{{border-collapse:collapse;width:1800px;font-size:15px;table-layout:fixed}}
+.sheet td{{border:1px solid #bfc7d7;background:#ffffff;padding:3px 5px;vertical-align:middle;height:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.sheet td:nth-child(1){{width:245px}}
+.sheet td:nth-child(2){{width:500px}}
+.sheet td:nth-child(3){{width:80px}}
+.sheet td:nth-child(4){{width:130px}}
+.sheet td:nth-child(5),.sheet td:nth-child(6),.sheet td:nth-child(7),.sheet td:nth-child(8),.sheet td:nth-child(9),.sheet td:nth-child(10),.sheet td:nth-child(11),.sheet td:nth-child(12),.sheet td:nth-child(13){{width:132px}}
+.sheet .peach{{background:#fae2d5}}
+.sheet .green{{background:#d9f2d0}}
+.sheet .blue{{background:#dbe9f7}}
+.sheet .pink{{background:#f1ceee}}
+.sheet .gray{{background:#e8e8e8}}
+.sheet .gray-dark{{background:#d0d0d0}}
+.sheet .warning{{background:#ff0000;color:#000000;font-weight:700}}
+.sheet .bold{{font-weight:700}}
+.sheet .num{{text-align:right;font-variant-numeric:tabular-nums}}
+.sheet td[data-cell="D12"],.sheet td[data-cell="D14"],.sheet td[data-cell="D18"],.sheet td[data-cell="D23"],.sheet td[data-cell="D30"]{{font-weight:700}}
 .sheet td[contenteditable="true"]{{cursor:text}}
 .sheet td[contenteditable="true"]:hover{{outline:1px solid #a3a3a3;outline-offset:-1px}}
 .sheet td[contenteditable="true"]:focus{{outline:2px solid #1a73e8;outline-offset:-2px;overflow:visible;text-overflow:clip;white-space:normal}}
-.sheet tr:nth-child(1) td:first-child,.sheet tr:nth-child(15) td:first-child{{font-weight:700}}
-.sheet .hdr td{{font-weight:700}}
-.sheet .total td{{font-weight:700}}
-.sheet td:nth-child(1),.sheet td:nth-child(2){{width:190px}}
-.sheet td:nth-child(4){{font-weight:700}}
-.sheet td:nth-child(n+5){{text-align:right}}
-.sheet td:nth-child(5),.sheet td:nth-child(6),.sheet td:nth-child(7),.sheet td:nth-child(8),.sheet td:nth-child(10),.sheet td:nth-child(11){{font-variant-numeric:tabular-nums}}
 .note{{margin-top:14px;font-size:12px;color:#6b7280;line-height:1.5}}
 </style>
 </head>
@@ -387,41 +394,35 @@ const money = n => Number(n || 0).toLocaleString(undefined, {{ minimumFractionDi
 const compact = n => Number(n || 0).toLocaleString(undefined, {{ maximumFractionDigits: 0 }});
 const set = (id, text) => {{ const el = cell(id); if (el && document.activeElement !== el) el.textContent = text; }};
 function recalc() {{
-  const monthSeconds = 2592000;
-  const ingestionSeconds = 36000;
-  const querySeconds = 180000;
-  const ingestionCpu = num("B9") || 8;
-  const ingestionVolume = num("B8") || 0;
-  const ingestionEgress = num("B3") || 0;
-  const ingestionTokenMillions = num("I14") / 1000000 || num("B5") / 1000000;
-  const queryCpu = num("B16") || 0;
-  const queryRam = num("B17") || 0;
-  const queryVolume = num("B18") || 0;
-  const queryEgress = num("B19") || 0;
-  const totalQueryTokens = num("E27") || num("B22");
-  const cacheHitRatio = num("H27");
-  const cacheHitTokens = totalQueryTokens * cacheHitRatio;
-  const cacheMissTokens = totalQueryTokens * cacheHitRatio;
+  set("F14", money(num("F12") * 36000 * 8));
+  set("G14", money(num("G12") * 5 * 36000));
+  set("H14", money(num("H12") * 0 * 2592000));
+  set("I14", money(num("I12") * 0.5));
+  set("K14", money(10 * num("K12")));
+  set("L14", money(num("L12") * 0.1));
+  set("M14", money(num("F14") + num("G14") + num("H14") + num("I14") + num("K14") + num("L14")));
 
-  set("E14", money(num("E12") * ingestionSeconds * ingestionCpu));
-  set("F14", money(num("F12") * ingestionCpu * ingestionSeconds));
-  set("G14", money(num("G12") * ingestionVolume * monthSeconds));
-  set("H14", money(num("H12") * ingestionEgress));
-  set("J14", money(ingestionTokenMillions * num("J12")));
-  set("K14", money(num("E14") + num("F14") + num("G14") + num("H14") + num("J14")));
+  set("F18", money(num("F12") * 180000 * 2));
+  set("G18", money(num("G12") * 180000 * 2));
+  set("H18", money(num("H12") * 5 * 2592000));
+  set("I18", money(20 * num("I12")));
+  set("K18", money(num("E38")));
+  set("M18", money(num("F18") + num("G18") + num("H18") + num("I18") + num("K18")));
+  set("M20", money(num("M18") + num("M14")));
 
-  set("E18", money(num("E12") * querySeconds * queryRam));
-  set("F18", money(num("F12") * querySeconds * queryCpu));
-  set("G18", money(num("G12") * queryVolume * monthSeconds));
-  set("H18", money(queryEgress * num("H12")));
-  set("E28", compact(cacheHitTokens));
-  set("F28", money(cacheHitTokens * 0.28 / 1000000));
-  set("E29", compact(cacheMissTokens));
-  set("F29", money(cacheMissTokens * 0.42 / 1000000));
+  set("E28", compact(num("H27") * num("E27")));
+  set("F28", money(num("E28") * 0.28 / 1000000));
+  set("E29", compact(num("H27") * num("E27")));
+  set("F29", money(num("E29") * 0.42 / 1000000));
   set("F30", money(num("F28") + num("F29")));
-  set("J18", money(num("F30")));
-  set("K18", money(num("E18") + num("F18") + num("G18") + num("H18") + num("J18")));
-  set("K20", money(num("K18") + num("K14")));
+
+  set("B35", compact(num("B33") / num("B34")));
+  set("B36", compact(1000 * num("B35")));
+  set("B88", compact(num("B87") + num("B86")));
+  set("B90", compact(num("B89") * num("B88")));
+  set("B92", compact(num("B91") / num("B90")));
+  set("B93", compact(num("B91") / num("B88")));
+  set("H99", money(180 / 20));
 }}
 document.querySelectorAll("[contenteditable=true]").forEach(el => el.addEventListener("input", recalc));
 recalc();
