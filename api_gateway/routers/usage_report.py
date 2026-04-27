@@ -276,7 +276,7 @@ async def usage_report(request: Request, tenant: str = ""):
     print(
         f"[USAGE REPORT] returned {len(data.get('sessions', []))} sessions, {len(data.get('files', []))} files"
     )
-    data_json = json.dumps(data, default=str)
+    data_json = json.dumps(data, default=str).replace("</", "<\\/")
 
     html = (
         """<!DOCTYPE html>
@@ -401,10 +401,10 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 <div class="toolbar">
   <button onclick="setDays(7)" id="btn-7">7 Days</button>
   <button onclick="setDays(14)" id="btn-14">14 Days</button>
-  <button onclick="setDays(30)" id="btn-30" class="active">30 Days</button>
+  <button onclick="setDays(30)" id="btn-30">30 Days</button>
   <button onclick="setDays(90)" id="btn-90">90 Days</button>
   <button onclick="setDays(180)" id="btn-180">180 Days</button>
-  <button onclick="setDays(365)" id="btn-365">All Time</button>
+  <button onclick="setDays(365)" id="btn-365" class="active">All Time</button>
   <span style="flex:1"></span>
   <select id="tenant-filter" onchange="setTenant(this.value)" style="padding:8px 12px;border-radius:8px;font-size:13px;border:1px solid var(--border);background:var(--card);max-width:200px">
     <option value="">All Tenants</option>
@@ -440,12 +440,14 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <div id="header-tooltip-popover" class="header-tooltip-popover" role="dialog" aria-live="polite" aria-hidden="true"></div>
 
+<script id="report-raw-data" type="application/json">"""
+        + data_json
+        + """</script>
+
 <script>
 // === DATA ===
-const RAW = """
-        + data_json
-        + """;
-let currentDays = 30;
+const RAW = JSON.parse(document.getElementById('report-raw-data').textContent || '{}');
+let currentDays = 365;
 console.log('RAW keys:', RAW ? Object.keys(RAW) : 'empty');
 
 // === HELPERS ===
