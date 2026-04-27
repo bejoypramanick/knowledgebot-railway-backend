@@ -326,7 +326,6 @@ class FileUploadDAO:
         file_size: int,
         sha256_hash: str,
         final_state: str,
-        storage_processed_at: Any,
         mime_type: str,
         storage_metadata: Optional[Dict[str, Any]] = None,
         char_count: int = 0,
@@ -341,10 +340,10 @@ class FileUploadDAO:
             query = """INSERT INTO file_uploads
                        (user_role_id, original_filename, display_name, file_extension,
                         mime_type, file_size, sha256_hash, storage_document_name, processing_status,
-                        gemini_processed_at, metadata, char_count, created_at)
+                        metadata, char_count, created_at)
                        VALUES (:user_role_id, :original_filename, :display_name, :file_extension,
                         :mime_type, :file_size, :sha256_hash, :storage_document_name, :processing_status,
-                        :storage_processed_at, :metadata, :char_count, NOW())
+                        :metadata, :char_count, NOW())
                        RETURNING id"""
 
             params = {
@@ -357,7 +356,6 @@ class FileUploadDAO:
                 "sha256_hash": sha256_hash,
                 "storage_document_name": storage_document_name,
                 "processing_status": final_state,
-                "storage_processed_at": storage_processed_at,
                 "metadata": json.dumps(storage_metadata) if storage_metadata else None,
                 "char_count": char_count,
             }

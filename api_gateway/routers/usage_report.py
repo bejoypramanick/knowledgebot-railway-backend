@@ -508,7 +508,17 @@ function callTypeLabel(callType) {
   return labels[callType] || callType || 'Unknown';
 }
 function isIngestionUsage(row) {
-  return (row.api_call_type || '') === 'embedding';
+  if ((row.api_call_type || '') !== 'embedding') return false;
+  const meta = parseMeta(row.request_metadata);
+  const workflow = meta.ingestion_workflow || '';
+  return workflow === 'file_upload_pipeline'
+    || workflow === 'web_scrape_pipeline'
+    || !!meta.file_id
+    || !!meta.website_id
+    || !!meta.source_url
+    || !!meta.webpage_name
+    || !!meta.filename
+    || !!meta.display_name;
 }
 function groupByCallType(rows) {
   const grouped = {};
@@ -825,7 +835,7 @@ function render() {
       }
     }
     
-    const sourceName = meta.webpage_name || meta.source_url || meta.url || '-';
+    const sourceName = meta.display_name || meta.filename || meta.webpage_name || meta.source_url || meta.url || '-';
     
     return `<tr>
       <td>${fmtDateTime(r.created_at)}</td>
@@ -1069,10 +1079,9 @@ function downloadExcel() {
     const meta = parseMeta(r.request_metadata);
     return {
       'Created': r.created_at||'',
-      'Session ID': r.session_id||'',
-      'Message ID': r.message_id||'',
       'Provider': r.provider||'',
       'Model': r.model||'',
+      'Source': meta.display_name || meta.filename || meta.webpage_name || meta.source_url || meta.url || '',
       'Call Type': callTypeLabel(r.api_call_type),
       'Embedding Tokens': r.total_tokens || r.prompt_tokens || 0,
       'Input Characters': payloadChars(meta),
@@ -1103,14 +1112,13 @@ function downloadExcel() {
     const meta = parseMeta(r.request_metadata);
     return {
       'Created': r.created_at||'',
+      'Source': meta.display_name || meta.filename || meta.webpage_name || meta.source_url || meta.url || '',
       'Call Type': callTypeLabel(r.api_call_type),
       'Provider': r.provider||'',
       'Model': r.model||'',
       'Embedding Tokens': r.total_tokens || r.prompt_tokens || 0,
       'Token Source': meta.token_source||'',
-      'Context': metadataSummary(meta),
-      'Session ID': r.session_id||'',
-      'Message ID': r.message_id||''
+      'Context': metadataSummary(meta)
     };
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topCallsData), 'Largest Token Calls');
