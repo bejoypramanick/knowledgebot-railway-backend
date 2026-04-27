@@ -85,6 +85,7 @@ class ComprehensiveDeletionService:
                 "s3_raw_files_deleted": 0,
                 "s3_processed_files_deleted": 0,
                 "db_records_affected": 0,
+                "token_usage_rows_deleted": 0,
             },
             "errors": [],
             "warnings": [],
@@ -238,6 +239,20 @@ class ComprehensiveDeletionService:
                         deletion_report["warnings"].append(
                             f"Vector cleanup failed: {vec_err}"
                         )
+
+                    # Step 5b: TOKEN USAGE CLEANUP
+                    logger.info(
+                        f"[DELETE_FILE] file_id={file_id} step=TOKEN_USAGE_CLEANUP start=true"
+                    )
+                    token_usage_deleted = await self._delete_token_usage_logs_for_file(
+                        conn, file_id
+                    )
+                    deletion_report["cleanup_summary"]["token_usage_rows_deleted"] = (
+                        token_usage_deleted
+                    )
+                    logger.info(
+                        f"[DELETE_FILE] file_id={file_id} step=TOKEN_USAGE_CLEANUP deleted={token_usage_deleted}"
+                    )
 
                     # Step 6: DATABASE TRANSACTION
                     logger.info(
@@ -479,6 +494,28 @@ class ComprehensiveDeletionService:
                             f"Vector cleanup failed: {vec_err}"
                         )
 
+                    # Step 4b: TOKEN USAGE CLEANUP
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=TOKEN_USAGE_CLEANUP start=true"
+                    )
+                    token_usage_deleted = (
+                        await self._delete_token_usage_logs_for_web_pages(
+                            conn,
+                            website_id,
+                            [
+                                str(page["original_url"]).strip()
+                                for page in all_pages
+                                if page["original_url"]
+                            ],
+                        )
+                    )
+                    deletion_report["cleanup_summary"]["token_usage_rows_deleted"] = (
+                        token_usage_deleted
+                    )
+                    logger.info(
+                        f"[DELETE_WEBSITE] website_id={website_id} step=TOKEN_USAGE_CLEANUP deleted={token_usage_deleted}"
+                    )
+
                     # Step 5: DATABASE TRANSACTION (atomic - parent + children together)
                     logger.info(
                         f"[DELETE_WEBSITE] website_id={website_id} step=DB_TRANSACTION start=true hard_delete={hard_delete} page_count={len(all_pages)}"
@@ -582,6 +619,72 @@ class ComprehensiveDeletionService:
     # ============================================================================
     # HELPER METHODS
     # ============================================================================
+
+    def _parse_status_count(self, status: Optional[str]) -> int:
+        if not status:
+            return 0
+        match = re.search(r"(\d+)$", status.strip())
+        return int(match.group(1)) if match else 0
+
+    async def _delete_token_usage_logs_for_file(self, conn: Any, file_id: str) -> int:
+        """Delete embedding usage rows that belong to a specific file upload."""
+        try:
+            status = await conn.execute(
+                """
+                DELETE FROM token_usage_log
+                WHERE api_call_type = 'embedding'
+                  AND request_metadata IS NOT NULL
+                  AND request_metadata->>'file_id' = $1
+                """,
+                str(file_id),
+            )
+            return self._parse_status_count(status)
+        except Exception as e:
+            logger.warning(
+                f"   ⚠️ [TOKEN_USAGE_CLEANUP] Could not clean file token usage for {file_id}: {e}"
+            )
+            return 0
+
+    async def _delete_token_usage_logs_for_web_pages(
+        self, conn: Any, website_id: str, page_urls: List[str]
+    ) -> int:
+        """Delete embedding usage rows that belong to a website scrape and its pages."""
+        cleaned_urls = [str(url).strip() for url in page_urls if str(url).strip()]
+
+        try:
+            if cleaned_urls:
+                status = await conn.execute(
+                    """
+                    DELETE FROM token_usage_log
+                    WHERE api_call_type = 'embedding'
+                      AND request_metadata IS NOT NULL
+                      AND (
+                            request_metadata->>'website_id' = $1
+                         OR (
+                                request_metadata->>'ingestion_workflow' = 'web_scrape_pipeline'
+                            AND request_metadata->>'source_url' = ANY($2::text[])
+                         )
+                      )
+                    """,
+                    str(website_id),
+                    cleaned_urls,
+                )
+            else:
+                status = await conn.execute(
+                    """
+                    DELETE FROM token_usage_log
+                    WHERE api_call_type = 'embedding'
+                      AND request_metadata IS NOT NULL
+                      AND request_metadata->>'website_id' = $1
+                    """,
+                    str(website_id),
+                )
+            return self._parse_status_count(status)
+        except Exception as e:
+            logger.warning(
+                f"   ⚠️ [TOKEN_USAGE_CLEANUP] Could not clean website token usage for {website_id}: {e}"
+            )
+            return 0
 
     async def _revoke_celery_task(self, task_id: Optional[str], task_type: str) -> bool:
         """Revoke and terminate Celery task"""

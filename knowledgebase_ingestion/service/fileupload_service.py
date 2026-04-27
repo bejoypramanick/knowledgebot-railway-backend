@@ -316,7 +316,10 @@ async def delete_all_knowledge() -> Dict[str, Any]:
     logger.info("=" * 80)
 
     deleted_websites = 0
+    deleted_files = 0
     s3_files_deleted = 0
+    chunks_cleared = 0
+    token_usage_rows_deleted = 0
     errors = []
 
     try:
@@ -384,11 +387,14 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
         try:
             async with get_db_session() as session:
-                await session.execute(
+                result = await session.execute(
                     text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP")
                 )
                 await session.commit()
-                logger.info(f"   ✅ All file records marked as deleted (status updated, records retained)")
+                deleted_files = result.rowcount or 0
+                logger.info(
+                    f"   ✅ All file records marked as deleted (status updated, records retained): {deleted_files}"
+                )
 
         except Exception as e:
             logger.error(f"❌ [DB_UPDATE_FILES_ERROR] Error marking files as deleted: {e}")
@@ -423,12 +429,50 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [DB_CLEAR_RAG_ERROR] Error clearing document_chunks: {e}")
             errors.append(f"Vector knowledge base clear failed: {e}")
 
+        # Step 6: CLEAR KB INGESTION TOKEN USAGE LOGS
+        logger.info(
+            "💾 [DB_CLEAR_TOKEN_USAGE] Deleting KB ingestion embedding usage rows..."
+        )
+        try:
+            async with get_db_session() as session:
+                result = await session.execute(
+                    text(
+                        """
+                        DELETE FROM token_usage_log
+                        WHERE api_call_type = 'embedding'
+                          AND request_metadata IS NOT NULL
+                          AND (
+                                COALESCE(request_metadata->>'ingestion_workflow', '') IN (
+                                    'file_upload_pipeline',
+                                    'web_scrape_pipeline'
+                                )
+                             OR request_metadata ? 'file_id'
+                             OR request_metadata ? 'website_id'
+                             OR request_metadata ? 'source_url'
+                             OR request_metadata ? 'filename'
+                             OR request_metadata ? 'display_name'
+                             OR request_metadata ? 'webpage_name'
+                          )
+                        """
+                    )
+                )
+                await session.commit()
+                token_usage_rows_deleted = result.rowcount or 0
+                logger.info(
+                    f"   ✅ [DB_CLEAR_TOKEN_USAGE_SUCCESS] Cleared {token_usage_rows_deleted} KB token usage rows"
+                )
+        except Exception as e:
+            logger.error(f"❌ [DB_CLEAR_TOKEN_USAGE_ERROR] Error clearing token_usage_log: {e}")
+            errors.append(f"KB token usage log clear failed: {e}")
+
         logger.info("=" * 80)
         logger.info("✅ [DELETE_ALL_COMPLETE] Knowledge base clear completed")
         logger.info("=" * 80)
         logger.info(f"📊 [RESULT] Files deleted from S3: {s3_files_deleted}")
+        logger.info(f"📊 [RESULT] Files marked as deleted: {deleted_files}")
         logger.info(f"📊 [RESULT] Websites marked as deleted: {deleted_websites}")
         logger.info(f"📊 [RESULT] Vector chunks cleared: {chunks_cleared}")
+        logger.info(f"📊 [RESULT] KB token usage rows deleted: {token_usage_rows_deleted}")
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
 
         if errors:
@@ -440,8 +484,10 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             "success": len(errors) == 0,
             "message": "Knowledge base cleared successfully" if len(errors) == 0 else "Knowledge base cleared with errors",
             "s3_files_deleted": s3_files_deleted,
+            "files_marked_deleted": deleted_files,
             "websites_marked_deleted": deleted_websites,
             "chunks_cleared": chunks_cleared,
+            "token_usage_rows_deleted": token_usage_rows_deleted,
             "redis_queues_cleared": 2,
             "errors": errors if errors else None
         }
@@ -455,6 +501,8 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             "success": False,
             "message": f"Error clearing knowledge base: {str(e)}",
             "s3_files_deleted": 0,
+            "files_marked_deleted": 0,
             "websites_marked_deleted": 0,
+            "token_usage_rows_deleted": 0,
             "errors": [str(e)]
         }

@@ -708,10 +708,10 @@ function render() {
   const totalMsgTokens = sessions.reduce((a,r) => a+(r.total_message_token_count||0), 0);
   const totalChars = sessions.reduce((a,r) => a+(r.total_character_count||0), 0);
   const totalFiles = files.length;
-  const fileTokens = files.reduce((a,r) => a+(r.filestore_token_count||0), 0);
+  const fileTokens = files.reduce((a,r) => a+(r.embedding_token_count||0), 0);
   const fileSizeBytes = files.reduce((a,r) => a+(r.file_size||0), 0);
   const totalWebsites = websites.length;
-  const webTokens = websites.reduce((a,r) => a+(r.filestore_token_count||0), 0);
+  const webTokens = websites.reduce((a,r) => a+(r.embedding_token_count||0), 0);
   const websiteSizeBytes = websites.reduce((a,r) => a+(r.file_size||0), 0);
 
   // Token log cache totals

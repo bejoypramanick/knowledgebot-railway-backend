@@ -351,6 +351,12 @@ class ProcessingService:
                     len((c.get("text") or c.get("content", "")).encode("utf-8"))
                     for c in chunks
                 )
+                chunk_texts = [c.get("text") or c.get("content", "") for c in chunks]
+                page_embedding_character_count = sum(len(text) for text in chunk_texts)
+                page_embedding_word_count = sum(
+                    len(text.split()) for text in chunk_texts
+                )
+                page_embedding_token_count = 0
                 tenant_id = get_current_tenant_id()
                 if tenant_id:
                     logger.info(
@@ -370,9 +376,7 @@ class ProcessingService:
                 logger.info(
                     f"🧬 Generating embeddings for {len(chunks)} chunks from {page_data.page_url}..."
                 )
-                from shared.embeddings import batch_generate_embeddings
-
-                chunk_texts = [c.get("text") or c.get("content", "") for c in chunks]
+                from shared.embeddings import batch_generate_embeddings_with_usage
 
                 # Pass source information for better usage observability
                 usage_metadata = {
@@ -384,8 +388,13 @@ class ProcessingService:
                 logger.info(
                     f"🧬 Sending embedding request with metadata: {usage_metadata}"
                 )
-                embeddings = await batch_generate_embeddings(
-                    chunk_texts, request_metadata=usage_metadata
+                embeddings, embedding_usage = (
+                    await batch_generate_embeddings_with_usage(
+                        chunk_texts, request_metadata=usage_metadata
+                    )
+                )
+                page_embedding_token_count = int(
+                    embedding_usage.get("total_tokens", 0) or 0
                 )
 
                 # Attach embeddings to chunks
@@ -409,10 +418,13 @@ class ProcessingService:
                 )
                 stored_chunk_size_bytes = chunk_metrics["size_bytes"]
                 stored_chunk_char_count = chunk_metrics["char_count"]
+                stored_chunk_word_count = chunk_metrics["word_count"]
                 logger.info(
                     f"   ✅ Uploaded {len(chunks)} chunks with OpenAI embeddings to vector DB"
                     f" | stored_size_bytes={stored_chunk_size_bytes}"
                     f" | stored_char_count={stored_chunk_char_count}"
+                    f" | stored_word_count={stored_chunk_word_count}"
+                    f" | page_embedding_tokens={page_embedding_token_count}"
                 )
             else:
                 logger.error(
@@ -478,6 +490,9 @@ class ProcessingService:
                 processed_content_s3_key,
                 chunk_size_bytes=stored_chunk_size_bytes,
                 chunk_char_count=stored_chunk_char_count,
+                embedding_character_count=page_embedding_character_count,
+                embedding_word_count=page_embedding_word_count,
+                embedding_token_count=page_embedding_token_count,
             )
 
             # Metrics
@@ -1807,6 +1822,9 @@ class ProcessingService:
         processed_content_s3_key: Optional[str] = None,
         chunk_size_bytes: Optional[int] = None,
         chunk_char_count: Optional[int] = None,
+        embedding_character_count: int = 0,
+        embedding_word_count: int = 0,
+        embedding_token_count: int = 0,
     ) -> Optional[str]:
         """Record single page in database"""
         storage_backend_state = (
@@ -1835,6 +1853,9 @@ class ProcessingService:
                 char_count=chunk_char_count
                 if chunk_char_count is not None
                 else metrics.get("char_count", 0),
+                embedding_character_count=embedding_character_count,
+                embedding_word_count=embedding_word_count,
+                embedding_token_count=embedding_token_count,
                 mark_completed=True,  # Single-page mode - mark as completed
                 processed_content_s3_key=processed_content_s3_key,
                 storage_backend_state=storage_backend_state,
@@ -1879,6 +1900,9 @@ class ProcessingService:
                 char_count=chunk_char_count
                 if chunk_char_count is not None
                 else metrics.get("char_count", 0),
+                embedding_character_count=embedding_character_count,
+                embedding_word_count=embedding_word_count,
+                embedding_token_count=embedding_token_count,
                 mark_completed=False,  # Multi-page mode - keep status as 'processing'
                 processed_content_s3_key=processed_content_s3_key,
                 storage_backend_state=storage_backend_state,
@@ -1917,6 +1941,9 @@ class ProcessingService:
             char_count=chunk_char_count
             if chunk_char_count is not None
             else metrics.get("char_count", 0),
+            embedding_character_count=embedding_character_count,
+            embedding_word_count=embedding_word_count,
+            embedding_token_count=embedding_token_count,
             title=page_data.title,
             description=page_data.description,
             crawl_session_id=page_data.session_id,
@@ -1975,6 +2002,9 @@ class ProcessingService:
         upload_result: UploadResult,
         file_size: int,
         char_count: int,
+        embedding_character_count: int,
+        embedding_word_count: int,
+        embedding_token_count: int,
         mark_completed: bool = True,
         processed_content_s3_key: Optional[str] = None,
         storage_backend_state: str = "completed",
@@ -1988,6 +2018,9 @@ class ProcessingService:
             storage_document_uri=upload_result.storage_document_uri,
             file_size=file_size,
             char_count=char_count,
+            embedding_character_count=embedding_character_count,
+            embedding_word_count=embedding_word_count,
+            embedding_token_count=embedding_token_count,
             title=page_data.title,
             description=page_data.description,
             crawl_session_id=page_data.session_id,

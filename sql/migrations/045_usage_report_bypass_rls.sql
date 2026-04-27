@@ -66,9 +66,9 @@ RETURNS TABLE (
     processing_status VARCHAR,
     file_size INTEGER,
     char_count INTEGER,
-    filestore_character_count INTEGER,
-    filestore_word_count INTEGER,
-    filestore_token_count INTEGER,
+    embedding_character_count INTEGER,
+    embedding_word_count INTEGER,
+    embedding_token_count INTEGER,
     processed_by_extractor VARCHAR,
     created_at TIMESTAMPTZ
 )
@@ -79,7 +79,7 @@ BEGIN
     RETURN QUERY
     SELECT fu.id, fu.tenant_id, fu.original_filename, fu.display_name, fu.file_extension, fu.processing_status,
            fu.file_size, fu.char_count,
-           fu.filestore_character_count, fu.filestore_word_count, fu.filestore_token_count,
+           fu.embedding_character_count, fu.embedding_word_count, fu.embedding_token_count,
            fu.processed_by_extractor, fu.created_at
     FROM public.file_uploads fu
     WHERE fu.created_at >= COALESCE(p_since, NOW() - INTERVAL '365 days')
@@ -98,9 +98,9 @@ RETURNS TABLE (
     pages_scraped INTEGER,
     file_size INTEGER,
     char_count INTEGER,
-    filestore_character_count INTEGER,
-    filestore_word_count INTEGER,
-    filestore_token_count INTEGER,
+    embedding_character_count INTEGER,
+    embedding_word_count INTEGER,
+    embedding_token_count INTEGER,
     parent_id UUID,
     depth INTEGER,
     created_at TIMESTAMPTZ
@@ -112,7 +112,7 @@ BEGIN
     RETURN QUERY
     SELECT sw.id, sw.tenant_id, sw.original_url, sw.title, sw.processing_status, sw.pages_scraped,
            sw.file_size, sw.char_count,
-           sw.filestore_character_count, sw.filestore_word_count, sw.filestore_token_count,
+           sw.embedding_character_count, sw.embedding_word_count, sw.embedding_token_count,
            sw.parent_id, sw.depth, sw.created_at
     FROM public.scraped_websites sw
     WHERE sw.created_at >= COALESCE(p_since, NOW() - INTERVAL '365 days')

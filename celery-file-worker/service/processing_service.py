@@ -62,6 +62,8 @@ async def process_file_content(
     original_file_extension = None
     original_mime_type = None
     char_count = 0
+    embedding_word_count = 0
+    embedding_token_count = 0
     total_pages = 0
     semantic_chunks = []
     processed_content_s3_key = None
@@ -394,12 +396,23 @@ async def process_file_content(
                     logger.info(
                         f"🧬 Generating embeddings for {len(chunks_to_insert)} file chunks..."
                     )
-                    from shared.embeddings import batch_generate_embeddings
+                    from shared.embeddings import batch_generate_embeddings_with_usage
 
                     chunk_texts = [
                         c.get("text") or c.get("content", "") for c in chunks_to_insert
                     ]
-                    embeddings = await batch_generate_embeddings(chunk_texts)
+                    usage_metadata = {
+                        "file_id": str(file_id),
+                        "filename": original_filename,
+                        "display_name": file_display_name,
+                        "ingestion_workflow": "file_upload_pipeline",
+                    }
+                    embeddings, embedding_usage = (
+                        await batch_generate_embeddings_with_usage(
+                            chunk_texts,
+                            request_metadata=usage_metadata,
+                        )
+                    )
 
                     # Attach embeddings to chunks
                     for i, embedding in enumerate(embeddings):
@@ -423,10 +436,16 @@ async def process_file_content(
                         )
                         file_size = chunk_metrics["size_bytes"]
                         char_count = chunk_metrics["char_count"]
+                        embedding_word_count = chunk_metrics["word_count"]
+                        embedding_token_count = int(
+                            embedding_usage.get("total_tokens", 0) or 0
+                        )
                         logger.info(
                             f"✅ Uploaded {len(chunks_to_insert)} chunks with OpenAI embeddings to vector DB"
                             f" | stored_size_bytes={file_size}"
                             f" | stored_char_count={char_count}"
+                            f" | stored_word_count={embedding_word_count}"
+                            f" | embedding_tokens={embedding_token_count}"
                         )
                 else:
                     raise Exception(f"No chunks produced for file {file_id}")
@@ -490,6 +509,9 @@ async def process_file_content(
                     storage_backend_state=final_state,
                     file_size=file_size,
                     char_count=char_count,
+                    embedding_character_count=char_count,
+                    embedding_word_count=embedding_word_count,
+                    embedding_token_count=embedding_token_count,
                     sha256_hash=sha256_hash,
                     metadata={
                         "type": "vector_db",

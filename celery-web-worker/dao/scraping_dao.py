@@ -322,6 +322,9 @@ class ScrapingDAO:
         user_role_id: str = None,
         file_size: int = 0,
         char_count: int = 0,
+        embedding_character_count: int = 0,
+        embedding_word_count: int = 0,
+        embedding_token_count: int = 0,
         title: str = None,
         description: str = None,
         crawl_session_id: str = None,
@@ -368,13 +371,15 @@ class ScrapingDAO:
             INSERT INTO scraped_websites (
                 parent_id, original_url, processing_status,
                 storage_document_name, storage_document_uri, metadata, depth, user_role_id,
-                file_size, char_count, title, description, crawl_session_id,
+                file_size, char_count, embedding_character_count, embedding_word_count,
+                embedding_token_count, title, description, crawl_session_id,
                 pages_scraped, processed_content_s3_key,
                 storage_backend_state, created_at, updated_at
             ) VALUES (
                 :parent_id, :page_url, :processing_status,
                 :storage_document_name, :storage_document_uri, CAST(:metadata AS jsonb), :depth, :user_role_id,
-                :file_size, :char_count, :title, :description, :crawl_session_id,
+                :file_size, :char_count, :embedding_character_count, :embedding_word_count,
+                :embedding_token_count, :title, :description, :crawl_session_id,
                 :pages_scraped, :processed_content_s3_key,
                 :storage_backend_state, NOW(), NOW()
             ) RETURNING id
@@ -391,6 +396,9 @@ class ScrapingDAO:
             "user_role_id": user_role_id,
             "file_size": file_size,
             "char_count": char_count,
+            "embedding_character_count": embedding_character_count,
+            "embedding_word_count": embedding_word_count,
+            "embedding_token_count": embedding_token_count,
             "title": title,
             "description": description,
             "crawl_session_id": crawl_session_id,
@@ -424,6 +432,41 @@ class ScrapingDAO:
 
                 # Parent exists, proceed with insert
                 result = (await session.execute(text(query), params)).scalar()
+                parent_sync_query = text("""
+                    UPDATE scraped_websites parent
+                    SET file_size = metrics.size_bytes,
+                        char_count = metrics.char_count,
+                        embedding_character_count = metrics.char_count,
+                        embedding_word_count = metrics.word_count,
+                        embedding_token_count = COALESCE(parent.embedding_token_count, 0) + :embedding_token_count,
+                        updated_at = NOW()
+                    FROM (
+                        SELECT
+                            COALESCE(SUM(pg_column_size(dc.content)), 0)::INTEGER AS size_bytes,
+                            COALESCE(SUM(char_length(dc.content)), 0)::INTEGER AS char_count,
+                            COALESCE(
+                                SUM(
+                                    CASE
+                                        WHEN btrim(dc.content) = '' THEN 0
+                                        ELSE cardinality(regexp_split_to_array(btrim(dc.content), E'\\s+'))
+                                    END
+                                ),
+                                0
+                            )::INTEGER AS word_count
+                        FROM document_chunks dc
+                        WHERE dc.document_id = :parent_id
+                          AND dc.document_type = 'website'
+                    ) metrics
+                    WHERE parent.id = :parent_id
+                      AND parent.processing_status != 'deleted'
+                """)
+                await session.execute(
+                    parent_sync_query,
+                    {
+                        "parent_id": parent_id,
+                        "embedding_token_count": embedding_token_count,
+                    },
+                )
                 await session.commit()
                 logger.info(
                     f"✅ [CHILD_PAGE_SUCCESS] Recorded child page with ID: {result}"
@@ -456,6 +499,9 @@ class ScrapingDAO:
         total_size_bytes: int,
         total_char_count: int,
         storage_metadata: Dict[str, Any],
+        embedding_character_count: int = 0,
+        embedding_word_count: int = 0,
+        embedding_token_count: int = 0,
         storage_backend_state: str = "completed",
     ) -> bool:
         """
@@ -477,6 +523,9 @@ class ScrapingDAO:
                 metadata = :metadata,
                 file_size = :file_size,
                 char_count = :char_count,
+                embedding_character_count = :embedding_character_count,
+                embedding_word_count = :embedding_word_count,
+                embedding_token_count = :embedding_token_count,
                 storage_backend_state = :storage_backend_state,
                 processing_status = 'completed',
                 completed_at = COALESCE(completed_at, NOW()),
@@ -489,6 +538,9 @@ class ScrapingDAO:
             "metadata": json.dumps(storage_metadata),
             "file_size": total_size_bytes,
             "char_count": total_char_count,
+            "embedding_character_count": embedding_character_count,
+            "embedding_word_count": embedding_word_count,
+            "embedding_token_count": embedding_token_count,
             "storage_backend_state": storage_backend_state,
             "website_id": website_id,
         }
@@ -527,6 +579,9 @@ class ScrapingDAO:
         storage_document_uri: str,
         file_size: int,
         char_count: int,
+        embedding_character_count: int,
+        embedding_word_count: int,
+        embedding_token_count: int,
         title: str,
         description: str,
         crawl_session_id: str,
@@ -568,6 +623,9 @@ class ScrapingDAO:
                     storage_backend_state = :storage_backend_state,
                     file_size = :file_size,
                     char_count = :char_count,
+                    embedding_character_count = :embedding_character_count,
+                    embedding_word_count = :embedding_word_count,
+                    embedding_token_count = :embedding_token_count,
                     title = :title,
                     description = :description,
                     crawl_session_id = :crawl_session_id,
@@ -590,6 +648,9 @@ class ScrapingDAO:
                     storage_backend_state = :storage_backend_state,
                     file_size = :file_size,
                     char_count = :char_count,
+                    embedding_character_count = :embedding_character_count,
+                    embedding_word_count = :embedding_word_count,
+                    embedding_token_count = :embedding_token_count,
                     title = :title,
                     description = :description,
                     crawl_session_id = :crawl_session_id,
@@ -606,6 +667,9 @@ class ScrapingDAO:
             "storage_document_uri": storage_document_uri,
             "file_size": file_size,
             "char_count": char_count,
+            "embedding_character_count": embedding_character_count,
+            "embedding_word_count": embedding_word_count,
+            "embedding_token_count": embedding_token_count,
             "title": title,
             "description": description,
             "crawl_session_id": crawl_session_id,

@@ -116,7 +116,7 @@ class VectorDAO:
 
     @staticmethod
     async def get_document_chunk_metrics(document_id: str, document_type: str) -> Dict[str, int]:
-        """Return stored chunk size and character count for a document."""
+        """Return stored chunk size plus text metrics for a document."""
         if document_type not in ("file", "website"):
             raise ValueError("document_type must be 'file' or 'website'")
 
@@ -127,7 +127,16 @@ class VectorDAO:
                         """
                         SELECT
                             COALESCE(SUM(pg_column_size(content)), 0) AS size_bytes,
-                            COALESCE(SUM(char_length(content)), 0) AS char_count
+                            COALESCE(SUM(char_length(content)), 0) AS char_count,
+                            COALESCE(
+                                SUM(
+                                    CASE
+                                        WHEN btrim(content) = '' THEN 0
+                                        ELSE cardinality(regexp_split_to_array(btrim(content), E'\\s+'))
+                                    END
+                                ),
+                                0
+                            ) AS word_count
                         FROM document_chunks
                         WHERE document_id = :document_id
                           AND document_type = :document_type
@@ -140,6 +149,7 @@ class VectorDAO:
         return {
             "size_bytes": int(row["size_bytes"] or 0) if row else 0,
             "char_count": int(row["char_count"] or 0) if row else 0,
+            "word_count": int(row["word_count"] or 0) if row else 0,
         }
 
     @staticmethod

@@ -91,9 +91,9 @@ RETURNS TABLE (
     processing_status VARCHAR,
     file_size BIGINT,
     char_count INTEGER,
-    filestore_character_count INTEGER,
-    filestore_word_count INTEGER,
-    filestore_token_count INTEGER,
+    embedding_character_count INTEGER,
+    embedding_word_count INTEGER,
+    embedding_token_count INTEGER,
     processed_by_extractor BOOLEAN,
     created_at TIMESTAMPTZ
 )
@@ -111,9 +111,9 @@ BEGIN
         fu.processing_status::VARCHAR,
         fu.file_size::BIGINT,
         fu.char_count::INTEGER,
-        fu.filestore_character_count::INTEGER,
-        fu.filestore_word_count::INTEGER,
-        fu.filestore_token_count::INTEGER,
+        fu.embedding_character_count::INTEGER,
+        fu.embedding_word_count::INTEGER,
+        fu.embedding_token_count::INTEGER,
         fu.processed_by_extractor::BOOLEAN,
         fu.created_at::TIMESTAMPTZ
     FROM public.file_uploads fu
@@ -136,9 +136,9 @@ RETURNS TABLE (
     pages_scraped INTEGER,
     file_size INTEGER,
     char_count INTEGER,
-    filestore_character_count INTEGER,
-    filestore_word_count INTEGER,
-    filestore_token_count INTEGER,
+    embedding_character_count INTEGER,
+    embedding_word_count INTEGER,
+    embedding_token_count INTEGER,
     parent_id UUID,
     depth INTEGER,
     created_at TIMESTAMPTZ
@@ -157,9 +157,9 @@ BEGIN
         sw.pages_scraped::INTEGER,
         sw.file_size::INTEGER,
         sw.char_count::INTEGER,
-        sw.filestore_character_count::INTEGER,
-        sw.filestore_word_count::INTEGER,
-        sw.filestore_token_count::INTEGER,
+        sw.embedding_character_count::INTEGER,
+        sw.embedding_word_count::INTEGER,
+        sw.embedding_token_count::INTEGER,
         sw.parent_id::UUID,
         sw.depth::INTEGER,
         sw.created_at::TIMESTAMPTZ

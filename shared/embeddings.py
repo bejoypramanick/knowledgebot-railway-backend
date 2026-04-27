@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from shared.otel_logger import get_otel_logger
 from shared.usage_tracking import text_payload_details, text_payload_stats, track_model_usage
 # Configuration from environment variables with defaults
@@ -100,6 +100,13 @@ async def _track_openai_embedding_usage(
 
 
 async def _openai_embed(texts: List[str], request_metadata: Optional[Dict] = None) -> List[List[float]]:
+    embeddings, _ = await _openai_embed_with_usage(texts, request_metadata)
+    return embeddings
+
+
+async def _openai_embed_with_usage(
+    texts: List[str], request_metadata: Optional[Dict] = None
+) -> Tuple[List[List[float]], Dict[str, int]]:
     from openai import AsyncOpenAI
 
     model = os.getenv("EMBEDDING_MODEL", EMBEDDING_MODEL)
@@ -115,20 +122,24 @@ async def _openai_embed(texts: List[str], request_metadata: Optional[Dict] = Non
     api_key = os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY
     if not api_key:
         logger.error("❌ OPENAI_API_KEY not set")
-        return []
+        return [], {"prompt_tokens": 0, "total_tokens": 0}
 
     client = AsyncOpenAI(api_key=api_key)
     kwargs = {"input": texts, "model": model}
     if dimensionality:
         kwargs["dimensions"] = dimensionality
     response = await client.embeddings.create(**kwargs)
+    prompt_tokens, total_tokens, _ = _openai_usage_tokens(response, texts, model)
     await _track_openai_embedding_usage(
         response=response,
         texts=texts,
         model=model,
         request_metadata=request_metadata,
     )
-    return [d.embedding for d in response.data]
+    return [d.embedding for d in response.data], {
+        "prompt_tokens": prompt_tokens,
+        "total_tokens": total_tokens,
+    }
 
 async def generate_embedding(query: str, request_metadata: Optional[Dict] = None) -> List[float]:
     """Generate an OpenAI embedding vector."""
@@ -161,3 +172,29 @@ async def batch_generate_embeddings(texts: List[str], request_metadata: Optional
     except Exception as e:
         logger.error(f"❌ Batch embedding error ({provider}): {e}")
         return []
+
+
+async def batch_generate_embeddings_with_usage(
+    texts: List[str], request_metadata: Optional[Dict] = None
+) -> Tuple[List[List[float]], Dict[str, int]]:
+    """Batch-generate embeddings and return provider token usage for the batch."""
+    provider = EMBEDDING_PROVIDER
+    model = os.getenv("EMBEDDING_MODEL", EMBEDDING_MODEL)
+    dimensionality = _openai_embedding_dimensions() or 0
+
+    if not texts:
+        return [], {"prompt_tokens": 0, "total_tokens": 0}
+
+    try:
+        _log_embedding_config_once(
+            action="embed_batch",
+            provider=provider,
+            model=model,
+            dimensionality=dimensionality,
+            batch_size=len(texts),
+        )
+        return await _openai_embed_with_usage(texts, request_metadata)
+
+    except Exception as e:
+        logger.error(f"❌ Batch embedding error ({provider}): {e}")
+        return [], {"prompt_tokens": 0, "total_tokens": 0}

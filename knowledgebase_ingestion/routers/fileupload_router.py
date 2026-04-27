@@ -467,6 +467,8 @@ async def delete_all_knowledge_endpoint(request: Request = None):
     2. Deletes stored knowledge-base files from S3
     3. Marks all file records with status='deleted' (soft delete for audit trail)
     4. Marks all website records with status='deleted' (soft delete for audit trail)
+    5. Clears all tenant-scoped document_chunks embeddings
+    6. Clears all tenant-scoped KB ingestion embedding usage rows from token_usage_log
 
     Records are retained in database with status='deleted' for audit and recovery purposes.
 
@@ -501,8 +503,12 @@ async def delete_all_knowledge_endpoint(request: Request = None):
             logger.info(f"✅ [DELETE_ALL_SUCCESS] Knowledge base cleared")
             logger.info("=" * 80)
             logger.info(f"   S3 files deleted: {result.get('s3_files_deleted')}")
+            logger.info(f"   Files marked as deleted: {result.get('files_marked_deleted')}")
             logger.info(
                 f"   Websites marked as deleted: {result.get('websites_marked_deleted')}"
+            )
+            logger.info(
+                f"   KB token usage rows deleted: {result.get('token_usage_rows_deleted')}"
             )
             logger.info(
                 f"   Redis queues cleared: {result.get('redis_queues_cleared')}"
@@ -519,9 +525,12 @@ async def delete_all_knowledge_endpoint(request: Request = None):
                 "success": True,
                 "message": result.get("message"),
                 "s3_files_deleted": result.get("s3_files_deleted"),
+                "files_marked_deleted": result.get("files_marked_deleted"),
                 "websites_marked_deleted": result.get("websites_marked_deleted"),
+                "chunks_cleared": result.get("chunks_cleared"),
+                "token_usage_rows_deleted": result.get("token_usage_rows_deleted"),
                 "redis_queues_cleared": result.get("redis_queues_cleared"),
-                "note": "Database records retained with status='deleted' for audit trail and recovery. The pgvector-backed knowledge base is now cleared and ready for new content.",
+                "note": "Database records are retained with status='deleted' for audit trail and recovery. Tenant-scoped pgvector embeddings and KB ingestion token-usage rows are now cleared for a clean slate.",
             }
         else:
             logger.error("=" * 80)
