@@ -425,7 +425,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     <h2 style="margin:0">Knowledge Ingestion</h2>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th title="Table: token_usage_log&#10;Column: created_at&#10;Logic: shows the created_at timestamp of the ingestion embedding usage row.">Date</th><th title="Table: file_uploads.original_filename or scraped_websites.original_url&#10;Fallbacks: token_usage_log.request_metadata.source_url, url, display_name, filename, webpage_name&#10;Logic: if request_metadata.file_id matches RAW.files.id, show file_uploads.original_filename; else if request_metadata.website_id matches RAW.websites.id, show scraped_websites.original_url; otherwise use stored request metadata fallbacks.">Source</th><th title="Table: document_chunks&#10;Column: COUNT(*) grouped by document_id&#10;Logic: uses the pre-aggregated chunk_count for the matching file_id or website_id from RAW.file_chunk_stats / RAW.website_chunk_stats.">Chunk Row Count</th><th title="Table: document_chunks&#10;Column: SUM(pg_column_size(content)) grouped by document_id&#10;Logic: uses content_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id.">Content KB</th><th title="Table: document_chunks&#10;Column: SUM(pg_column_size(embedding)) grouped by document_id&#10;Logic: uses embedding_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id.">Embedding KB</th><th title="Table: token_usage_log&#10;Column: model&#10;Logic: shows the embedding model recorded for the ingestion usage row.">Model</th><th title="Table: token_usage_log&#10;Columns: total_tokens, prompt_tokens&#10;Logic: shows total_tokens when present; otherwise falls back to prompt_tokens for the embedding call.">Embedding Tokens</th><th title="Table: token_usage_log.request_metadata&#10;Column: input_character_count&#10;Fallback: system_prompt_character_count&#10;Logic: shows the captured character count of the text payload sent to the embedding request.">Chars</th><th title="Table: token_usage_log.request_metadata&#10;Column: input_word_count&#10;Logic: shows the captured word count of the text payload sent to the embedding request.">Words</th><th title="Table: token_usage_log.request_metadata&#10;Columns: input_size_bytes, image_size_bytes, system_prompt_size_bytes&#10;Logic: shows the size of the payload sent to the embedding API, formatted as B/KB/MB. This is not the original uploaded file size.">Size</th><th title="Tables: token_usage_log + token_usage_log.request_metadata&#10;Columns: total_tokens/prompt_tokens and input_character_count/system_prompt_character_count&#10;Logic: character_count divided by embedding_tokens.">Char/Token Ratio</th><th title="Table: token_usage_log.request_metadata&#10;Columns used: batch_size, dimensions, image_size_bytes, cache_ttl_seconds, tool_call_count, token_source, webpage_name, source_url, url, website_id&#10;Logic: condensed metadata summary built from the stored request_metadata fields for the ingestion call.">Context</th></tr></thead>
+  <thead><tr><th title="Table: token_usage_log&#10;Column: created_at&#10;Logic: shows the created_at timestamp of the ingestion embedding usage row.">Date</th><th title="Table: file_uploads.original_filename or scraped_websites.original_url&#10;Fallbacks: token_usage_log.request_metadata.source_url, url, display_name, filename, webpage_name&#10;Logic: if request_metadata.file_id matches RAW.files.id, show file_uploads.original_filename; else if request_metadata.website_id matches RAW.websites.id, show scraped_websites.original_url; otherwise use stored request metadata fallbacks.">Source</th><th title="Table: document_chunks&#10;Column: COUNT(*) grouped by document_id&#10;Logic: uses the pre-aggregated chunk_count for the matching file_id or website_id from RAW.file_chunk_stats / RAW.website_chunk_stats.">Chunk Row Count</th><th title="Table: document_chunks&#10;Column: SUM(pg_column_size(content)) grouped by document_id&#10;Logic: uses content_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id.">Content KB</th><th title="Table: document_chunks&#10;Column: SUM(pg_column_size(embedding)) grouped by document_id&#10;Logic: uses embedding_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id.">Embedding KB</th><th title="Table: token_usage_log&#10;Column: model&#10;Logic: shows the embedding model recorded for the ingestion usage row.">Model</th><th title="Table: token_usage_log&#10;Columns: total_tokens, prompt_tokens&#10;Logic: shows total_tokens when present; otherwise falls back to prompt_tokens for the embedding call.">Embedding Tokens</th><th title="Table: token_usage_log.request_metadata&#10;Column: input_character_count&#10;Fallback: system_prompt_character_count&#10;Logic: shows the captured character count of the text payload sent to the embedding request.">Chars</th><th title="Table: token_usage_log.request_metadata&#10;Column: input_word_count&#10;Logic: shows the captured word count of the text payload sent to the embedding request.">Words</th><th title="Table: token_usage_log.request_metadata&#10;Columns: input_size_bytes, image_size_bytes, system_prompt_size_bytes&#10;Logic: shows the size of the payload sent to the embedding API, formatted as B/KB/MB. This is not the original uploaded file size.">Size</th><th title="Tables: token_usage_log + token_usage_log.request_metadata&#10;Columns: total_tokens/prompt_tokens and input_character_count/system_prompt_character_count&#10;Logic: character_count divided by embedding_tokens.">Char/Token Ratio</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -538,24 +538,6 @@ function groupByCallType(rows) {
     grouped[key].tools += meta.tool_call_count || 0;
   });
   return Object.values(grouped).sort((a,b) => (b.total || (b.prompt + b.completion)) - (a.total || (a.prompt + a.completion)));
-}
-function metadataSummary(meta) {
-  const parts = [];
-  if(meta.batch_size) parts.push(`batch=${meta.batch_size}`);
-  if(meta.dimensions) parts.push(`dims=${meta.dimensions}`);
-  if(meta.image_size_bytes) parts.push(`image=${fmt(meta.image_size_bytes)} bytes`);
-  if(meta.cache_ttl_seconds) parts.push(`ttl=${meta.cache_ttl_seconds}s`);
-  if(meta.tool_call_count) parts.push(`tools=${meta.tool_call_count}`);
-  if(meta.token_source) parts.push(`token_src=${meta.token_source}`);
-  if(meta.webpage_name) parts.push(`page="${meta.webpage_name}"`);
-  const url = meta.source_url || meta.url;
-  if(url) parts.push(`url=${url}`);
-  if(meta.website_id) parts.push(`site=${meta.website_id.substring(0,8)}`);
-  
-  if (parts.length === 0 && Object.keys(meta).length > 0) {
-    return 'Keys: ' + Object.keys(meta).join(', ');
-  }
-  return parts.join(' · ') || '-';
 }
 function payloadChars(meta) {
   return meta.input_character_count || meta.system_prompt_character_count || 0;
@@ -859,9 +841,6 @@ function render() {
       <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
       <td>${fmtBytes(payloadBytes(meta))}</td>
       <td>${(() => { const t=r.total_tokens||r.prompt_tokens||0,c=payloadChars(meta)||0; return t>0 ? (c/t).toFixed(2) : '-'; })()}</td>
-      <td>${escHtml(metadataSummary(meta))}</td>
-    </tr>
-      </td>
     </tr>`;
   }).join('');
 }
@@ -1099,8 +1078,7 @@ function downloadExcel() {
       'Input Text Chunks': payloadTextChunks(meta).join('\\n\\n--- chunk ---\\n\\n'),
       'Input Text Truncated': meta.input_text_truncated ? 'yes' : 'no',
       'Tool Calls': meta.tool_call_count||0,
-      'Token Source': meta.token_source||'',
-      'Context': metadataSummary(meta)
+      'Token Source': meta.token_source||''
     };
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tokenLogData), 'Knowledge Ingestion');
@@ -1124,8 +1102,7 @@ function downloadExcel() {
       'Provider': r.provider||'',
       'Model': r.model||'',
       'Embedding Tokens': r.total_tokens || r.prompt_tokens || 0,
-      'Token Source': meta.token_source||'',
-      'Context': metadataSummary(meta)
+      'Token Source': meta.token_source||''
     };
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topCallsData), 'Largest Token Calls');
