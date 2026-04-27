@@ -425,7 +425,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     <h2 style="margin:0">Knowledge Ingestion</h2>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th>Date</th><th>Source</th><th>Chunk Row Count</th><th>Content KB</th><th>Embedding KB</th><th>Call Type</th><th>Model</th><th>Embedding Tokens</th><th>Chars</th><th>Words</th><th title="Size of text payload sent to embedding API (not S3 file size)">Size</th><th>Char/Token Ratio</th><th>Context</th></tr></thead>
+  <thead><tr><th title="Table: token_usage_log&#10;Column: created_at&#10;Logic: shows the created_at timestamp of the ingestion embedding usage row.">Date</th><th title="Table: file_uploads.original_filename or scraped_websites.original_url&#10;Fallbacks: token_usage_log.request_metadata.source_url, url, display_name, filename, webpage_name&#10;Logic: if request_metadata.file_id matches RAW.files.id, show file_uploads.original_filename; else if request_metadata.website_id matches RAW.websites.id, show scraped_websites.original_url; otherwise use stored request metadata fallbacks.">Source</th><th title="Table: document_chunks&#10;Column: COUNT(*) grouped by document_id&#10;Logic: uses the pre-aggregated chunk_count for the matching file_id or website_id from RAW.file_chunk_stats / RAW.website_chunk_stats.">Chunk Row Count</th><th title="Table: document_chunks&#10;Column: SUM(pg_column_size(content)) grouped by document_id&#10;Logic: uses content_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id.">Content KB</th><th title="Table: document_chunks&#10;Column: SUM(pg_column_size(embedding)) grouped by document_id&#10;Logic: uses embedding_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id.">Embedding KB</th><th title="Table: token_usage_log&#10;Column: model&#10;Logic: shows the embedding model recorded for the ingestion usage row.">Model</th><th title="Table: token_usage_log&#10;Columns: total_tokens, prompt_tokens&#10;Logic: shows total_tokens when present; otherwise falls back to prompt_tokens for the embedding call.">Embedding Tokens</th><th title="Table: token_usage_log.request_metadata&#10;Column: input_character_count&#10;Fallback: system_prompt_character_count&#10;Logic: shows the captured character count of the text payload sent to the embedding request.">Chars</th><th title="Table: token_usage_log.request_metadata&#10;Column: input_word_count&#10;Logic: shows the captured word count of the text payload sent to the embedding request.">Words</th><th title="Table: token_usage_log.request_metadata&#10;Columns: input_size_bytes, image_size_bytes, system_prompt_size_bytes&#10;Logic: shows the size of the payload sent to the embedding API, formatted as B/KB/MB. This is not the original uploaded file size.">Size</th><th title="Tables: token_usage_log + token_usage_log.request_metadata&#10;Columns: total_tokens/prompt_tokens and input_character_count/system_prompt_character_count&#10;Logic: character_count divided by embedding_tokens.">Char/Token Ratio</th><th title="Table: token_usage_log.request_metadata&#10;Columns used: batch_size, dimensions, image_size_bytes, cache_ttl_seconds, tool_call_count, token_source, webpage_name, source_url, url, website_id&#10;Logic: condensed metadata summary built from the stored request_metadata fields for the ingestion call.">Context</th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -448,6 +448,8 @@ const badge = s => `<span class="badge badge-${s||'active'}">${s||'active'}</spa
 const cutoff = days => { const d=new Date(); d.setDate(d.getDate()-days); return d.toISOString(); };
 const trunc = (s,n) => s && s.length>n ? s.substring(0,n)+'...' : (s||'-');
 const escHtml = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
+const FILE_SOURCE_MAP = Object.fromEntries((RAW.files || []).map(f => [String(f.id), f.original_filename || f.display_name || f.storage_document_name || '']));
+const WEBSITE_SOURCE_MAP = Object.fromEntries((RAW.websites || []).map(w => [String(w.id), w.original_url || w.title || w.storage_document_name || '']));
 
 function filterByDate(arr, days, dateField='created_at') {
   const c = cutoff(days);
@@ -835,15 +837,22 @@ function render() {
       }
     }
     
-    const sourceName = meta.display_name || meta.filename || meta.webpage_name || meta.source_url || meta.url || '-';
+    const sourceName =
+      (meta.file_id && FILE_SOURCE_MAP[String(meta.file_id)]) ||
+      (meta.website_id && WEBSITE_SOURCE_MAP[String(meta.website_id)]) ||
+      meta.source_url ||
+      meta.url ||
+      meta.display_name ||
+      meta.filename ||
+      meta.webpage_name ||
+      '-';
     
     return `<tr>
       <td>${fmtDateTime(r.created_at)}</td>
-      <td class="mono source-cell">${trunc(sourceName, 40)}</td>
+      <td class="mono source-cell" title="${escHtml(sourceName)}">${escHtml(sourceName)}</td>
       <td>${chunkStats.chunk_count || '-'}</td>
       <td>${chunkStats.content_pretty || '-'}</td>
       <td>${chunkStats.embedding_pretty || '-'}</td>
-      <td>${callTypeLabel(r.api_call_type)}</td>
       <td>${r.model||'-'}</td>
       <td class="token-cell">${fmt(r.total_tokens || r.prompt_tokens || 0)}</td>
       <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
@@ -1081,8 +1090,7 @@ function downloadExcel() {
       'Created': r.created_at||'',
       'Provider': r.provider||'',
       'Model': r.model||'',
-      'Source': meta.display_name || meta.filename || meta.webpage_name || meta.source_url || meta.url || '',
-      'Call Type': callTypeLabel(r.api_call_type),
+      'Source': (meta.file_id && FILE_SOURCE_MAP[String(meta.file_id)]) || (meta.website_id && WEBSITE_SOURCE_MAP[String(meta.website_id)]) || meta.source_url || meta.url || meta.display_name || meta.filename || meta.webpage_name || '',
       'Embedding Tokens': r.total_tokens || r.prompt_tokens || 0,
       'Input Characters': payloadChars(meta),
       'Input Words': payloadWords(meta),
@@ -1112,8 +1120,7 @@ function downloadExcel() {
     const meta = parseMeta(r.request_metadata);
     return {
       'Created': r.created_at||'',
-      'Source': meta.display_name || meta.filename || meta.webpage_name || meta.source_url || meta.url || '',
-      'Call Type': callTypeLabel(r.api_call_type),
+      'Source': (meta.file_id && FILE_SOURCE_MAP[String(meta.file_id)]) || (meta.website_id && WEBSITE_SOURCE_MAP[String(meta.website_id)]) || meta.source_url || meta.url || meta.display_name || meta.filename || meta.webpage_name || '',
       'Provider': r.provider||'',
       'Model': r.model||'',
       'Embedding Tokens': r.total_tokens || r.prompt_tokens || 0,
