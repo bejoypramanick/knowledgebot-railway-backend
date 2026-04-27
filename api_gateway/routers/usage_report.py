@@ -347,6 +347,12 @@ tr:hover td{background:rgba(79,70,229,.04)}
 .loading{text-align:center;padding:40px;color:var(--muted)}
 .table-wrap{overflow-x:auto;max-height:500px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
 th[title]{cursor:help;border-bottom:2px dashed var(--border)}
+.th-with-info{display:inline-flex;align-items:center;gap:6px}
+.info-icon{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;border:1px solid var(--accent);background:#fff;color:var(--accent);font-size:10px;font-weight:700;line-height:1;cursor:pointer;padding:0;flex-shrink:0}
+.info-icon:hover,.info-icon[aria-expanded="true"]{background:var(--accent);color:#fff}
+.header-tooltip-popover{position:fixed;display:none;max-width:320px;min-width:260px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 14px 32px rgba(15,23,42,.18);padding:12px 14px;z-index:9999}
+.header-tooltip-title{font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px}
+.header-tooltip-body{font-size:12px;line-height:1.55;color:var(--text);white-space:pre-line;text-transform:none;letter-spacing:0}
 .token-summary{background:linear-gradient(135deg,#f0f9ff,#eef2ff);border:1px solid #bfdbfe;border-radius:12px;padding:20px;margin-bottom:32px}
 .token-summary h2{font-size:20px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #bfdbfe;color:#1d4ed8}
 .token-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
@@ -425,12 +431,14 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     <h2 style="margin:0">Knowledge Ingestion</h2>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th title="Table: token_usage_log&#10;Column: created_at&#10;Logic: shows the created_at timestamp of the ingestion embedding usage row.">Date</th><th title="Table: file_uploads.original_filename or scraped_websites.original_url&#10;Fallbacks: token_usage_log.request_metadata.source_url, url, display_name, filename, webpage_name&#10;Logic: if request_metadata.file_id matches RAW.files.id, show file_uploads.original_filename; else if request_metadata.website_id matches RAW.websites.id, show scraped_websites.original_url; otherwise use stored request metadata fallbacks.">Source</th><th title="Table: document_chunks&#10;Column: COUNT(*) grouped by document_id&#10;Logic: uses the pre-aggregated chunk_count for the matching file_id or website_id from RAW.file_chunk_stats / RAW.website_chunk_stats.">Chunk Row Count</th><th title="Table: document_chunks&#10;Column: SUM(pg_column_size(content)) grouped by document_id&#10;Logic: uses content_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id.">Content KB</th><th title="Table: document_chunks&#10;Column: SUM(pg_column_size(embedding)) grouped by document_id&#10;Logic: uses embedding_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id.">Embedding KB</th><th title="Table: token_usage_log&#10;Column: model&#10;Logic: shows the embedding model recorded for the ingestion usage row.">Model</th><th title="Table: token_usage_log&#10;Columns: total_tokens, prompt_tokens&#10;Logic: shows total_tokens when present; otherwise falls back to prompt_tokens for the embedding call.">Embedding Tokens</th><th title="Table: token_usage_log.request_metadata&#10;Column: input_character_count&#10;Fallback: system_prompt_character_count&#10;Logic: shows the captured character count of the text payload sent to the embedding request.">Chars</th><th title="Table: token_usage_log.request_metadata&#10;Column: input_word_count&#10;Logic: shows the captured word count of the text payload sent to the embedding request.">Words</th><th title="Table: token_usage_log.request_metadata&#10;Columns: input_size_bytes, image_size_bytes, system_prompt_size_bytes&#10;Logic: shows the size of the payload sent to the embedding API, formatted as B/KB/MB. This is not the original uploaded file size.">Size</th><th title="Tables: token_usage_log + token_usage_log.request_metadata&#10;Columns: total_tokens/prompt_tokens and input_character_count/system_prompt_character_count&#10;Logic: character_count divided by embedding_tokens.">Char/Token Ratio</th></tr></thead>
+  <thead><tr><th><span class="th-with-info">Date<button type="button" class="info-icon" aria-label="Explain Date column" aria-expanded="false" data-tooltip-title="Date" data-tooltip="Table: token_usage_log&#10;Column: created_at&#10;Logic: shows the created_at timestamp of the ingestion embedding usage row." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Source<button type="button" class="info-icon" aria-label="Explain Source column" aria-expanded="false" data-tooltip-title="Source" data-tooltip="Table: file_uploads.original_filename or scraped_websites.original_url&#10;Fallbacks: token_usage_log.request_metadata.source_url, url, display_name, filename, webpage_name&#10;Logic: if request_metadata.file_id matches RAW.files.id, show file_uploads.original_filename; else if request_metadata.website_id matches RAW.websites.id, show scraped_websites.original_url; otherwise use stored request metadata fallbacks." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chunk Row Count<button type="button" class="info-icon" aria-label="Explain Chunk Row Count column" aria-expanded="false" data-tooltip-title="Chunk Row Count" data-tooltip="Table: document_chunks&#10;Column: COUNT(*) grouped by document_id&#10;Logic: uses the pre-aggregated chunk_count for the matching file_id or website_id from RAW.file_chunk_stats / RAW.website_chunk_stats." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Content KB<button type="button" class="info-icon" aria-label="Explain Content KB column" aria-expanded="false" data-tooltip-title="Content KB" data-tooltip="Table: document_chunks&#10;Column: SUM(pg_column_size(content)) grouped by document_id&#10;Logic: uses content_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding KB<button type="button" class="info-icon" aria-label="Explain Embedding KB column" aria-expanded="false" data-tooltip-title="Embedding KB" data-tooltip="Table: document_chunks&#10;Column: SUM(pg_column_size(embedding)) grouped by document_id&#10;Logic: uses embedding_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Model<button type="button" class="info-icon" aria-label="Explain Model column" aria-expanded="false" data-tooltip-title="Model" data-tooltip="Table: token_usage_log&#10;Column: model&#10;Logic: shows the embedding model recorded for the ingestion usage row." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding Tokens<button type="button" class="info-icon" aria-label="Explain Embedding Tokens column" aria-expanded="false" data-tooltip-title="Embedding Tokens" data-tooltip="Table: token_usage_log&#10;Columns: total_tokens, prompt_tokens&#10;Logic: shows total_tokens when present; otherwise falls back to prompt_tokens for the embedding call." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chars<button type="button" class="info-icon" aria-label="Explain Chars column" aria-expanded="false" data-tooltip-title="Chars" data-tooltip="Table: token_usage_log.request_metadata&#10;Column: input_character_count&#10;Fallback: system_prompt_character_count&#10;Logic: shows the captured character count of the text payload sent to the embedding request." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Words<button type="button" class="info-icon" aria-label="Explain Words column" aria-expanded="false" data-tooltip-title="Words" data-tooltip="Table: token_usage_log.request_metadata&#10;Column: input_word_count&#10;Logic: shows the captured word count of the text payload sent to the embedding request." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Size<button type="button" class="info-icon" aria-label="Explain Size column" aria-expanded="false" data-tooltip-title="Size" data-tooltip="Table: token_usage_log.request_metadata&#10;Columns: input_size_bytes, image_size_bytes, system_prompt_size_bytes&#10;Logic: shows the size of the payload sent to the embedding API, formatted as B/KB/MB. This is not the original uploaded file size." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Char/Token Ratio<button type="button" class="info-icon" aria-label="Explain Char/Token Ratio column" aria-expanded="false" data-tooltip-title="Char/Token Ratio" data-tooltip="Tables: token_usage_log + token_usage_log.request_metadata&#10;Columns: total_tokens/prompt_tokens and input_character_count/system_prompt_character_count&#10;Logic: character_count divided by embedding_tokens." onclick="toggleHeaderTooltip(event)">i</button></span></th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
 
 </div>
+
+<div id="header-tooltip-popover" class="header-tooltip-popover" role="dialog" aria-live="polite" aria-hidden="true"></div>
 
 <script>
 // === DATA ===
@@ -450,10 +458,56 @@ const trunc = (s,n) => s && s.length>n ? s.substring(0,n)+'...' : (s||'-');
 const escHtml = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
 const FILE_SOURCE_MAP = Object.fromEntries((RAW.files || []).map(f => [String(f.id), f.original_filename || f.display_name || f.storage_document_name || '']));
 const WEBSITE_SOURCE_MAP = Object.fromEntries((RAW.websites || []).map(w => [String(w.id), w.original_url || w.title || w.storage_document_name || '']));
+let activeHeaderTooltipButton = null;
 
 function filterByDate(arr, days, dateField='created_at') {
   const c = cutoff(days);
   return arr.filter(r => (r[dateField]||'') >= c);
+}
+
+function closeHeaderTooltip() {
+  const popover = document.getElementById('header-tooltip-popover');
+  if (!popover) return;
+  popover.style.display = 'none';
+  popover.setAttribute('aria-hidden', 'true');
+  popover.innerHTML = '';
+  if (activeHeaderTooltipButton) {
+    activeHeaderTooltipButton.setAttribute('aria-expanded', 'false');
+    activeHeaderTooltipButton = null;
+  }
+}
+
+function toggleHeaderTooltip(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const btn = event.currentTarget;
+  const popover = document.getElementById('header-tooltip-popover');
+  if (!popover) return;
+
+  if (activeHeaderTooltipButton === btn && popover.style.display === 'block') {
+    closeHeaderTooltip();
+    return;
+  }
+
+  if (activeHeaderTooltipButton) {
+    activeHeaderTooltipButton.setAttribute('aria-expanded', 'false');
+  }
+
+  activeHeaderTooltipButton = btn;
+  btn.setAttribute('aria-expanded', 'true');
+  popover.innerHTML = `<div class="header-tooltip-title">${escHtml(btn.dataset.tooltipTitle || '')}</div><div class="header-tooltip-body">${escHtml(btn.dataset.tooltip || '').replace(/\n/g, '<br>')}</div>`;
+  popover.style.display = 'block';
+  popover.setAttribute('aria-hidden', 'false');
+
+  const rect = btn.getBoundingClientRect();
+  const popRect = popover.getBoundingClientRect();
+  let left = Math.min(window.innerWidth - popRect.width - 12, Math.max(12, rect.left - 8));
+  let top = rect.bottom + 8;
+  if (top + popRect.height > window.innerHeight - 12) {
+    top = Math.max(12, rect.top - popRect.height - 8);
+  }
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
 }
 
 // Tenant filtering - server-side
@@ -1118,6 +1172,11 @@ initTenantFilter();
 if (currentTenant) {
   document.getElementById('tenant-filter').value = currentTenant;
 }
+document.addEventListener('click', closeHeaderTooltip);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeHeaderTooltip(); });
+window.addEventListener('resize', closeHeaderTooltip);
+window.addEventListener('scroll', closeHeaderTooltip, true);
+document.getElementById('header-tooltip-popover').addEventListener('click', e => e.stopPropagation());
 console.log('Sessions in RAW:', RAW.sessions ? RAW.sessions.length : 0);
 render();
 </script>
