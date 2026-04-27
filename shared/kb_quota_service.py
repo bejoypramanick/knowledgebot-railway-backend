@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException
 from sqlalchemy import text
 
+from shared.http_exception import HTTPException
 from shared.otel_logger import get_otel_logger
 from shared.sqlalchemy_db import get_db_session
 from shared.tenant_context import get_current_tenant_id

@@ -10,8 +10,8 @@ import json
 import time
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
-from fastapi import HTTPException
 
+from shared.http_exception import HTTPException
 from shared.otel_logger import get_otel_logger
 from shared.kb_quota_service import kb_quota_service
 from shared.tenant_context import get_current_tenant_id
