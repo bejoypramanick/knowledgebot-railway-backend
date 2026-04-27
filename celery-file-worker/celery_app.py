@@ -51,6 +51,7 @@ worker_concurrency = int(os.getenv('CELERY_FILE_CONCURRENCY', '10'))
 celery_app.conf.update(
     broker_url=redis_url,
     result_backend=redis_url,
+    imports=('tasks',),
     # Task configuration
     task_serializer='json',
     accept_content=['json'],
@@ -85,6 +86,12 @@ logger.info(f"   Queue: 'file_processing'")
 try:
     import tasks  # noqa: F401
     logger.info("✅ [CELERY_APP] Tasks module loaded successfully")
+    registered_file_tasks = sorted(
+        task_name
+        for task_name in celery_app.tasks.keys()
+        if "process_file_upload" in task_name or task_name.startswith("tasks.")
+    )
+    logger.info(f"📋 [CELERY_APP] Registered file tasks: {registered_file_tasks}")
 except ImportError as e:
     logger.error(f"❌ [CELERY_APP] Failed to load tasks module: {e}")
 

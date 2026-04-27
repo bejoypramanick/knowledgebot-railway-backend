@@ -17,7 +17,7 @@ from shared.tenant_context import tenant_context
 logger = get_otel_logger("celery_tasks", "celery-file-worker")
 
 
-@celery_app.task(name="tasks.process_file_upload_task", bind=True, max_retries=2)
+@celery_app.task(bind=True, max_retries=2)
 def process_file_upload_task(
     self,
     file_id: str,
