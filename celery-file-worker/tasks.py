@@ -8,7 +8,6 @@ import sys
 import asyncio
 from typing import Dict, Any
 from celery.exceptions import SoftTimeLimitExceeded
-from fastapi import HTTPException
 
 from celery_app import celery_app
 from shared.otel_logger import get_otel_logger, set_task_id
@@ -17,7 +16,17 @@ from shared.tenant_context import tenant_context
 logger = get_otel_logger("celery_tasks", "celery-file-worker")
 
 
-@celery_app.task(bind=True, max_retries=2)
+def _is_kb_quota_error(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    detail = getattr(exc, "detail", None)
+    return (
+        status_code == 409
+        and isinstance(detail, dict)
+        and detail.get("code") == "kb_quota_exceeded"
+    )
+
+
+@celery_app.task(name="tasks.process_file_upload_task", bind=True, max_retries=2)
 def process_file_upload_task(
     self,
     file_id: str,
@@ -158,12 +167,7 @@ def process_file_upload_task(
         }
 
     except Exception as e:
-        is_quota_error = (
-            isinstance(e, HTTPException)
-            and e.status_code == 409
-            and isinstance(e.detail, dict)
-            and e.detail.get("code") == "kb_quota_exceeded"
-        )
+        is_quota_error = _is_kb_quota_error(e)
         logger.error("=" * 80)
         logger.error(f"❌ [CELERY_TASK_ERROR] Error in file processing task {task_id}")
         logger.error("=" * 80)
