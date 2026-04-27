@@ -497,7 +497,7 @@ function toggleHeaderTooltip(event) {
 
   activeHeaderTooltipButton = btn;
   btn.setAttribute('aria-expanded', 'true');
-  popover.innerHTML = `<div class="header-tooltip-title">${escHtml(btn.dataset.tooltipTitle || '')}</div><div class="header-tooltip-body">${escHtml(btn.dataset.tooltip || '').replace(/\n/g, '<br>')}</div>`;
+  popover.innerHTML = `<div class="header-tooltip-title">${escHtml(btn.dataset.tooltipTitle || '')}</div><div class="header-tooltip-body">${escHtml(btn.dataset.tooltip || '').replace(/\\n/g, '<br>')}</div>`;
   popover.style.display = 'block';
   popover.setAttribute('aria-hidden', 'false');
 
@@ -614,8 +614,8 @@ function fmtBytes(bytes) {
 function payloadTextChunks(meta) {
   const chunks = meta.input_text_chunks;
   if(Array.isArray(chunks)) {
-    if(chunks.length === 1 && (meta.batch_size || 0) > 1 && chunks[0] && chunks[0].includes('\\n---\\n')) {
-      return chunks[0].split('\\n---\\n');
+    if(chunks.length === 1 && (meta.batch_size || 0) > 1 && chunks[0] && chunks[0].includes('\\\\n---\\\\n')) {
+      return chunks[0].split('\\\\n---\\\\n');
     }
     return chunks;
   }
