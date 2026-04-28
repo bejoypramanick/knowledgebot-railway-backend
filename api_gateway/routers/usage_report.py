@@ -904,6 +904,25 @@ function buildWebsitePageRows(documentId, parentWebsite, childWebsites, chunks) 
     || String(a.pageUrl || '').localeCompare(String(b.pageUrl || ''))
   );
 }
+function countWebsitePages(parentWebsite, childWebsites, usageRows) {
+  const pageKeys = new Set();
+  const rootUrl = normalizeSourceKey(parentWebsite?.original_url || '');
+  if(rootUrl) pageKeys.add(rootUrl);
+
+  (childWebsites || []).forEach(site => {
+    const key = normalizeSourceKey(site.original_url || '');
+    if(key) pageKeys.add(key);
+  });
+
+  (usageRows || []).forEach(row => {
+    const meta = parseMeta(row.request_metadata);
+    const key = normalizeSourceKey(meta.source_url || meta.url || '');
+    if(key) pageKeys.add(key);
+  });
+
+  const explicitPagesScraped = Number(parentWebsite?.pages_scraped || 0);
+  return Math.max(pageKeys.size, explicitPagesScraped, rootUrl ? 1 : 0);
+}
 function buildIngestionParentRows(files, websites) {
   const parentRows = [];
   const rootWebsites = (websites || []).filter(site => !site.parent_id);
@@ -914,7 +933,7 @@ function buildIngestionParentRows(files, websites) {
     const usageSummary = summarizeUsageRows(usageRows);
     const chunkStats = RAW.website_chunk_stats[siteId] || {};
     const childPages = CURRENT_INGESTION_VIEW.websiteChildrenByParentId.get(siteId) || [];
-    const pageCount = Number(site.pages_scraped || (childPages.length ? childPages.length + 1 : 0));
+    const pageCount = countWebsitePages(site, childPages, usageRows);
     const sourceSecondary = joinSecondaryParts([
       site.title || '',
       pageCount ? `${fmt(pageCount)} pages` : '',
@@ -935,8 +954,8 @@ function buildIngestionParentRows(files, websites) {
       chunkCount: Number(chunkStats.chunk_count || 0),
       contentPretty: chunkStats.content_pretty || '-',
       embeddingPretty: chunkStats.embedding_pretty || '-',
-      // Only show a second level when this website actually has child pages.
-      expandable: childPages.length > 0,
+      // Multi-page websites expand to child pages; single-page websites expand directly to chunks.
+      expandable: childPages.length > 0 || Number(chunkStats.chunk_count || 0) > 0,
       downloadable: childPages.length > 0 || Number(chunkStats.chunk_count || 0) > 0 || usageRows.length > 0,
     });
   });
@@ -1382,9 +1401,15 @@ async function toggleIngestionParentRow(rowEl) {
 
   rowEl.classList.add('open');
 
+  const websiteId = String(documentId);
+  const websiteChildren = rowKind === 'website-parent'
+    ? (CURRENT_INGESTION_VIEW.websiteChildrenByParentId.get(websiteId) || [])
+    : [];
+  const showWebsitePages = rowKind === 'website-parent' && websiteChildren.length > 0;
+
   const loadingRow = document.createElement('tr');
-  loadingRow.className = rowKind === 'website-parent' ? 'page-row' : 'chunk-row';
-  loadingRow.innerHTML = `<td colspan="12" style="color:var(--muted)">${rowKind === 'website-parent' ? 'Loading child pages...' : 'Loading chunk rows...'}</td>`;
+  loadingRow.className = showWebsitePages ? 'page-row' : 'chunk-row';
+  loadingRow.innerHTML = `<td colspan="12" style="color:var(--muted)">${showWebsitePages ? 'Loading child pages...' : 'Loading chunk rows...'}</td>`;
   rowEl.after(loadingRow);
 
   try {
@@ -1392,8 +1417,26 @@ async function toggleIngestionParentRow(rowEl) {
     loadingRow.remove();
 
     if (rowKind === 'website-parent') {
-      const parentWebsite = CURRENT_INGESTION_VIEW.websiteRootsById.get(String(documentId)) || null;
-      const childWebsites = CURRENT_INGESTION_VIEW.websiteChildrenByParentId.get(String(documentId)) || [];
+      const parentWebsite = CURRENT_INGESTION_VIEW.websiteRootsById.get(websiteId) || null;
+      const childWebsites = websiteChildren;
+      if (!childWebsites.length) {
+        if (!chunks.length) {
+          const emptyRow = document.createElement('tr');
+          emptyRow.className = 'chunk-row';
+          emptyRow.innerHTML = `<td colspan="12" style="color:var(--muted)">No chunks found for this website.</td>`;
+          rowEl.after(emptyRow);
+          return;
+        }
+
+        let insertAfter = rowEl;
+        chunks.forEach(chunk => {
+          const chunkRowEl = createChunkRowElement(chunk, embeddingModel);
+          insertAfter.after(chunkRowEl);
+          insertAfter = chunkRowEl;
+        });
+        return;
+      }
+
       const pageRows = buildWebsitePageRows(documentId, parentWebsite, childWebsites, chunks);
       if (!pageRows.length) {
         const emptyRow = document.createElement('tr');
