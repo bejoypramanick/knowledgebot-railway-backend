@@ -293,8 +293,15 @@ async def usage_report_chunks(
                         document_id,
                         document_type,
                         chunk_index,
+                        ROW_NUMBER() OVER (ORDER BY chunk_index ASC, created_at ASC) AS chunk_row_number,
                         content,
                         metadata,
+                        char_length(content) AS char_count,
+                        CASE
+                            WHEN btrim(content) = '' THEN 0
+                            ELSE cardinality(regexp_split_to_array(btrim(content), E'\\s+'))
+                        END AS word_count,
+                        octet_length(content) AS size_bytes,
                         pg_size_pretty(CAST(pg_column_size(content) AS bigint)) AS content_pretty,
                         pg_size_pretty(CAST(pg_column_size(embedding) AS bigint)) AS embedding_pretty,
                         created_at
@@ -492,7 +499,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     <h2 style="margin:0">Knowledge Ingestion</h2>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th><span class="th-with-info">Date<button type="button" class="info-icon" aria-label="Explain Date column" aria-expanded="false" data-tooltip-title="Date" data-tooltip="Table: token_usage_log&#10;Column: created_at&#10;Logic: shows the created_at timestamp of the ingestion embedding usage row." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Source<button type="button" class="info-icon" aria-label="Explain Source column" aria-expanded="false" data-tooltip-title="Source" data-tooltip="Table: file_uploads.original_filename or scraped_websites.original_url&#10;Fallbacks: token_usage_log.request_metadata.source_url, url, display_name, filename, webpage_name&#10;Logic: if request_metadata.file_id matches RAW.files.id, show file_uploads.original_filename; else if request_metadata.website_id matches RAW.websites.id, show scraped_websites.original_url; otherwise use stored request metadata fallbacks." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chunk Row Count<button type="button" class="info-icon" aria-label="Explain Chunk Row Count column" aria-expanded="false" data-tooltip-title="Chunk Row Count" data-tooltip="Table: document_chunks&#10;Column: COUNT(*) grouped by document_id&#10;Logic: uses the pre-aggregated chunk_count for the matching file_id or website_id from RAW.file_chunk_stats / RAW.website_chunk_stats." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Content KB<button type="button" class="info-icon" aria-label="Explain Content KB column" aria-expanded="false" data-tooltip-title="Content KB" data-tooltip="Table: document_chunks&#10;Column: SUM(pg_column_size(content)) grouped by document_id&#10;Logic: uses content_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding KB<button type="button" class="info-icon" aria-label="Explain Embedding KB column" aria-expanded="false" data-tooltip-title="Embedding KB" data-tooltip="Table: document_chunks&#10;Column: SUM(pg_column_size(embedding)) grouped by document_id&#10;Logic: uses embedding_pretty from RAW.file_chunk_stats / RAW.website_chunk_stats for the matching file_id or website_id." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Model<button type="button" class="info-icon" aria-label="Explain Model column" aria-expanded="false" data-tooltip-title="Model" data-tooltip="Table: token_usage_log&#10;Column: model&#10;Logic: shows the embedding model recorded for the ingestion usage row." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding Tokens<button type="button" class="info-icon" aria-label="Explain Embedding Tokens column" aria-expanded="false" data-tooltip-title="Embedding Tokens" data-tooltip="Table: token_usage_log&#10;Columns: total_tokens, prompt_tokens&#10;Logic: shows total_tokens when present; otherwise falls back to prompt_tokens for the embedding call." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chars<button type="button" class="info-icon" aria-label="Explain Chars column" aria-expanded="false" data-tooltip-title="Chars" data-tooltip="Table: token_usage_log.request_metadata&#10;Column: input_character_count&#10;Fallback: system_prompt_character_count&#10;Logic: shows the captured character count of the text payload sent to the embedding request." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Words<button type="button" class="info-icon" aria-label="Explain Words column" aria-expanded="false" data-tooltip-title="Words" data-tooltip="Table: token_usage_log.request_metadata&#10;Column: input_word_count&#10;Logic: shows the captured word count of the text payload sent to the embedding request." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Size<button type="button" class="info-icon" aria-label="Explain Size column" aria-expanded="false" data-tooltip-title="Size" data-tooltip="Table: token_usage_log.request_metadata&#10;Columns: input_size_bytes, image_size_bytes, system_prompt_size_bytes&#10;Logic: shows the size of the payload sent to the embedding API, formatted as B/KB/MB. This is not the original uploaded file size." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Char/Token Ratio<button type="button" class="info-icon" aria-label="Explain Char/Token Ratio column" aria-expanded="false" data-tooltip-title="Char/Token Ratio" data-tooltip="Tables: token_usage_log + token_usage_log.request_metadata&#10;Columns: total_tokens/prompt_tokens and input_character_count/system_prompt_character_count&#10;Logic: character_count divided by embedding_tokens." onclick="toggleHeaderTooltip(event)">i</button></span></th></tr></thead>
+  <thead><tr><th><span class="th-with-info">Date<button type="button" class="info-icon" aria-label="Explain Date column" aria-expanded="false" data-tooltip-title="Date" data-tooltip="Table: token_usage_log&#10;Column: created_at&#10;Logic: shows the created_at timestamp of the ingestion embedding usage row. Expanded chunk rows show the chunk created_at timestamp." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Source<button type="button" class="info-icon" aria-label="Explain Source column" aria-expanded="false" data-tooltip-title="Source" data-tooltip="Table: file_uploads.original_filename or scraped_websites.original_url&#10;Logic: if request_metadata.file_id matches RAW.files.id, show file_uploads.original_filename; else if request_metadata.website_id matches RAW.websites.id, show scraped_websites.original_url. Expanded chunk rows show the chunk text itself." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chunk Row Count<button type="button" class="info-icon" aria-label="Explain Chunk Row Count column" aria-expanded="false" data-tooltip-title="Chunk Row Count" data-tooltip="Table: document_chunks&#10;Logic: main rows use COUNT(*) grouped by document_id from RAW.file_chunk_stats / RAW.website_chunk_stats. Expanded chunk rows show the 1-based row number of that chunk within the document." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Content KB<button type="button" class="info-icon" aria-label="Explain Content KB column" aria-expanded="false" data-tooltip-title="Content KB" data-tooltip="Table: document_chunks&#10;Column: pg_column_size(content)&#10;Logic: main rows show grouped totals; expanded chunk rows show the stored size for that individual chunk content." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding KB<button type="button" class="info-icon" aria-label="Explain Embedding KB column" aria-expanded="false" data-tooltip-title="Embedding KB" data-tooltip="Table: document_chunks&#10;Column: pg_column_size(embedding)&#10;Logic: main rows show grouped totals; expanded chunk rows show the stored size for that individual chunk embedding." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Model<button type="button" class="info-icon" aria-label="Explain Model column" aria-expanded="false" data-tooltip-title="Model" data-tooltip="Table: token_usage_log&#10;Column: model&#10;Logic: shows the embedding model recorded for the ingestion usage row, and the same model is shown on expanded chunk rows." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding Tokens<button type="button" class="info-icon" aria-label="Explain Embedding Tokens column" aria-expanded="false" data-tooltip-title="Embedding Tokens" data-tooltip="Table: token_usage_log&#10;Column: total_tokens&#10;Logic: shows the logged embedding token count for the ingestion usage row." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chars<button type="button" class="info-icon" aria-label="Explain Chars column" aria-expanded="false" data-tooltip-title="Chars" data-tooltip="Tables: token_usage_log.request_metadata and document_chunks&#10;Logic: main rows show request_metadata.input_character_count; expanded chunk rows show char_length(content) for that chunk." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Words<button type="button" class="info-icon" aria-label="Explain Words column" aria-expanded="false" data-tooltip-title="Words" data-tooltip="Tables: token_usage_log.request_metadata and document_chunks&#10;Logic: main rows show request_metadata.input_word_count; expanded chunk rows show the whitespace-delimited word count for that chunk." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Size<button type="button" class="info-icon" aria-label="Explain Size column" aria-expanded="false" data-tooltip-title="Size" data-tooltip="Tables: token_usage_log.request_metadata and document_chunks&#10;Logic: main rows show request_metadata.input_size_bytes; expanded chunk rows show octet_length(content) for that chunk, formatted as B/KB/MB." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Char/Token Ratio<button type="button" class="info-icon" aria-label="Explain Char/Token Ratio column" aria-expanded="false" data-tooltip-title="Char/Token Ratio" data-tooltip="Tables: token_usage_log.request_metadata and token_usage_log&#10;Columns: input_character_count and total_tokens&#10;Logic: character_count divided by the logged embedding token count for the ingestion usage row. Expanded chunk rows leave this blank because there is no per-chunk token value stored." onclick="toggleHeaderTooltip(event)">i</button></span></th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -519,8 +526,8 @@ const badge = s => `<span class="badge badge-${s||'active'}">${s||'active'}</spa
 const cutoff = days => { const d=new Date(); d.setDate(d.getDate()-days); return d.toISOString(); };
 const trunc = (s,n) => s && s.length>n ? s.substring(0,n)+'...' : (s||'-');
 const escHtml = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
-const FILE_SOURCE_MAP = Object.fromEntries((RAW.files || []).map(f => [String(f.id), f.original_filename || f.display_name || f.storage_document_name || '']));
-const WEBSITE_SOURCE_MAP = Object.fromEntries((RAW.websites || []).map(w => [String(w.id), w.original_url || w.title || w.storage_document_name || '']));
+const FILE_SOURCE_MAP = Object.fromEntries((RAW.files || []).map(f => [String(f.id), f.original_filename || '']));
+const WEBSITE_SOURCE_MAP = Object.fromEntries((RAW.websites || []).map(w => [String(w.id), w.original_url || '']));
 let activeHeaderTooltipButton = null;
 
 function filterByDate(arr, days, dateField='created_at') {
@@ -665,6 +672,11 @@ function payloadWords(meta) {
 function payloadBytes(meta) {
   return meta.input_size_bytes || meta.image_size_bytes || meta.system_prompt_size_bytes || 0;
 }
+function strictIngestionSource(meta) {
+  if(meta.file_id) return FILE_SOURCE_MAP[String(meta.file_id)] || '';
+  if(meta.website_id) return WEBSITE_SOURCE_MAP[String(meta.website_id)] || '';
+  return '';
+}
 function fmtBytes(bytes) {
   bytes = Number(bytes || 0);
   if(!bytes) return '-';
@@ -793,6 +805,7 @@ function toggleAllRows(tableId, btn) {
 async function toggleIngestionRow(rowEl, documentId, documentType) {
   if (!documentId) return;
   const isOpen = rowEl.classList.contains('open');
+  const embeddingModel = rowEl.dataset.embeddingModel || '';
   let next = rowEl.nextElementSibling;
   while(next && next.classList.contains('chunk-row')) {
     const toRemove = next;
@@ -838,15 +851,19 @@ async function toggleIngestionRow(rowEl, documentId, documentType) {
       const chunkRow = document.createElement('tr');
       chunkRow.className = 'chunk-row';
       chunkRow.innerHTML = `
-        <td class="mono">#${chunk.chunk_index ?? '-'}</td>
-        <td colspan="2">
+        <td>${fmtDateTime(chunk.created_at)}</td>
+        <td>
           <div class="chunk-content">${escHtml(chunk.content || '')}</div>
         </td>
+        <td class="mono">${chunk.chunk_row_number ?? '-'}</td>
         <td>${chunk.content_pretty || '-'}</td>
         <td>${chunk.embedding_pretty || '-'}</td>
-        <td colspan="2">Chunk</td>
-        <td colspan="2">${fmt((chunk.content || '').length)}</td>
-        <td colspan="2">${fmtDateTime(chunk.created_at)}</td>
+        <td>${escHtml(embeddingModel)}</td>
+        <td>-</td>
+        <td class="bd-num">${chunk.char_count ?? '-'}</td>
+        <td class="bd-num">${chunk.word_count ?? '-'}</td>
+        <td>${chunk.size_bytes == null ? '-' : fmtBytes(chunk.size_bytes)}</td>
+        <td>-</td>
       `;
       insertAfter.after(chunkRow);
       insertAfter = chunkRow;
@@ -989,42 +1006,39 @@ function render() {
     // Get source ID from metadata and look up chunk stats
     const sourceId = meta.website_id || meta.file_id || '';
     const sourceType = meta.website_id ? 'website' : 'file';
-    let chunkStats = { chunk_count: 0, total_content_bytes: 0, total_embedding_bytes: 0 };
+    let chunkStats = { chunk_count: null, content_pretty: null, embedding_pretty: null };
     if (sourceId) {
       const stats = RAW.file_chunk_stats[sourceId] || RAW.website_chunk_stats[sourceId];
       if (stats) {
         chunkStats = {
-          chunk_count: stats.chunk_count || 0,
-          content_pretty: stats.content_pretty || '-',
-          embedding_pretty: stats.embedding_pretty || '-'
+          chunk_count: stats.chunk_count ?? null,
+          content_pretty: stats.content_pretty ?? null,
+          embedding_pretty: stats.embedding_pretty ?? null
         };
       }
     }
     
-    const sourceName =
-      (meta.file_id && FILE_SOURCE_MAP[String(meta.file_id)]) ||
-      (meta.website_id && WEBSITE_SOURCE_MAP[String(meta.website_id)]) ||
-      meta.source_url ||
-      meta.url ||
-      meta.display_name ||
-      meta.filename ||
-      meta.webpage_name ||
-      '-';
+    const sourceName = strictIngestionSource(meta);
+    const embeddingModel = r.model || '';
+    const embeddingTokens = r.total_tokens ?? null;
+    const charCount = meta.input_character_count ?? null;
+    const wordCount = meta.input_word_count ?? null;
+    const sizeBytes = meta.input_size_bytes ?? null;
     
     const rowClass = sourceId ? 'ingestion-row' : '';
     const rowOnClick = sourceId ? `onclick="toggleIngestionRow(this, '${escHtml(sourceId)}', '${sourceType}')"` : '';
-    return `<tr class="${rowClass}" data-document-id="${escHtml(sourceId)}" data-document-type="${sourceType}" ${rowOnClick}>
+    return `<tr class="${rowClass}" data-document-id="${escHtml(sourceId)}" data-document-type="${sourceType}" data-embedding-model="${escHtml(embeddingModel)}" ${rowOnClick}>
       <td>${fmtDateTime(r.created_at)}</td>
       <td class="mono source-cell" title="${escHtml(sourceName)}">${escHtml(sourceName)}</td>
-      <td>${chunkStats.chunk_count || '-'}</td>
-      <td>${chunkStats.content_pretty || '-'}</td>
-      <td>${chunkStats.embedding_pretty || '-'}</td>
-      <td>${r.model||'-'}</td>
-      <td class="token-cell">${fmt(r.total_tokens || r.prompt_tokens || 0)}</td>
-      <td>${payloadChars(meta) ? fmt(payloadChars(meta)) : '-'}</td>
-      <td>${payloadWords(meta) ? fmt(payloadWords(meta)) : '-'}</td>
-      <td>${fmtBytes(payloadBytes(meta))}</td>
-      <td>${(() => { const t=r.total_tokens||r.prompt_tokens||0,c=payloadChars(meta)||0; return t>0 ? (c/t).toFixed(2) : '-'; })()}</td>
+      <td>${chunkStats.chunk_count == null ? '-' : fmt(chunkStats.chunk_count)}</td>
+      <td>${chunkStats.content_pretty == null ? '-' : chunkStats.content_pretty}</td>
+      <td>${chunkStats.embedding_pretty == null ? '-' : chunkStats.embedding_pretty}</td>
+      <td>${embeddingModel ? escHtml(embeddingModel) : '-'}</td>
+      <td class="token-cell">${embeddingTokens == null ? '-' : fmt(embeddingTokens)}</td>
+      <td>${charCount == null ? '-' : fmt(charCount)}</td>
+      <td>${wordCount == null ? '-' : fmt(wordCount)}</td>
+      <td>${sizeBytes == null ? '-' : fmtBytes(sizeBytes)}</td>
+      <td>${embeddingTokens > 0 && charCount != null ? (charCount / embeddingTokens).toFixed(2) : '-'}</td>
     </tr>`;
   }).join('');
 }
