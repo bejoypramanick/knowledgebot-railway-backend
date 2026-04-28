@@ -506,7 +506,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <div id="details-panel">
 <div class="section"><h2>Chat Sessions</h2><div class="table-wrap" style="max-height:700px"><table>
-  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Provider-reported input tokens">Prompt Tokens</th><th title="Provider-reported output tokens">Completion Tokens</th><th title="Gemini count_tokens totals for captured context text only">Captured Context Tokens</th><th title="Gemini count_tokens totals for visible message text">Message Tokens</th><th>Status</th></tr></thead>
+  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Provider-reported input tokens">Prompt Tokens</th><th title="Provider-reported output tokens">Completion Tokens</th><th title="Gemini count_tokens totals for captured context text only">Captured Context Tokens</th><th title="Gemini count_tokens totals for visible message text">Message Tokens</th><th>Status</th><th>Price</th></tr></thead>
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
@@ -515,7 +515,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
     <h2 style="margin:0">Knowledge Ingestion</h2>
   </div>
   <div class="table-wrap"><table>
-  <thead><tr><th><span class="th-with-info">Date<button type="button" class="info-icon" aria-label="Explain Date column" aria-expanded="false" data-tooltip-title="Date" data-tooltip="Table: token_usage_log&#10;Column: created_at&#10;Logic: shows the created_at timestamp of the ingestion embedding usage row. Expanded chunk rows show the chunk created_at timestamp." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Source<button type="button" class="info-icon" aria-label="Explain Source column" aria-expanded="false" data-tooltip-title="Source" data-tooltip="Table: file_uploads.original_filename or scraped_websites.original_url&#10;Logic: if request_metadata.file_id matches RAW.files.id, show file_uploads.original_filename; else if request_metadata.website_id matches RAW.websites.id, show scraped_websites.original_url. Expanded chunk rows show the chunk text itself." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chunk Row Count<button type="button" class="info-icon" aria-label="Explain Chunk Row Count column" aria-expanded="false" data-tooltip-title="Chunk Row Count" data-tooltip="Table: document_chunks&#10;Logic: main rows use COUNT(*) grouped by document_id from RAW.file_chunk_stats / RAW.website_chunk_stats. Expanded chunk rows show the 1-based row number of that chunk within the document." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Content KB<button type="button" class="info-icon" aria-label="Explain Content KB column" aria-expanded="false" data-tooltip-title="Content KB" data-tooltip="Table: document_chunks&#10;Column: pg_column_size(content)&#10;Logic: main rows show grouped totals; expanded chunk rows show the stored size for that individual chunk content." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding KB<button type="button" class="info-icon" aria-label="Explain Embedding KB column" aria-expanded="false" data-tooltip-title="Embedding KB" data-tooltip="Table: document_chunks&#10;Column: pg_column_size(embedding)&#10;Logic: main rows show grouped totals; expanded chunk rows show the stored size for that individual chunk embedding." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Model<button type="button" class="info-icon" aria-label="Explain Model column" aria-expanded="false" data-tooltip-title="Model" data-tooltip="Table: token_usage_log&#10;Column: model&#10;Logic: shows the embedding model recorded for the ingestion usage row, and the same model is shown on expanded chunk rows." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding Tokens<button type="button" class="info-icon" aria-label="Explain Embedding Tokens column" aria-expanded="false" data-tooltip-title="Embedding Tokens" data-tooltip="Table: token_usage_log&#10;Column: total_tokens&#10;Logic: shows the logged embedding token count for the ingestion usage row." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Price<button type="button" class="info-icon" aria-label="Explain Price column" aria-expanded="false" data-tooltip-title="Price" data-tooltip="Logic: calculated estimated embedding cost for the parent row using the model pricing and the logged embedding token count." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chars<button type="button" class="info-icon" aria-label="Explain Chars column" aria-expanded="false" data-tooltip-title="Chars" data-tooltip="Tables: token_usage_log.request_metadata and document_chunks&#10;Logic: main rows show request_metadata.input_character_count; expanded chunk rows show char_length(content) for that chunk." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Words<button type="button" class="info-icon" aria-label="Explain Words column" aria-expanded="false" data-tooltip-title="Words" data-tooltip="Tables: token_usage_log.request_metadata and document_chunks&#10;Logic: main rows show request_metadata.input_word_count; expanded chunk rows show the whitespace-delimited word count for that chunk." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Size<button type="button" class="info-icon" aria-label="Explain Size column" aria-expanded="false" data-tooltip-title="Size" data-tooltip="Tables: token_usage_log.request_metadata and document_chunks&#10;Logic: main rows show request_metadata.input_size_bytes; expanded chunk rows show octet_length(content) for that chunk, formatted as B/KB/MB." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Char/Token Ratio<button type="button" class="info-icon" aria-label="Explain Char/Token Ratio column" aria-expanded="false" data-tooltip-title="Char/Token Ratio" data-tooltip="Tables: token_usage_log.request_metadata and token_usage_log&#10;Columns: input_character_count and total_tokens&#10;Logic: character_count divided by the logged embedding token count for the ingestion usage row. Expanded chunk rows leave this blank because there is no per-chunk token value stored." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Download CSV<button type="button" class="info-icon" aria-label="Explain Download CSV column" aria-expanded="false" data-tooltip-title="Download CSV" data-tooltip="Logic: parent ingestion rows can export their child chunk rows to a CSV file for manual tally. Child rows themselves do not show a download button." onclick="toggleHeaderTooltip(event)">i</button></span></th></tr></thead>
+  <thead><tr><th><span class="th-with-info">Date<button type="button" class="info-icon" aria-label="Explain Date column" aria-expanded="false" data-tooltip-title="Date" data-tooltip="Table: token_usage_log&#10;Column: created_at&#10;Logic: shows the created_at timestamp of the ingestion embedding usage row. Expanded chunk rows show the chunk created_at timestamp." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Source<button type="button" class="info-icon" aria-label="Explain Source column" aria-expanded="false" data-tooltip-title="Source" data-tooltip="Table: file_uploads.original_filename or scraped_websites.original_url&#10;Logic: if request_metadata.file_id matches RAW.files.id, show file_uploads.original_filename; else if request_metadata.website_id matches RAW.websites.id, show scraped_websites.original_url. Expanded chunk rows show the chunk text itself." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chunk Row Count<button type="button" class="info-icon" aria-label="Explain Chunk Row Count column" aria-expanded="false" data-tooltip-title="Chunk Row Count" data-tooltip="Table: document_chunks&#10;Logic: main rows use COUNT(*) grouped by document_id from RAW.file_chunk_stats / RAW.website_chunk_stats. Expanded chunk rows show the 1-based row number of that chunk within the document." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Content KB<button type="button" class="info-icon" aria-label="Explain Content KB column" aria-expanded="false" data-tooltip-title="Content KB" data-tooltip="Table: document_chunks&#10;Column: pg_column_size(content)&#10;Logic: main rows show grouped totals; expanded chunk rows show the stored size for that individual chunk content." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding KB<button type="button" class="info-icon" aria-label="Explain Embedding KB column" aria-expanded="false" data-tooltip-title="Embedding KB" data-tooltip="Table: document_chunks&#10;Column: pg_column_size(embedding)&#10;Logic: main rows show grouped totals; expanded chunk rows show the stored size for that individual chunk embedding." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Model<button type="button" class="info-icon" aria-label="Explain Model column" aria-expanded="false" data-tooltip-title="Model" data-tooltip="Table: token_usage_log&#10;Column: model&#10;Logic: shows the embedding model recorded for the ingestion usage row, and the same model is shown on expanded chunk rows." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Embedding Tokens<button type="button" class="info-icon" aria-label="Explain Embedding Tokens column" aria-expanded="false" data-tooltip-title="Embedding Tokens" data-tooltip="Table: token_usage_log&#10;Column: total_tokens&#10;Logic: shows the logged embedding token count for the ingestion usage row." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Chars<button type="button" class="info-icon" aria-label="Explain Chars column" aria-expanded="false" data-tooltip-title="Chars" data-tooltip="Tables: token_usage_log.request_metadata and document_chunks&#10;Logic: main rows show request_metadata.input_character_count; expanded chunk rows show char_length(content) for that chunk." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Words<button type="button" class="info-icon" aria-label="Explain Words column" aria-expanded="false" data-tooltip-title="Words" data-tooltip="Tables: token_usage_log.request_metadata and document_chunks&#10;Logic: main rows show request_metadata.input_word_count; expanded chunk rows show the whitespace-delimited word count for that chunk." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Size<button type="button" class="info-icon" aria-label="Explain Size column" aria-expanded="false" data-tooltip-title="Size" data-tooltip="Tables: token_usage_log.request_metadata and document_chunks&#10;Logic: main rows show request_metadata.input_size_bytes; expanded chunk rows show octet_length(content) for that chunk, formatted as B/KB/MB." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Char/Token Ratio<button type="button" class="info-icon" aria-label="Explain Char/Token Ratio column" aria-expanded="false" data-tooltip-title="Char/Token Ratio" data-tooltip="Tables: token_usage_log.request_metadata and token_usage_log&#10;Columns: input_character_count and total_tokens&#10;Logic: character_count divided by the logged embedding token count for the ingestion usage row. Expanded chunk rows leave this blank because there is no per-chunk token value stored." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Download CSV<button type="button" class="info-icon" aria-label="Explain Download CSV column" aria-expanded="false" data-tooltip-title="Download CSV" data-tooltip="Logic: parent ingestion rows can export their child chunk rows to a CSV file for manual tally. Child rows themselves do not show a download button." onclick="toggleHeaderTooltip(event)">i</button></span></th><th><span class="th-with-info">Price<button type="button" class="info-icon" aria-label="Explain Price column" aria-expanded="false" data-tooltip-title="Price" data-tooltip="Logic: calculated estimated embedding cost for the parent row using the model pricing and the logged embedding token count." onclick="toggleHeaderTooltip(event)">i</button></span></th></tr></thead>
   <tbody id="token-log-table"></tbody>
 </table></div></div>
 </div>
@@ -781,6 +781,12 @@ function fmtUsd(value) {
   if(amount < 0.01) return `$${amount.toFixed(6)}`;
   return `$${amount.toFixed(4)}`;
 }
+function usageRowCostUsd(row) {
+  const meta = parseMeta(row && row.request_metadata);
+  const direct = Number(meta.cost_usd ?? row.cost_usd ?? 0);
+  if(Number.isFinite(direct) && direct > 0) return direct;
+  return 0;
+}
 function summarizeWebsiteChunksByPage(chunks) {
   const grouped = new Map();
   (chunks || []).forEach(chunk => {
@@ -1037,12 +1043,12 @@ function renderIngestionParentRow(row) {
       <td>${row.embeddingPretty || '-'}</td>
       <td>${row.model ? escHtml(row.model) : '-'}</td>
       <td class="token-cell">${row.embeddingTokens ? fmt(row.embeddingTokens) : '-'}</td>
-      <td>${fmtUsd(row.priceUsd)}</td>
       <td>${row.charCount ? fmt(row.charCount) : '-'}</td>
       <td>${row.wordCount ? fmt(row.wordCount) : '-'}</td>
       <td>${row.sizeBytes ? fmtBytes(row.sizeBytes) : '-'}</td>
       <td>${ratio}</td>
       <td class="table-action-cell">${downloadCell}</td>
+      <td>${fmtUsd(row.priceUsd)}</td>
     </tr>`;
 }
 function createWebsitePageRowElement(page, parentDocumentId) {
@@ -1193,6 +1199,9 @@ function nonIngestionUsageForSession(sessionId) {
   return (RAW.token_usage_log || [])
     .filter(r => r.session_id === sessionId && !isIngestionUsage(r))
     .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+}
+function sessionPriceUsd(sessionId) {
+  return nonIngestionUsageForSession(sessionId).reduce((sum, row) => sum + usageRowCostUsd(row), 0);
 }
 function usageTokenSource(meta) {
   return meta.token_source || meta.usage_capture || '-';
@@ -1578,6 +1587,10 @@ function render() {
   const fileTokens = files.reduce((a,r) => a+(r.embedding_token_count||0), 0);
   const fileSizeBytes = files.reduce((a,r) => a+(r.file_size||0), 0);
   const totalWebsites = websites.length;
+  const rootWebsiteRows = websites.filter(w => !w.parent_id);
+  const childWebpageRows = websites.filter(w => !!w.parent_id);
+  const totalWebsiteRoots = rootWebsiteRows.length;
+  const totalWebpagesScraped = childWebpageRows.length;
   const webTokens = websites.reduce((a,r) => a+(r.embedding_token_count||0), 0);
   const websiteSizeBytes = websites.reduce((a,r) => a+(r.file_size||0), 0);
 
@@ -1590,54 +1603,54 @@ function render() {
   });
 
   const ingestionTokens = ingestionTokenLog.reduce((a,r) => a + (r.total_tokens||0), 0);
+  const ingestionPriceUsd = ingestionTokenLog.reduce(
+    (sum, row) => sum + estimatedEmbeddingCostUsd(row.model || '', row.total_tokens || row.prompt_tokens || 0),
+    0
+  );
 
-  // === TOKEN SUMMARY ===
+  // === KNOWLEDGE BASE INGESTION SUMMARY ===
   document.getElementById('token-summary').innerHTML = `
-    <h2>Token Usage Summary</h2>
+    <h2>Knowledge Base Ingestion Summary</h2>
     <div class="token-grid">
       <div class="token-item">
-        <div class="token-label">Total Reported Tokens</div>
-        <div class="token-value">${fmt(totalPromptTokens + totalCompletionTokens + ingestionTokens)}</div>
-        <div class="token-detail">Chat sessions plus knowledge ingestion calls</div>
+        <div class="token-label">Embedding Tokens</div>
+        <div class="token-value">${fmt(ingestionTokens)}</div>
+        <div class="token-detail">Total embedding tokens from knowledge ingestion</div>
       </div>
       <div class="token-item">
-        <div class="token-label">Provider Prompt Input</div>
-        <div class="token-value" style="font-size:20px">${fmt(totalPromptTokens)}</div>
-        <div class="token-detail">Prompt tokens returned by provider usage</div>
+        <div class="token-label">Files Uploaded</div>
+        <div class="token-value" style="font-size:20px">${fmt(totalFiles)}</div>
+        <div class="token-detail">${fmtBytes(fileSizeBytes)} total uploaded file size</div>
       </div>
       <div class="token-item">
-        <div class="token-label">Output</div>
-        <div class="token-value" style="font-size:20px">${fmt(totalCompletionTokens)}</div>
-        <div class="token-detail">Completion tokens from chat sessions</div>
+        <div class="token-label">Websites Scraped</div>
+        <div class="token-value" style="font-size:20px">${fmt(totalWebsiteRoots)}</div>
+        <div class="token-detail">Root website scrape entries</div>
       </div>
       <div class="token-item">
-        <div class="token-label">Cache Read</div>
-        <div class="token-value" style="font-size:20px">${fmt(totalCacheReadTokens)}</div>
-        <div class="token-detail">Cached input tokens reported by logged API calls</div>
+        <div class="token-label">WebPages Scraped</div>
+        <div class="token-value" style="font-size:20px">${fmt(totalWebpagesScraped)}</div>
+        <div class="token-detail">${fmtBytes(websiteSizeBytes)} total scraped web content size</div>
       </div>
       <div class="token-item">
-        <div class="token-label">Cache Write</div>
-        <div class="token-value" style="font-size:20px">${fmt(totalCacheWriteTokens)}</div>
-        <div class="token-detail">Cache creation tokens from logged API calls</div>
-      </div>
-      <div class="token-item">
-        <div class="token-label">Knowledge Ingestion</div>
-        <div class="token-value" style="font-size:20px">${fmt(ingestionTokens)}</div>
-        <div class="token-detail">${fmt(ingestionTokens)} tokens from embeddings</div>
+        <div class="token-label">Total Cost</div>
+        <div class="token-value" style="font-size:20px">${fmtUsd(ingestionPriceUsd)}</div>
+        <div class="token-detail">Estimated total embedding cost</div>
       </div>
     </div>
   `;
 
-  // === KPIs ===
+  // === CHAT SUMMARY ===
   document.getElementById('kpis').innerHTML = `
-    <div class="kpi"><div class="label">Total Sessions</div><div class="value accent">${fmt(totalSessions)}</div><div class="sub">${fmt(totalMsgs)} messages total</div></div>
-    <div class="kpi"><div class="label">Provider Prompt Tokens</div><div class="value green">${fmt(totalPromptTokens)}</div><div class="sub">Input tokens returned by provider usage</div></div>
-    <div class="kpi"><div class="label">Output Tokens (Completion)</div><div class="value cyan">${fmt(totalCompletionTokens)}</div><div class="sub">Chat completion tokens</div></div>
-    <div class="kpi"><div class="label">Cache Read Tokens</div><div class="value accent2">${fmt(totalCacheReadTokens)}</div><div class="sub">Reported cached input tokens</div></div>
-    <div class="kpi"><div class="label">Cache Write Tokens</div><div class="value processing">${fmt(totalCacheWriteTokens)}</div><div class="sub">Reported cache creation tokens</div></div>
-    <div class="kpi"><div class="label">Knowledge Ingestion Tokens</div><div class="value red">${fmt(ingestionTokens)}</div><div class="sub">Embeddings</div></div>
-    <div class="kpi"><div class="label">Files Uploaded</div><div class="value orange">${fmt(totalFiles)}</div><div class="sub">${fmtBytes(fileSizeBytes)} total</div></div>
-    <div class="kpi"><div class="label">WebPages Scraped</div><div class="value cyan">${fmt(totalWebsites)}</div><div class="sub">${fmtBytes(websiteSizeBytes)} total</div></div>
+    <div class="token-summary">
+      <h2>Chat Summary</h2>
+      <div class="kpi-grid">
+        <div class="kpi"><div class="label">Total Sessions</div><div class="value accent">${fmt(totalSessions)}</div><div class="sub">${fmt(totalMsgs)} messages total</div></div>
+        <div class="kpi"><div class="label">Total Tokens</div><div class="value green">${fmt(totalPromptTokens + totalCompletionTokens)}</div><div class="sub">Input plus output chat tokens</div></div>
+        <div class="kpi"><div class="label">Input Tokens</div><div class="value cyan">${fmt(totalPromptTokens)}</div><div class="sub">Prompt tokens returned by provider usage</div></div>
+        <div class="kpi"><div class="label">Output Tokens</div><div class="value accent2">${fmt(totalCompletionTokens)}</div><div class="sub">Completion tokens from chat sessions</div></div>
+      </div>
+    </div>
   `;
 
   // === INSIGHTS ===
@@ -1662,6 +1675,7 @@ function render() {
     const sessionRow = document.createElement('tr');
     sessionRow.className = 'session-row';
     sessionRow.dataset.sessionId = r.id;
+    const sessionPrice = sessionPriceUsd(r.id);
     sessionRow.innerHTML = `
       <td class="mono">${r.id}</td>
       <td>${fmtDateTime(r.started_at)}</td><td>${r.message_count||0}</td>
@@ -1669,7 +1683,8 @@ function render() {
       <td class="token-cell">${fmt(r.total_completion_token_count)}</td>
       <td class="token-cell">${fmt((r.total_system_prompt_token_count||0)+(r.total_history_token_count||0)+(r.total_tool_def_token_count||0))}</td>
       <td class="token-cell">${fmt((r.total_user_msg_token_count||0)+(r.total_bot_response_token_count||0))}</td>
-      <td>${badge(r.archive_status)}</td>`;
+      <td>${badge(r.archive_status)}</td>
+      <td>${fmtUsd(sessionPrice)}</td>`;
     sessionsEl.appendChild(sessionRow);
   });
 
