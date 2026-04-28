@@ -296,12 +296,16 @@ async def usage_report_chunks(
                         ROW_NUMBER() OVER (ORDER BY chunk_index ASC, created_at ASC) AS chunk_row_number,
                         content,
                         metadata,
+                        COALESCE(metadata->>'url', '') AS page_url,
+                        COALESCE(metadata->>'title', '') AS page_title,
                         char_length(content) AS char_count,
                         CASE
                             WHEN btrim(content) = '' THEN 0
                             ELSE cardinality(regexp_split_to_array(btrim(content), '[[:space:]]+'))
                         END AS word_count,
                         octet_length(content) AS size_bytes,
+                        pg_column_size(content) AS content_storage_bytes,
+                        pg_column_size(embedding) AS embedding_storage_bytes,
                         pg_size_pretty(CAST(pg_column_size(content) AS bigint)) AS content_pretty,
                         pg_size_pretty(CAST(pg_column_size(embedding) AS bigint)) AS embedding_pretty,
                         created_at
@@ -435,14 +439,22 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 .metadata-snippet{font-family:'SF Mono','Fira Code',monospace;font-size:10px;color:var(--muted);white-space:pre-wrap;word-break:break-all}
 .source-cell{max-width:220px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.35}
 .source-link{color:inherit;text-decoration:none;overflow-wrap:anywhere;word-break:break-word}
+.source-primary{font-weight:600;line-height:1.35}
+.source-secondary{font-size:11px;color:var(--muted);line-height:1.35;margin-top:2px}
 .ingestion-row{cursor:pointer}
 .ingestion-row td:first-child::before{content:'\\25B6';margin-right:8px;font-size:10px;color:var(--muted);transition:.2s;display:inline-block}
 .ingestion-row.open td:first-child::before{transform:rotate(90deg)}
+.ingestion-parent-row td{background:#fff}
+.page-row td{background:rgba(79,70,229,.03);font-size:12px}
+.page-row td:first-child{padding-left:28px}
+.page-row-expandable td:first-child::before{content:'\\25B6';margin-right:8px;font-size:10px;color:var(--muted);transition:.2s;display:inline-block}
+.page-row-expandable.open td:first-child::before{transform:rotate(90deg)}
 .table-action-cell{white-space:nowrap}
 .inline-action-btn{padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:#fff;color:var(--text);font-size:11px;font-weight:600;cursor:pointer}
 .inline-action-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(79,70,229,.06)}
 .inline-action-btn:disabled{opacity:.65;cursor:wait}
-.chunk-row td{background:rgba(79,70,229,.03);font-size:12px;padding:8px 12px}
+.chunk-row td{background:rgba(79,70,229,.06);font-size:12px;padding:8px 12px}
+.chunk-row td:first-child{padding-left:52px}
 .chunk-content{white-space:pre-wrap;word-break:break-word;max-width:760px;line-height:1.5}
 .hidden-panel{display:none}
 @media (max-width: 760px) {
@@ -534,6 +546,13 @@ const FILE_SOURCE_MAP = Object.fromEntries((RAW.files || []).map(f => [String(f.
 const WEBSITE_SOURCE_MAP = Object.fromEntries((RAW.websites || []).map(w => [String(w.id), w.original_url || '']));
 const INGESTION_CHUNK_CACHE = new Map();
 const INGESTION_CHUNK_REQUESTS = new Map();
+let CURRENT_INGESTION_VIEW = {
+  websiteUsageById: new Map(),
+  fileUsageById: new Map(),
+  websiteRootsById: new Map(),
+  websiteChildrenByParentId: new Map(),
+  fileRowsById: new Map(),
+};
 let activeHeaderTooltipButton = null;
 
 function filterByDate(arr, days, dateField='created_at') {
@@ -679,9 +698,380 @@ function payloadBytes(meta) {
   return meta.input_size_bytes || meta.image_size_bytes || meta.system_prompt_size_bytes || 0;
 }
 function strictIngestionSource(meta) {
+  if(meta.source_url) return meta.source_url;
+  if(meta.url) return meta.url;
   if(meta.file_id) return FILE_SOURCE_MAP[String(meta.file_id)] || '';
   if(meta.website_id) return WEBSITE_SOURCE_MAP[String(meta.website_id)] || '';
-  return '';
+  return meta.display_name || meta.filename || meta.webpage_name || '';
+}
+function normalizeSourceKey(value) {
+  const normalized = String(value || '').trim();
+  if(!normalized) return '';
+  return normalized.replace(/\/+$/,'');
+}
+function parseChunkMetadata(chunk) {
+  if(!chunk || chunk.metadata == null) return {};
+  if(typeof chunk.metadata === 'string') {
+    try { return JSON.parse(chunk.metadata); } catch(e) { return {}; }
+  }
+  return chunk.metadata || {};
+}
+function getChunkPageUrl(chunk) {
+  const meta = parseChunkMetadata(chunk);
+  return chunk.page_url || meta.url || '';
+}
+function getChunkPageTitle(chunk) {
+  const meta = parseChunkMetadata(chunk);
+  return chunk.page_title || meta.title || '';
+}
+function sortRowsByCreatedDesc(rows) {
+  return [...(rows || [])].sort((a,b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+}
+function buildUsageMaps(rows) {
+  const websiteUsageById = new Map();
+  const fileUsageById = new Map();
+  (rows || []).forEach(row => {
+    const meta = parseMeta(row.request_metadata);
+    if(meta.website_id) {
+      const key = String(meta.website_id);
+      if(!websiteUsageById.has(key)) websiteUsageById.set(key, []);
+      websiteUsageById.get(key).push(row);
+    }
+    if(meta.file_id) {
+      const key = String(meta.file_id);
+      if(!fileUsageById.has(key)) fileUsageById.set(key, []);
+      fileUsageById.get(key).push(row);
+    }
+  });
+  websiteUsageById.forEach((value, key) => websiteUsageById.set(key, sortRowsByCreatedDesc(value)));
+  fileUsageById.forEach((value, key) => fileUsageById.set(key, sortRowsByCreatedDesc(value)));
+  return { websiteUsageById, fileUsageById };
+}
+function summarizeUsageRows(rows) {
+  const sorted = sortRowsByCreatedDesc(rows);
+  const totals = sorted.reduce((acc, row) => {
+    const meta = parseMeta(row.request_metadata);
+    acc.tokens += Number(row.total_tokens || row.prompt_tokens || 0);
+    acc.charCount += Number(meta.input_character_count || 0);
+    acc.wordCount += Number(meta.input_word_count || 0);
+    acc.sizeBytes += Number(meta.input_size_bytes || 0);
+    return acc;
+  }, { tokens: 0, charCount: 0, wordCount: 0, sizeBytes: 0 });
+  return {
+    createdAt: sorted[0]?.created_at || '',
+    model: sorted.find(row => row.model)?.model || '',
+    tokens: totals.tokens,
+    charCount: totals.charCount,
+    wordCount: totals.wordCount,
+    sizeBytes: totals.sizeBytes,
+  };
+}
+function summarizeWebsiteChunksByPage(chunks) {
+  const grouped = new Map();
+  (chunks || []).forEach(chunk => {
+    const pageUrl = getChunkPageUrl(chunk);
+    const key = normalizeSourceKey(pageUrl) || '__unknown__';
+    if(!grouped.has(key)) {
+      grouped.set(key, {
+        pageKey: key,
+        pageUrl,
+        pageTitle: getChunkPageTitle(chunk),
+        chunkCount: 0,
+        contentStorageBytes: 0,
+        embeddingStorageBytes: 0,
+        charCount: 0,
+        wordCount: 0,
+        sizeBytes: 0,
+        createdAt: chunk.created_at || '',
+      });
+    }
+    const summary = grouped.get(key);
+    summary.pageUrl = summary.pageUrl || pageUrl;
+    summary.pageTitle = summary.pageTitle || getChunkPageTitle(chunk);
+    summary.chunkCount += 1;
+    summary.contentStorageBytes += Number(chunk.content_storage_bytes || 0);
+    summary.embeddingStorageBytes += Number(chunk.embedding_storage_bytes || 0);
+    summary.charCount += Number(chunk.char_count || 0);
+    summary.wordCount += Number(chunk.word_count || 0);
+    summary.sizeBytes += Number(chunk.size_bytes || 0);
+    if(String(chunk.created_at || '') > String(summary.createdAt || '')) summary.createdAt = chunk.created_at || summary.createdAt;
+  });
+  return grouped;
+}
+function renderSourceCell(primary, secondary='') {
+  const primaryText = escHtml(primary || '-');
+  const secondaryText = secondary ? `<div class="source-secondary">${escHtml(secondary)}</div>` : '';
+  return `<div class="source-primary">${primaryText}</div>${secondaryText}`;
+}
+function joinSecondaryParts(parts) {
+  return (parts || []).filter(Boolean).join(' • ');
+}
+function buildWebsiteChildrenMap(websites) {
+  const websiteRootsById = new Map();
+  const websiteChildrenByParentId = new Map();
+  (websites || []).forEach(site => {
+    const siteId = String(site.id || '');
+    if(!site.parent_id) {
+      websiteRootsById.set(siteId, site);
+      return;
+    }
+    const parentId = String(site.parent_id);
+    if(!websiteChildrenByParentId.has(parentId)) websiteChildrenByParentId.set(parentId, []);
+    websiteChildrenByParentId.get(parentId).push(site);
+  });
+  websiteChildrenByParentId.forEach((rows, key) => websiteChildrenByParentId.set(key, sortRowsByCreatedDesc(rows)));
+  return { websiteRootsById, websiteChildrenByParentId };
+}
+function buildWebsitePageRows(documentId, parentWebsite, childWebsites, chunks) {
+  const pageSummaries = summarizeWebsiteChunksByPage(chunks);
+  const usageRows = CURRENT_INGESTION_VIEW.websiteUsageById.get(String(documentId)) || [];
+  const parentSourceName = parentWebsite?.original_url || '';
+  const rowsByKey = new Map();
+
+  function ensureRow(key, fallbackId='') {
+    if(!rowsByKey.has(key)) {
+      rowsByKey.set(key, {
+        rowId: fallbackId || key,
+        pageKey: key,
+        pageUrl: '',
+        pageTitle: '',
+        createdAt: '',
+        model: '',
+        embeddingTokens: 0,
+        charCount: 0,
+        wordCount: 0,
+        sizeBytes: 0,
+        chunkCount: 0,
+        contentStorageBytes: 0,
+        embeddingStorageBytes: 0,
+        isRootPage: false,
+      });
+    }
+    return rowsByKey.get(key);
+  }
+
+  (childWebsites || []).forEach(site => {
+    const key = normalizeSourceKey(site.original_url) || `child:${site.id}`;
+    const row = ensureRow(key, String(site.id || key));
+    row.pageUrl = row.pageUrl || site.original_url || '';
+    row.pageTitle = row.pageTitle || site.title || '';
+    if(String(site.created_at || '') > String(row.createdAt || '')) row.createdAt = site.created_at || row.createdAt;
+    row.embeddingTokens = Math.max(row.embeddingTokens || 0, Number(site.embedding_token_count || 0));
+    row.charCount = Math.max(row.charCount || 0, Number(site.embedding_character_count ?? site.char_count ?? 0));
+    row.wordCount = Math.max(row.wordCount || 0, Number(site.embedding_word_count ?? 0));
+    row.sizeBytes = Math.max(row.sizeBytes || 0, Number(site.file_size || 0));
+  });
+
+  usageRows.forEach(row => {
+    const meta = parseMeta(row.request_metadata);
+    const pageUrl = meta.source_url || meta.url || '';
+    const key = normalizeSourceKey(pageUrl) || '__unknown__';
+    const summary = pageSummaries.get(key);
+    const pageRow = ensureRow(key, String(row.id || key));
+    pageRow.pageUrl = pageRow.pageUrl || pageUrl || summary?.pageUrl || '';
+    pageRow.pageTitle = pageRow.pageTitle || meta.webpage_name || summary?.pageTitle || '';
+    if(String(row.created_at || '') > String(pageRow.createdAt || '')) pageRow.createdAt = row.created_at || pageRow.createdAt;
+    pageRow.model = pageRow.model || row.model || '';
+    pageRow.embeddingTokens += Number(row.total_tokens || row.prompt_tokens || 0);
+    pageRow.charCount = Math.max(pageRow.charCount || 0, Number(meta.input_character_count ?? summary?.charCount ?? 0));
+    pageRow.wordCount = Math.max(pageRow.wordCount || 0, Number(meta.input_word_count ?? summary?.wordCount ?? 0));
+    pageRow.sizeBytes = Math.max(pageRow.sizeBytes || 0, Number(meta.input_size_bytes ?? summary?.sizeBytes ?? 0));
+  });
+
+  pageSummaries.forEach(summary => {
+    const pageRow = ensureRow(summary.pageKey, `summary:${summary.pageKey}`);
+    pageRow.pageUrl = pageRow.pageUrl || summary.pageUrl || '';
+    pageRow.pageTitle = pageRow.pageTitle || summary.pageTitle || '';
+    if(String(summary.createdAt || '') > String(pageRow.createdAt || '')) pageRow.createdAt = summary.createdAt || pageRow.createdAt;
+    pageRow.chunkCount = Number(summary.chunkCount || 0);
+    pageRow.contentStorageBytes = Number(summary.contentStorageBytes || 0);
+    pageRow.embeddingStorageBytes = Number(summary.embeddingStorageBytes || 0);
+    pageRow.charCount = Math.max(pageRow.charCount || 0, Number(summary.charCount || 0));
+    pageRow.wordCount = Math.max(pageRow.wordCount || 0, Number(summary.wordCount || 0));
+    pageRow.sizeBytes = Math.max(pageRow.sizeBytes || 0, Number(summary.sizeBytes || 0));
+  });
+
+  rowsByKey.forEach(pageRow => {
+    pageRow.pageUrl = pageRow.pageUrl || parentSourceName || '';
+    if(!pageRow.pageTitle && normalizeSourceKey(pageRow.pageUrl) === normalizeSourceKey(parentSourceName)) {
+      pageRow.pageTitle = parentWebsite?.title || '';
+    }
+    pageRow.isRootPage = normalizeSourceKey(pageRow.pageUrl) === normalizeSourceKey(parentSourceName);
+  });
+
+  return Array.from(rowsByKey.values()).sort((a,b) =>
+    String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+    || String(a.pageUrl || '').localeCompare(String(b.pageUrl || ''))
+  );
+}
+function buildIngestionParentRows(files, websites) {
+  const parentRows = [];
+  const rootWebsites = (websites || []).filter(site => !site.parent_id);
+
+  rootWebsites.forEach(site => {
+    const siteId = String(site.id);
+    const usageRows = CURRENT_INGESTION_VIEW.websiteUsageById.get(siteId) || [];
+    const usageSummary = summarizeUsageRows(usageRows);
+    const chunkStats = RAW.website_chunk_stats[siteId] || {};
+    const childPages = CURRENT_INGESTION_VIEW.websiteChildrenByParentId.get(siteId) || [];
+    const pageCount = Number(site.pages_scraped || (childPages.length ? childPages.length + 1 : 0));
+    const sourceSecondary = joinSecondaryParts([
+      site.title || '',
+      pageCount ? `${fmt(pageCount)} pages` : '',
+    ]);
+
+    parentRows.push({
+      rowKind: 'website-parent',
+      documentId: siteId,
+      documentType: 'website',
+      sourceName: site.original_url || '',
+      sourceSecondary,
+      createdAt: usageSummary.createdAt || site.created_at || '',
+      model: usageSummary.model || '',
+      embeddingTokens: Number(usageSummary.tokens || site.embedding_token_count || 0),
+      charCount: Number(usageSummary.charCount || site.embedding_character_count || site.char_count || 0),
+      wordCount: Number(usageSummary.wordCount || site.embedding_word_count || 0),
+      sizeBytes: Number(usageSummary.sizeBytes || site.file_size || 0),
+      chunkCount: Number(chunkStats.chunk_count || 0),
+      contentPretty: chunkStats.content_pretty || '-',
+      embeddingPretty: chunkStats.embedding_pretty || '-',
+      expandable: childPages.length > 0 || Number(chunkStats.chunk_count || 0) > 0 || usageRows.length > 0,
+      downloadable: childPages.length > 0 || Number(chunkStats.chunk_count || 0) > 0 || usageRows.length > 0,
+    });
+  });
+
+  (files || []).forEach(file => {
+    const fileId = String(file.id);
+    const usageRows = CURRENT_INGESTION_VIEW.fileUsageById.get(fileId) || [];
+    const usageSummary = summarizeUsageRows(usageRows);
+    const chunkStats = RAW.file_chunk_stats[fileId] || {};
+    const sourceSecondary = joinSecondaryParts([
+      file.display_name && file.display_name !== file.original_filename ? file.display_name : '',
+      file.file_extension ? `.${file.file_extension}` : '',
+    ]);
+
+    parentRows.push({
+      rowKind: 'file-parent',
+      documentId: fileId,
+      documentType: 'file',
+      sourceName: file.original_filename || file.display_name || '',
+      sourceSecondary,
+      createdAt: usageSummary.createdAt || file.created_at || '',
+      model: usageSummary.model || '',
+      embeddingTokens: Number(usageSummary.tokens || file.embedding_token_count || 0),
+      charCount: Number(usageSummary.charCount || file.embedding_character_count || file.char_count || 0),
+      wordCount: Number(usageSummary.wordCount || file.embedding_word_count || 0),
+      sizeBytes: Number(usageSummary.sizeBytes || file.file_size || 0),
+      chunkCount: Number(chunkStats.chunk_count || 0),
+      contentPretty: chunkStats.content_pretty || '-',
+      embeddingPretty: chunkStats.embedding_pretty || '-',
+      expandable: Number(chunkStats.chunk_count || 0) > 0,
+      downloadable: Number(chunkStats.chunk_count || 0) > 0,
+    });
+  });
+
+  return parentRows.sort((a,b) =>
+    String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+    || String(a.sourceName || '').localeCompare(String(b.sourceName || ''))
+  );
+}
+function renderIngestionParentRow(row) {
+  const rowClasses = [row.expandable ? 'ingestion-row' : '', 'ingestion-parent-row'].filter(Boolean).join(' ');
+  const ratio = row.embeddingTokens > 0 && row.charCount > 0 ? (row.charCount / row.embeddingTokens).toFixed(2) : '-';
+  const clickAttr = row.expandable ? 'onclick="toggleIngestionParentRow(this)"' : '';
+  const downloadCell = row.downloadable
+    ? `<button type="button" class="inline-action-btn" onclick="downloadIngestionCsv(event, this)">Download CSV</button>`
+    : '-';
+
+  return `<tr class="${rowClasses}"
+      data-row-kind="${escHtml(row.rowKind)}"
+      data-document-id="${escHtml(row.documentId)}"
+      data-document-type="${escHtml(row.documentType)}"
+      data-source-name="${escHtml(row.sourceName)}"
+      data-source-secondary="${escHtml(row.sourceSecondary || '')}"
+      data-parent-created-at="${escHtml(row.createdAt || '')}"
+      data-embedding-model="${escHtml(row.model || '')}"
+      data-embedding-tokens="${row.embeddingTokens ? String(row.embeddingTokens) : ''}"
+      ${clickAttr}>
+      <td>${fmtDateTime(row.createdAt)}</td>
+      <td class="source-cell" title="${escHtml(row.sourceName)}">${renderSourceCell(row.sourceName, row.sourceSecondary || '')}</td>
+      <td>${fmt(row.chunkCount)}</td>
+      <td>${row.contentPretty || '-'}</td>
+      <td>${row.embeddingPretty || '-'}</td>
+      <td>${row.model ? escHtml(row.model) : '-'}</td>
+      <td class="token-cell">${row.embeddingTokens ? fmt(row.embeddingTokens) : '-'}</td>
+      <td>${row.charCount ? fmt(row.charCount) : '-'}</td>
+      <td>${row.wordCount ? fmt(row.wordCount) : '-'}</td>
+      <td>${row.sizeBytes ? fmtBytes(row.sizeBytes) : '-'}</td>
+      <td>${ratio}</td>
+      <td class="table-action-cell">${downloadCell}</td>
+    </tr>`;
+}
+function createWebsitePageRowElement(page, parentDocumentId) {
+  const rowEl = document.createElement('tr');
+  const isExpandable = Number(page.chunkCount || 0) > 0;
+  rowEl.className = `page-row${isExpandable ? ' page-row-expandable' : ''}`;
+  rowEl.dataset.rowKind = 'website-page';
+  rowEl.dataset.parentDocumentId = String(parentDocumentId || '');
+  rowEl.dataset.pageKey = String(page.pageKey || '');
+  rowEl.dataset.pageUrl = String(page.pageUrl || '');
+  rowEl.dataset.sourceName = String(page.pageUrl || '');
+  rowEl.dataset.sourceSecondary = String(page.pageTitle || '');
+  rowEl.dataset.parentCreatedAt = String(page.createdAt || '');
+  rowEl.dataset.embeddingModel = String(page.model || '');
+  rowEl.dataset.embeddingTokens = page.embeddingTokens ? String(page.embeddingTokens) : '';
+  if(isExpandable) rowEl.setAttribute('onclick', 'toggleWebsitePageRow(this)');
+
+  const secondary = joinSecondaryParts([
+    page.pageTitle || '',
+    page.isRootPage ? 'Root page' : '',
+  ]);
+  const ratio = page.embeddingTokens > 0 && page.charCount > 0 ? (page.charCount / page.embeddingTokens).toFixed(2) : '-';
+  const downloadCell = isExpandable
+    ? `<button type="button" class="inline-action-btn" onclick="downloadIngestionCsv(event, this)">Download CSV</button>`
+    : '-';
+
+  rowEl.innerHTML = `
+    <td>${fmtDateTime(page.createdAt)}</td>
+    <td class="source-cell" title="${escHtml(page.pageUrl || '')}">${renderSourceCell(page.pageUrl || 'Unmapped page', secondary)}</td>
+    <td>${fmt(page.chunkCount)}</td>
+    <td>${page.contentStorageBytes ? fmtBytes(page.contentStorageBytes) : '-'}</td>
+    <td>${page.embeddingStorageBytes ? fmtBytes(page.embeddingStorageBytes) : '-'}</td>
+    <td>${page.model ? escHtml(page.model) : '-'}</td>
+    <td class="token-cell">${page.embeddingTokens ? fmt(page.embeddingTokens) : '-'}</td>
+    <td>${page.charCount ? fmt(page.charCount) : '-'}</td>
+    <td>${page.wordCount ? fmt(page.wordCount) : '-'}</td>
+    <td>${page.sizeBytes ? fmtBytes(page.sizeBytes) : '-'}</td>
+    <td>${ratio}</td>
+    <td class="table-action-cell">${downloadCell}</td>
+  `;
+  return rowEl;
+}
+function createChunkRowElement(chunk, embeddingModel='') {
+  const rowEl = document.createElement('tr');
+  rowEl.className = 'chunk-row';
+  const chunkLabel = chunk.chunk_row_number != null
+    ? `Chunk ${fmt(chunk.chunk_row_number)}`
+    : `Chunk ${fmt(Number(chunk.chunk_index || 0) + 1)}`;
+  const preview = chunk.content ? String(chunk.content).trim() : '';
+  rowEl.innerHTML = `
+    <td>${fmtDateTime(chunk.created_at)}</td>
+    <td class="source-cell">
+      <div class="source-primary">${escHtml(chunkLabel)}</div>
+      <div class="source-secondary chunk-content">${escHtml(preview || '-')}</div>
+    </td>
+    <td class="mono">${chunk.chunk_row_number ?? '-'}</td>
+    <td>${chunk.content_pretty || '-'}</td>
+    <td>${chunk.embedding_pretty || '-'}</td>
+    <td>${embeddingModel ? escHtml(embeddingModel) : '-'}</td>
+    <td>-</td>
+    <td>${chunk.char_count == null ? '-' : fmt(chunk.char_count)}</td>
+    <td>${chunk.word_count == null ? '-' : fmt(chunk.word_count)}</td>
+    <td>${chunk.size_bytes == null ? '-' : fmtBytes(chunk.size_bytes)}</td>
+    <td>-</td>
+    <td></td>
+  `;
+  return rowEl;
 }
 function fmtBytes(bytes) {
   bytes = Number(bytes || 0);
@@ -873,9 +1263,10 @@ async function downloadIngestionCsv(event, buttonEl) {
   const rowEl = buttonEl.closest('tr');
   if (!rowEl) return;
 
-  const documentId = rowEl.dataset.documentId || '';
-  const documentType = rowEl.dataset.documentType || '';
-  if (!documentId || !documentType) return;
+  const rowKind = rowEl.dataset.rowKind || '';
+  const documentId = rowEl.dataset.documentId || rowEl.dataset.parentDocumentId || '';
+  const documentType = rowEl.dataset.documentType || 'website';
+  if (!documentId) return;
 
   const originalLabel = buttonEl.textContent;
   buttonEl.disabled = true;
@@ -883,18 +1274,56 @@ async function downloadIngestionCsv(event, buttonEl) {
 
   try {
     const chunks = await fetchIngestionChunks(documentId, documentType);
-    if (!chunks.length) {
-      window.alert('No child rows were found for this parent row.');
+    if (rowKind === 'website-parent') {
+      const parentWebsite = CURRENT_INGESTION_VIEW.websiteRootsById.get(String(documentId)) || null;
+      const childWebsites = CURRENT_INGESTION_VIEW.websiteChildrenByParentId.get(String(documentId)) || [];
+      const pageRows = buildWebsitePageRows(documentId, parentWebsite, childWebsites, chunks);
+      if (!pageRows.length) {
+        window.alert('No child pages were found for this website row.');
+        return;
+      }
+      const rows = pageRows.map(page => ({
+        'Parent Source': rowEl.dataset.sourceName || '',
+        'Page URL': page.pageUrl || '',
+        'Page Title': page.pageTitle || '',
+        'Is Root Page': page.isRootPage ? 'yes' : 'no',
+        'Page Date': page.createdAt || '',
+        'Chunk Count': page.chunkCount || 0,
+        'Content Storage Bytes': page.contentStorageBytes || 0,
+        'Embedding Storage Bytes': page.embeddingStorageBytes || 0,
+        'Embedding Model': page.model || '',
+        'Embedding Tokens': page.embeddingTokens || 0,
+        'Chars': page.charCount || 0,
+        'Words': page.wordCount || 0,
+        'Size Bytes': page.sizeBytes || 0,
+      }));
+      const fileBase = safeFileNameSegment(rowEl.dataset.sourceName || documentId);
+      downloadCsvFile(`${fileBase}_pages.csv`, rows);
       return;
     }
 
-    const rows = chunks.map(chunk => ({
+    let exportChunks = chunks;
+    if (rowKind === 'website-page') {
+      const pageKey = rowEl.dataset.pageKey || '';
+      exportChunks = chunks.filter(chunk => (normalizeSourceKey(getChunkPageUrl(chunk)) || '__unknown__') === pageKey);
+      if (!exportChunks.length) {
+        window.alert('No chunks were found for this page row.');
+        return;
+      }
+    } else if (!chunks.length) {
+      window.alert('No chunks were found for this row.');
+      return;
+    }
+
+    const rows = exportChunks.map(chunk => ({
       'Parent Date': rowEl.dataset.parentCreatedAt || '',
       'Source': rowEl.dataset.sourceName || '',
       'Document ID': documentId,
       'Document Type': documentType,
       'Embedding Model': rowEl.dataset.embeddingModel || '',
       'Embedding Tokens': rowEl.dataset.embeddingTokens || '',
+      'Page URL': getChunkPageUrl(chunk) || '',
+      'Page Title': getChunkPageTitle(chunk) || '',
       'Chunk ID': chunk.id || '',
       'Chunk Index': chunk.chunk_index ?? '',
       'Chunk Row Number': chunk.chunk_row_number ?? '',
@@ -902,6 +1331,8 @@ async function downloadIngestionCsv(event, buttonEl) {
       'Chars': chunk.char_count ?? '',
       'Words': chunk.word_count ?? '',
       'Size Bytes': chunk.size_bytes ?? '',
+      'Content Storage Bytes': chunk.content_storage_bytes ?? '',
+      'Embedding Storage Bytes': chunk.embedding_storage_bytes ?? '',
       'Content Pretty': chunk.content_pretty || '',
       'Embedding Pretty': chunk.embedding_pretty || '',
       'Metadata': chunk.metadata == null ? '' : (typeof chunk.metadata === 'string' ? chunk.metadata : JSON.stringify(chunk.metadata)),
@@ -909,24 +1340,102 @@ async function downloadIngestionCsv(event, buttonEl) {
     }));
 
     const fileBase = safeFileNameSegment(rowEl.dataset.sourceName || documentId);
-    downloadCsvFile(`${fileBase}_child_rows.csv`, rows);
+    const suffix = rowKind === 'website-page' ? 'page_chunks' : 'chunks';
+    downloadCsvFile(`${fileBase}_${suffix}.csv`, rows);
   } catch (error) {
-    window.alert('Failed to download the child rows CSV.');
+    window.alert('Failed to download the CSV.');
   } finally {
     buttonEl.disabled = false;
     buttonEl.textContent = originalLabel;
   }
 }
-async function toggleIngestionRow(rowEl, documentId, documentType) {
-  if (!documentId) return;
-  const isOpen = rowEl.classList.contains('open');
-  const embeddingModel = rowEl.dataset.embeddingModel || '';
-  let next = rowEl.nextElementSibling;
+function removeNestedRowsForParent(parentRow) {
+  let next = parentRow.nextElementSibling;
+  while(next && (next.classList.contains('page-row') || next.classList.contains('chunk-row'))) {
+    const toRemove = next;
+    next = next.nextElementSibling;
+    toRemove.remove();
+  }
+}
+function removeChunkRowsForPage(pageRow) {
+  let next = pageRow.nextElementSibling;
   while(next && next.classList.contains('chunk-row')) {
     const toRemove = next;
     next = next.nextElementSibling;
     toRemove.remove();
   }
+}
+async function toggleIngestionParentRow(rowEl) {
+  const documentId = rowEl.dataset.documentId || '';
+  const documentType = rowEl.dataset.documentType || '';
+  const rowKind = rowEl.dataset.rowKind || '';
+  if (!documentId || !documentType) return;
+  const isOpen = rowEl.classList.contains('open');
+  const embeddingModel = rowEl.dataset.embeddingModel || '';
+  removeNestedRowsForParent(rowEl);
+
+  if (isOpen) {
+    rowEl.classList.remove('open');
+    return;
+  }
+
+  rowEl.classList.add('open');
+
+  const loadingRow = document.createElement('tr');
+  loadingRow.className = rowKind === 'website-parent' ? 'page-row' : 'chunk-row';
+  loadingRow.innerHTML = `<td colspan="12" style="color:var(--muted)">${rowKind === 'website-parent' ? 'Loading child pages...' : 'Loading chunk rows...'}</td>`;
+  rowEl.after(loadingRow);
+
+  try {
+    const chunks = await fetchIngestionChunks(documentId, documentType);
+    loadingRow.remove();
+
+    if (rowKind === 'website-parent') {
+      const parentWebsite = CURRENT_INGESTION_VIEW.websiteRootsById.get(String(documentId)) || null;
+      const childWebsites = CURRENT_INGESTION_VIEW.websiteChildrenByParentId.get(String(documentId)) || [];
+      const pageRows = buildWebsitePageRows(documentId, parentWebsite, childWebsites, chunks);
+      if (!pageRows.length) {
+        const emptyRow = document.createElement('tr');
+        emptyRow.className = 'page-row';
+        emptyRow.innerHTML = `<td colspan="12" style="color:var(--muted)">No child pages found for this website.</td>`;
+        rowEl.after(emptyRow);
+        return;
+      }
+
+      let insertAfter = rowEl;
+      pageRows.forEach(page => {
+        const pageRowEl = createWebsitePageRowElement(page, documentId);
+        insertAfter.after(pageRowEl);
+        insertAfter = pageRowEl;
+      });
+      return;
+    }
+
+    if (!chunks.length) {
+      const emptyRow = document.createElement('tr');
+      emptyRow.className = 'chunk-row';
+      emptyRow.innerHTML = `<td colspan="12" style="color:var(--muted)">No chunks found for this record.</td>`;
+      rowEl.after(emptyRow);
+      return;
+    }
+
+    let insertAfter = rowEl;
+    chunks.forEach(chunk => {
+      const chunkRowEl = createChunkRowElement(chunk, embeddingModel);
+      insertAfter.after(chunkRowEl);
+      insertAfter = chunkRowEl;
+    });
+  } catch (error) {
+    loadingRow.innerHTML = `<td colspan="12" style="color:var(--red)">Failed to load ${rowKind === 'website-parent' ? 'child pages' : 'chunk rows'}.</td>`;
+  }
+}
+async function toggleWebsitePageRow(rowEl) {
+  const parentDocumentId = rowEl.dataset.parentDocumentId || '';
+  const pageKey = rowEl.dataset.pageKey || '';
+  if (!parentDocumentId || !pageKey) return;
+  const isOpen = rowEl.classList.contains('open');
+  const embeddingModel = rowEl.dataset.embeddingModel || '';
+  removeChunkRowsForPage(rowEl);
 
   if (isOpen) {
     rowEl.classList.remove('open');
@@ -941,39 +1450,23 @@ async function toggleIngestionRow(rowEl, documentId, documentType) {
   rowEl.after(loadingRow);
 
   try {
-    const chunks = await fetchIngestionChunks(documentId, documentType);
+    const chunks = await fetchIngestionChunks(parentDocumentId, 'website');
+    const pageChunks = chunks.filter(chunk => (normalizeSourceKey(getChunkPageUrl(chunk)) || '__unknown__') === pageKey);
     loadingRow.remove();
 
-    if (!chunks.length) {
+    if (!pageChunks.length) {
       const emptyRow = document.createElement('tr');
       emptyRow.className = 'chunk-row';
-      emptyRow.innerHTML = `<td colspan="12" style="color:var(--muted)">No chunks found for this record.</td>`;
+      emptyRow.innerHTML = `<td colspan="12" style="color:var(--muted)">No chunks found for this page.</td>`;
       rowEl.after(emptyRow);
       return;
     }
 
     let insertAfter = rowEl;
-    chunks.forEach(chunk => {
-      const chunkRow = document.createElement('tr');
-      chunkRow.className = 'chunk-row';
-      chunkRow.innerHTML = `
-        <td>${fmtDateTime(chunk.created_at)}</td>
-        <td>
-          <div class="chunk-content">${escHtml(chunk.content || '')}</div>
-        </td>
-        <td class="mono">${chunk.chunk_row_number ?? '-'}</td>
-        <td>${chunk.content_pretty || '-'}</td>
-        <td>${chunk.embedding_pretty || '-'}</td>
-        <td>${escHtml(embeddingModel)}</td>
-        <td>-</td>
-        <td class="bd-num">${chunk.char_count ?? '-'}</td>
-        <td class="bd-num">${chunk.word_count ?? '-'}</td>
-        <td>${chunk.size_bytes == null ? '-' : fmtBytes(chunk.size_bytes)}</td>
-        <td>-</td>
-        <td></td>
-      `;
-      insertAfter.after(chunkRow);
-      insertAfter = chunkRow;
+    pageChunks.forEach(chunk => {
+      const chunkRowEl = createChunkRowElement(chunk, embeddingModel);
+      insertAfter.after(chunkRowEl);
+      insertAfter = chunkRowEl;
     });
   } catch (error) {
     loadingRow.innerHTML = `<td colspan="12" style="color:var(--red)">Failed to load chunk rows.</td>`;
@@ -996,6 +1489,16 @@ function render() {
   const websites = filterByDate(RAW.websites, days);
   const tokenLog = filterByDate(RAW.token_usage_log||[], days);
   const ingestionTokenLog = tokenLog.filter(isIngestionUsage);
+  const { websiteUsageById, fileUsageById } = buildUsageMaps(ingestionTokenLog);
+  const { websiteRootsById, websiteChildrenByParentId } = buildWebsiteChildrenMap(websites);
+  const fileRowsById = new Map((files || []).map(file => [String(file.id), file]));
+  CURRENT_INGESTION_VIEW = {
+    websiteUsageById,
+    fileUsageById,
+    websiteRootsById,
+    websiteChildrenByParentId,
+    fileRowsById,
+  };
 
   document.getElementById('subtitle').textContent =
     `Last ${days} days \\u00b7 Generated ${new Date().toISOString().replace('T',' ').substring(0,16)} UTC`;
@@ -1107,52 +1610,11 @@ function render() {
   });
 
   // === KNOWLEDGE INGESTION TABLE ===
-  document.getElementById('token-log-table').innerHTML = ingestionTokenLog.slice(0,300).map(r => {
-    const meta = parseMeta(r.request_metadata);
-    
-    // Get source ID from metadata and look up chunk stats
-    const sourceId = meta.website_id || meta.file_id || '';
-    const sourceType = meta.website_id ? 'website' : 'file';
-    let chunkStats = { chunk_count: null, content_pretty: null, embedding_pretty: null };
-    if (sourceId) {
-      const stats = RAW.file_chunk_stats[sourceId] || RAW.website_chunk_stats[sourceId];
-      if (stats) {
-        chunkStats = {
-          chunk_count: stats.chunk_count ?? null,
-          content_pretty: stats.content_pretty ?? null,
-          embedding_pretty: stats.embedding_pretty ?? null
-        };
-      }
-    }
-    
-    const sourceName = strictIngestionSource(meta);
-    const embeddingModel = r.model || '';
-    const embeddingTokens = r.total_tokens ?? null;
-    const charCount = meta.input_character_count ?? null;
-    const wordCount = meta.input_word_count ?? null;
-    const sizeBytes = meta.input_size_bytes ?? null;
-    
-    const rowClass = sourceId ? 'ingestion-row' : '';
-    const rowOnClick = sourceId ? `onclick="toggleIngestionRow(this, '${escHtml(sourceId)}', '${sourceType}')"` : '';
-    const downloadCell = sourceId
-      ? `<button type="button" class="inline-action-btn" onclick="downloadIngestionCsv(event, this)">Download CSV</button>`
-      : '-';
-
-    return `<tr class="${rowClass}" data-document-id="${escHtml(sourceId)}" data-document-type="${sourceType}" data-source-name="${escHtml(sourceName)}" data-parent-created-at="${escHtml(r.created_at || '')}" data-embedding-model="${escHtml(embeddingModel)}" data-embedding-tokens="${embeddingTokens == null ? '' : String(embeddingTokens)}" ${rowOnClick}>
-      <td>${fmtDateTime(r.created_at)}</td>
-      <td class="mono source-cell" title="${escHtml(sourceName)}">${escHtml(sourceName)}</td>
-      <td>${chunkStats.chunk_count == null ? '-' : fmt(chunkStats.chunk_count)}</td>
-      <td>${chunkStats.content_pretty == null ? '-' : chunkStats.content_pretty}</td>
-      <td>${chunkStats.embedding_pretty == null ? '-' : chunkStats.embedding_pretty}</td>
-      <td>${embeddingModel ? escHtml(embeddingModel) : '-'}</td>
-      <td class="token-cell">${embeddingTokens == null ? '-' : fmt(embeddingTokens)}</td>
-      <td>${charCount == null ? '-' : fmt(charCount)}</td>
-      <td>${wordCount == null ? '-' : fmt(wordCount)}</td>
-      <td>${sizeBytes == null ? '-' : fmtBytes(sizeBytes)}</td>
-      <td>${embeddingTokens > 0 && charCount != null ? (charCount / embeddingTokens).toFixed(2) : '-'}</td>
-      <td class="table-action-cell">${downloadCell}</td>
-    </tr>`;
-  }).join('');
+  const parentRows = buildIngestionParentRows(files, websites);
+  document.getElementById('token-log-table').innerHTML = parentRows
+    .slice(0, 300)
+    .map(renderIngestionParentRow)
+    .join('');
 }
 
 // === RENDER AGENT RUN STEPS FOR A USER MESSAGE ===
@@ -1379,7 +1841,7 @@ function downloadExcel() {
       'Created': r.created_at||'',
       'Provider': r.provider||'',
       'Model': r.model||'',
-      'Source': (meta.file_id && FILE_SOURCE_MAP[String(meta.file_id)]) || (meta.website_id && WEBSITE_SOURCE_MAP[String(meta.website_id)]) || meta.source_url || meta.url || meta.display_name || meta.filename || meta.webpage_name || '',
+      'Source': strictIngestionSource(meta),
       'Embedding Tokens': r.total_tokens || r.prompt_tokens || 0,
       'Input Characters': payloadChars(meta),
       'Input Words': payloadWords(meta),
@@ -1408,7 +1870,7 @@ function downloadExcel() {
     const meta = parseMeta(r.request_metadata);
     return {
       'Created': r.created_at||'',
-      'Source': (meta.file_id && FILE_SOURCE_MAP[String(meta.file_id)]) || (meta.website_id && WEBSITE_SOURCE_MAP[String(meta.website_id)]) || meta.source_url || meta.url || meta.display_name || meta.filename || meta.webpage_name || '',
+      'Source': strictIngestionSource(meta),
       'Provider': r.provider||'',
       'Model': r.model||'',
       'Embedding Tokens': r.total_tokens || r.prompt_tokens || 0,
