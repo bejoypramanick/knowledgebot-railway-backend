@@ -119,6 +119,8 @@ async def _fetch_all_data_once(tenant_id: str = None):
                     text("""
             SELECT document_id,
                    COUNT(*) as chunk_count,
+                   SUM(pg_column_size(content))::bigint as content_storage_bytes,
+                   SUM(pg_column_size(embedding))::bigint as embedding_storage_bytes,
                    pg_size_pretty(CAST(SUM(pg_column_size(content)) AS bigint)) as content_pretty,
                    pg_size_pretty(CAST(SUM(pg_column_size(embedding)) AS bigint)) as embedding_pretty
             FROM document_chunks
@@ -156,6 +158,8 @@ async def _fetch_all_data_once(tenant_id: str = None):
                     text("""
             SELECT document_id,
                    COUNT(*) as chunk_count,
+                   SUM(pg_column_size(content))::bigint as content_storage_bytes,
+                   SUM(pg_column_size(embedding))::bigint as embedding_storage_bytes,
                    pg_size_pretty(CAST(SUM(pg_column_size(content)) AS bigint)) as content_pretty,
                    pg_size_pretty(CAST(SUM(pg_column_size(embedding)) AS bigint)) as embedding_pretty
             FROM document_chunks
@@ -974,8 +978,8 @@ function buildIngestionParentRows(files, websites) {
       wordCount: Number(usageSummary.wordCount || site.embedding_word_count || 0),
       sizeBytes: Number(usageSummary.sizeBytes || site.file_size || 0),
       chunkCount: Number(chunkStats.chunk_count || 0),
-      contentPretty: chunkStats.content_pretty || '-',
-      embeddingPretty: chunkStats.embedding_pretty || '-',
+      contentPretty: fmtKb(chunkStats.content_storage_bytes),
+      embeddingPretty: fmtKb(chunkStats.embedding_storage_bytes),
       // Multi-page websites expand to child pages; single-page websites expand directly to chunks.
       expandable: childPages.length > 0 || Number(chunkStats.chunk_count || 0) > 0,
       downloadable: childPages.length > 0 || Number(chunkStats.chunk_count || 0) > 0 || usageRows.length > 0,
@@ -1006,8 +1010,8 @@ function buildIngestionParentRows(files, websites) {
       wordCount: Number(usageSummary.wordCount || file.embedding_word_count || 0),
       sizeBytes: Number(usageSummary.sizeBytes || file.file_size || 0),
       chunkCount: Number(chunkStats.chunk_count || 0),
-      contentPretty: chunkStats.content_pretty || '-',
-      embeddingPretty: chunkStats.embedding_pretty || '-',
+      contentPretty: fmtKb(chunkStats.content_storage_bytes),
+      embeddingPretty: fmtKb(chunkStats.embedding_storage_bytes),
       expandable: Number(chunkStats.chunk_count || 0) > 0,
       downloadable: Number(chunkStats.chunk_count || 0) > 0,
     });
@@ -1079,8 +1083,8 @@ function createWebsitePageRowElement(page, parentDocumentId) {
     <td>${fmtDateTime(page.createdAt)}</td>
     <td class="source-cell" title="${escHtml(page.pageUrl || '')}">${renderSourceCell(page.pageUrl || 'Unmapped page', secondary)}</td>
     <td>${fmt(page.chunkCount)}</td>
-    <td>${page.contentStorageBytes ? fmtBytes(page.contentStorageBytes) : '-'}</td>
-    <td>${page.embeddingStorageBytes ? fmtBytes(page.embeddingStorageBytes) : '-'}</td>
+    <td>${page.contentStorageBytes ? fmtKb(page.contentStorageBytes) : '-'}</td>
+    <td>${page.embeddingStorageBytes ? fmtKb(page.embeddingStorageBytes) : '-'}</td>
     <td>${page.model ? escHtml(page.model) : '-'}</td>
     <td class="token-cell">${page.embeddingTokens ? fmt(page.embeddingTokens) : '-'}</td>
     <td>-</td>
@@ -1106,8 +1110,8 @@ function createChunkRowElement(chunk, embeddingModel='') {
       <div class="source-secondary chunk-content">${escHtml(preview || '-')}</div>
     </td>
     <td class="mono">${chunk.chunk_row_number ?? '-'}</td>
-    <td>${chunk.content_pretty || '-'}</td>
-    <td>${chunk.embedding_pretty || '-'}</td>
+    <td>${chunk.content_storage_bytes == null ? '-' : fmtKb(chunk.content_storage_bytes)}</td>
+    <td>${chunk.embedding_storage_bytes == null ? '-' : fmtKb(chunk.embedding_storage_bytes)}</td>
     <td>${embeddingModel ? escHtml(embeddingModel) : '-'}</td>
     <td>-</td>
     <td>-</td>
@@ -1125,6 +1129,11 @@ function fmtBytes(bytes) {
   if(bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   if(bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${fmt(bytes)} B`;
+}
+function fmtKb(bytes) {
+  bytes = Number(bytes || 0);
+  if(!bytes) return '-';
+  return `${(bytes / 1024).toFixed(1)} KB`;
 }
 function safeFileNameSegment(value) {
   return String(value || 'document')
