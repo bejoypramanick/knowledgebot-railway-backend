@@ -119,8 +119,8 @@ async def _fetch_all_data_once(tenant_id: str = None):
                     text("""
             SELECT document_id,
                    COUNT(*) as chunk_count,
-                   pg_size_pretty(SUM(pg_column_size(content))) as content_pretty,
-                   pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty
+                   pg_size_pretty(CAST(SUM(pg_column_size(content)) AS bigint)) as content_pretty,
+                   pg_size_pretty(CAST(SUM(pg_column_size(embedding)) AS bigint)) as embedding_pretty
             FROM document_chunks
             WHERE document_type = 'file'
               AND (CAST(:tenant_id AS UUID) IS NULL OR tenant_id = CAST(:tenant_id AS UUID))
@@ -156,8 +156,8 @@ async def _fetch_all_data_once(tenant_id: str = None):
                     text("""
             SELECT document_id,
                    COUNT(*) as chunk_count,
-                   pg_size_pretty(SUM(pg_column_size(content))) as content_pretty,
-                   pg_size_pretty(SUM(pg_column_size(embedding))) as embedding_pretty
+                   pg_size_pretty(CAST(SUM(pg_column_size(content)) AS bigint)) as content_pretty,
+                   pg_size_pretty(CAST(SUM(pg_column_size(embedding)) AS bigint)) as embedding_pretty
             FROM document_chunks
             WHERE document_type = 'website'
               AND (CAST(:tenant_id AS UUID) IS NULL OR tenant_id = CAST(:tenant_id AS UUID))
@@ -295,13 +295,16 @@ async def usage_report_chunks(
                         chunk_index,
                         content,
                         metadata,
-                        pg_size_pretty(pg_column_size(content)::bigint) AS content_pretty,
-                        pg_size_pretty(pg_column_size(embedding)::bigint) AS embedding_pretty,
+                        pg_size_pretty(CAST(pg_column_size(content) AS bigint)) AS content_pretty,
+                        pg_size_pretty(CAST(pg_column_size(embedding) AS bigint)) AS embedding_pretty,
                         created_at
                     FROM document_chunks
                     WHERE document_id = :document_id
                       AND document_type = :document_type
-                      AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+                      AND (
+                        CAST(:tenant_id AS UUID) IS NULL
+                        OR tenant_id = CAST(:tenant_id AS UUID)
+                      )
                     ORDER BY chunk_index ASC, created_at ASC
                     """
                 ),
