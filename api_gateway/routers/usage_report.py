@@ -709,7 +709,7 @@ function downloadCsvFile(filename, rows) {
   rows.forEach(row => {
     csvLines.push(headers.map(header => csvCell(row[header])).join(','));
   });
-  const blob = new Blob([String.fromCharCode(0xFEFF) + csvLines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([String.fromCharCode(0xFEFF) + csvLines.join('\\r\\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
