@@ -1109,7 +1109,7 @@ function createChunkRowElement(chunk, embeddingModel='') {
       <div class="source-primary">${escHtml(chunkLabel)}</div>
       <div class="source-secondary chunk-content">${escHtml(preview || '-')}</div>
     </td>
-    <td class="mono">${chunk.chunk_row_number ?? '-'}</td>
+    <td></td>
     <td>${chunk.content_storage_bytes == null ? '-' : fmtKb(chunk.content_storage_bytes)}</td>
     <td>${chunk.embedding_storage_bytes == null ? '-' : fmtKb(chunk.embedding_storage_bytes)}</td>
     <td>${embeddingModel ? escHtml(embeddingModel) : '-'}</td>
