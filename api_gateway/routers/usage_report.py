@@ -7,8 +7,8 @@ Protected by session auth middleware.
 
 import json
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi.responses import HTMLResponse, JSONResponse
 from shared.otel_logger import get_otel_logger
 from shared.sqlalchemy_db import get_db_session
 from sqlalchemy import text
@@ -268,6 +268,59 @@ async def _fetch_all_data_once(tenant_id: str = None):
     }
 
 
+@router.get("/usage/chunks")
+async def usage_report_chunks(
+    request: Request,
+    document_id: str = Query(...),
+    document_type: str = Query(...),
+    tenant: str = Query(default=""),
+):
+    if document_type not in {"file", "website"}:
+        raise HTTPException(status_code=400, detail="document_type must be 'file' or 'website'")
+
+    from uuid import UUID
+
+    tenant_uuid = UUID(tenant) if tenant else None
+    document_uuid = UUID(document_id)
+
+    async with get_db_session() as db:
+        rows = (
+            await db.execute(
+                text(
+                    """
+                    SELECT
+                        id,
+                        document_id,
+                        document_type,
+                        chunk_index,
+                        content,
+                        metadata,
+                        pg_size_pretty(pg_column_size(content)) AS content_pretty,
+                        pg_size_pretty(pg_column_size(embedding)) AS embedding_pretty,
+                        created_at
+                    FROM document_chunks
+                    WHERE document_id = :document_id
+                      AND document_type = :document_type
+                      AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+                    ORDER BY chunk_index ASC, created_at ASC
+                    """
+                ),
+                {
+                    "document_id": document_uuid,
+                    "document_type": document_type,
+                    "tenant_id": tenant_uuid,
+                },
+            )
+        ).fetchall()
+
+    return JSONResponse(
+        content={
+            "success": True,
+            "chunks": [_row_to_dict(row) for row in rows],
+        }
+    )
+
+
 @router.get("/usage", response_class=HTMLResponse)
 async def usage_report(request: Request, tenant: str = ""):
     """Single endpoint. Filter by tenant on server-side via ?tenant= query param."""
@@ -372,6 +425,11 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 .metadata-snippet{font-family:'SF Mono','Fira Code',monospace;font-size:10px;color:var(--muted);white-space:pre-wrap;word-break:break-all}
 .source-cell{max-width:220px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.35}
 .source-link{color:inherit;text-decoration:none;overflow-wrap:anywhere;word-break:break-word}
+.ingestion-row{cursor:pointer}
+.ingestion-row td:first-child::before{content:'\\25B6';margin-right:8px;font-size:10px;color:var(--muted);transition:.2s;display:inline-block}
+.ingestion-row.open td:first-child::before{transform:rotate(90deg)}
+.chunk-row td{background:rgba(79,70,229,.03);font-size:12px;padding:8px 12px}
+.chunk-content{white-space:pre-wrap;word-break:break-word;max-width:760px;line-height:1.5}
 .hidden-panel{display:none}
 @media (max-width: 760px) {
   body{padding:12px}
@@ -729,6 +787,71 @@ function toggleAllRows(tableId, btn) {
   
   btn.textContent = isExpand ? 'Collapse All' : 'Expand All';
 }
+async function toggleIngestionRow(rowEl, documentId, documentType) {
+  if (!documentId) return;
+  const isOpen = rowEl.classList.contains('open');
+  let next = rowEl.nextElementSibling;
+  while(next && next.classList.contains('chunk-row')) {
+    const toRemove = next;
+    next = next.nextElementSibling;
+    toRemove.remove();
+  }
+
+  if (isOpen) {
+    rowEl.classList.remove('open');
+    return;
+  }
+
+  rowEl.classList.add('open');
+
+  const query = new URLSearchParams({
+    document_id: documentId,
+    document_type: documentType,
+  });
+  if (currentTenant) query.set('tenant', currentTenant);
+
+  const loadingRow = document.createElement('tr');
+  loadingRow.className = 'chunk-row';
+  loadingRow.innerHTML = `<td colspan="11" style="color:var(--muted)">Loading chunk rows...</td>`;
+  rowEl.after(loadingRow);
+
+  try {
+    const response = await fetch(`${BASE_URL}/usage/chunks?${query.toString()}`, { credentials: 'include' });
+    if (!response.ok) throw new Error('Failed to load chunk rows');
+    const payload = await response.json();
+    loadingRow.remove();
+
+    const chunks = payload.chunks || [];
+    if (!chunks.length) {
+      const emptyRow = document.createElement('tr');
+      emptyRow.className = 'chunk-row';
+      emptyRow.innerHTML = `<td colspan="11" style="color:var(--muted)">No chunks found for this record.</td>`;
+      rowEl.after(emptyRow);
+      return;
+    }
+
+    let insertAfter = rowEl;
+    chunks.forEach(chunk => {
+      const chunkRow = document.createElement('tr');
+      chunkRow.className = 'chunk-row';
+      chunkRow.innerHTML = `
+        <td class="mono">#${chunk.chunk_index ?? '-'}</td>
+        <td colspan="2">
+          <div class="chunk-content">${escHtml(chunk.content || '')}</div>
+        </td>
+        <td>${chunk.content_pretty || '-'}</td>
+        <td>${chunk.embedding_pretty || '-'}</td>
+        <td colspan="2">Chunk</td>
+        <td colspan="2">${fmt((chunk.content || '').length)}</td>
+        <td colspan="2">${fmtDateTime(chunk.created_at)}</td>
+      `;
+      insertAfter.after(chunkRow);
+      insertAfter = chunkRow;
+    });
+  } catch (error) {
+    loadingRow.innerHTML = `<td colspan="11" style="color:var(--red)">Failed to load chunk rows.</td>`;
+  }
+}
 // === SET DAYS ===
 function setDays(d) {
   currentDays = d;
@@ -859,10 +982,10 @@ function render() {
   // === KNOWLEDGE INGESTION TABLE ===
   document.getElementById('token-log-table').innerHTML = ingestionTokenLog.slice(0,300).map(r => {
     const meta = parseMeta(r.request_metadata);
-    const chunks = payloadTextChunks(meta);
     
     // Get source ID from metadata and look up chunk stats
     const sourceId = meta.website_id || meta.file_id || '';
+    const sourceType = meta.website_id ? 'website' : 'file';
     let chunkStats = { chunk_count: 0, total_content_bytes: 0, total_embedding_bytes: 0 };
     if (sourceId) {
       const stats = RAW.file_chunk_stats[sourceId] || RAW.website_chunk_stats[sourceId];
@@ -885,7 +1008,9 @@ function render() {
       meta.webpage_name ||
       '-';
     
-    return `<tr>
+    const rowClass = sourceId ? 'ingestion-row' : '';
+    const rowOnClick = sourceId ? `onclick="toggleIngestionRow(this, '${escHtml(sourceId)}', '${sourceType}')"` : '';
+    return `<tr class="${rowClass}" data-document-id="${escHtml(sourceId)}" data-document-type="${sourceType}" ${rowOnClick}>
       <td>${fmtDateTime(r.created_at)}</td>
       <td class="mono source-cell" title="${escHtml(sourceName)}">${escHtml(sourceName)}</td>
       <td>${chunkStats.chunk_count || '-'}</td>
