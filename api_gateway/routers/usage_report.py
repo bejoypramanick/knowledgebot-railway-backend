@@ -299,7 +299,7 @@ async def usage_report_chunks(
                         char_length(content) AS char_count,
                         CASE
                             WHEN btrim(content) = '' THEN 0
-                            ELSE cardinality(regexp_split_to_array(btrim(content), E'\\s+'))
+                            ELSE cardinality(regexp_split_to_array(btrim(content), '[[:space:]]+'))
                         END AS word_count,
                         octet_length(content) AS size_bytes,
                         pg_size_pretty(CAST(pg_column_size(content) AS bigint)) AS content_pretty,
