@@ -935,7 +935,8 @@ function buildIngestionParentRows(files, websites) {
       chunkCount: Number(chunkStats.chunk_count || 0),
       contentPretty: chunkStats.content_pretty || '-',
       embeddingPretty: chunkStats.embedding_pretty || '-',
-      expandable: childPages.length > 0 || Number(chunkStats.chunk_count || 0) > 0 || usageRows.length > 0,
+      // Only show a second level when this website actually has child pages.
+      expandable: childPages.length > 0,
       downloadable: childPages.length > 0 || Number(chunkStats.chunk_count || 0) > 0 || usageRows.length > 0,
     });
   });
