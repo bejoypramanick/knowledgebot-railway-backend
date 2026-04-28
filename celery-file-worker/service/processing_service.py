@@ -277,10 +277,12 @@ async def process_file_content(
                     error_msg = kreuzberg_metadata.get(
                         "error", "Kreuzberg processing failed"
                     )
+                    timing_details = kreuzberg_metadata.get("timings_ms") or {}
                     logger.error(
                         "❌ [KREUZBERG_EMPTY_EXTRACTION] Extraction returned no markdown "
                         f"for filename={original_filename} mime_type={detected_mime_type} "
-                        f"s3_key={s3_key} file_id={file_id} error={error_msg}"
+                        f"s3_key={s3_key} file_id={file_id} error={error_msg} "
+                        f"timings_ms={timing_details}"
                     )
                     if tmp_path and os.path.exists(tmp_path):
                         os.unlink(tmp_path)
