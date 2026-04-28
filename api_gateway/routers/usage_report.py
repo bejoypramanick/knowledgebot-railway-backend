@@ -295,8 +295,8 @@ async def usage_report_chunks(
                         chunk_index,
                         content,
                         metadata,
-                        pg_size_pretty(pg_column_size(content)) AS content_pretty,
-                        pg_size_pretty(pg_column_size(embedding)) AS embedding_pretty,
+                        pg_size_pretty(pg_column_size(content)::bigint) AS content_pretty,
+                        pg_size_pretty(pg_column_size(embedding)::bigint) AS embedding_pretty,
                         created_at
                     FROM document_chunks
                     WHERE document_id = :document_id
