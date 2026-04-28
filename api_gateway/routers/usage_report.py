@@ -1334,7 +1334,7 @@ async function downloadIngestionCsv(event, buttonEl) {
       'Size Bytes': chunk.size_bytes ?? '',
       'Content Storage Bytes': chunk.content_storage_bytes ?? '',
       'Embedding Storage Bytes': chunk.embedding_storage_bytes ?? '',
-      'Content Pretty': chunk.content_pretty || '',
+      'Content Storage Pretty': chunk.content_pretty || '',
       'Embedding Pretty': chunk.embedding_pretty || '',
       'Metadata': chunk.metadata == null ? '' : (typeof chunk.metadata === 'string' ? chunk.metadata : JSON.stringify(chunk.metadata)),
       'Content': chunk.content || '',
@@ -1785,6 +1785,45 @@ function downloadExcel() {
 
   const wb = XLSX.utils.book_new();
 
+  function styleWorksheet(ws, opts={}) {
+    if(!ws || !ws['!ref']) return ws;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    ws['!autofilter'] = { ref: ws['!ref'] };
+    ws['!freeze'] = { xSplit: 0, ySplit: opts.freezeRows || 1 };
+
+    for(let row = range.s.r; row <= range.e.r; row += 1) {
+      for(let col = range.s.c; col <= range.e.c; col += 1) {
+        const cellRef = XLSX.utils.encode_cell({ r: row, c: col });
+        const cell = ws[cellRef];
+        if(!cell) continue;
+        cell.s = cell.s || {};
+        cell.s.alignment = Object.assign({}, cell.s.alignment || {}, {
+          wrapText: false,
+          vertical: 'top',
+        });
+      }
+    }
+
+    return ws;
+  }
+
+  function appendTotalsRow(ws, totalsByHeader) {
+    if(!ws || !ws['!ref'] || !totalsByHeader || !Object.keys(totalsByHeader).length) return ws;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const headers = [];
+    for(let col = range.s.c; col <= range.e.c; col += 1) {
+      const cellRef = XLSX.utils.encode_cell({ r: range.s.r, c: col });
+      headers.push(String(ws[cellRef]?.v || ''));
+    }
+
+    const footer = headers.map((header, idx) => {
+      if(idx === 0) return 'TOTALS';
+      return Object.prototype.hasOwnProperty.call(totalsByHeader, header) ? totalsByHeader[header] : '';
+    });
+    XLSX.utils.sheet_add_aoa(ws, [footer], { origin: -1 });
+    return ws;
+  }
+
   // Sheet 1: Chat Sessions
   const sessData = sessions.map(r => {
     return {
@@ -1798,7 +1837,9 @@ function downloadExcel() {
       'Status': r.archive_status||''
     };
   });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sessData), 'Chat Sessions');
+  const sessSheet = XLSX.utils.json_to_sheet(sessData);
+  styleWorksheet(sessSheet);
+  XLSX.utils.book_append_sheet(wb, sessSheet, 'Chat Sessions');
 
   // Sheet 2: Chat Messages
   const msgData = chatMsgs.map(r => {
@@ -1817,7 +1858,9 @@ function downloadExcel() {
       'Message Preview': trunc(r.content||'', 240)
     };
   });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(msgData), 'Chat Messages');
+  const msgSheet = XLSX.utils.json_to_sheet(msgData);
+  styleWorksheet(msgSheet);
+  XLSX.utils.book_append_sheet(wb, msgSheet, 'Chat Messages');
 
   // Sheet 3: Agent Run Steps
   const stepsData = (RAW.run_steps||[]).map(r => ({
@@ -1833,7 +1876,9 @@ function downloadExcel() {
     'Content Preview': r.content_preview||'',
     'Created': r.created_at||''
   }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stepsData), 'Agent Run Steps');
+  const stepsSheet = XLSX.utils.json_to_sheet(stepsData);
+  styleWorksheet(stepsSheet);
+  XLSX.utils.book_append_sheet(wb, stepsSheet, 'Agent Run Steps');
 
   // Sheet 4: Knowledge Ingestion
   const tokenLogData = ingestionTokenLog.map(r => {
@@ -1847,14 +1892,22 @@ function downloadExcel() {
       'Input Characters': payloadChars(meta),
       'Input Words': payloadWords(meta),
       'Input Size Bytes': payloadBytes(meta),
-      'Input Size': fmtBytes(payloadBytes(meta)),
+      'Size Pretty': fmtBytes(payloadBytes(meta)),
       'Input Text Chunks': payloadTextChunks(meta).join('\\n\\n--- chunk ---\\n\\n'),
       'Input Text Truncated': meta.input_text_truncated ? 'yes' : 'no',
       'Tool Calls': meta.tool_call_count||0,
       'Token Source': meta.token_source||''
     };
   });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tokenLogData), 'Knowledge Ingestion');
+  const ingestionSheet = XLSX.utils.json_to_sheet(tokenLogData);
+  appendTotalsRow(ingestionSheet, {
+    'Input Characters': ingestionTokenLog.reduce((sum, row) => sum + payloadChars(parseMeta(row.request_metadata)), 0),
+    'Input Words': ingestionTokenLog.reduce((sum, row) => sum + payloadWords(parseMeta(row.request_metadata)), 0),
+    'Input Size Bytes': ingestionTokenLog.reduce((sum, row) => sum + payloadBytes(parseMeta(row.request_metadata)), 0),
+    'Size Pretty': fmtBytes(ingestionTokenLog.reduce((sum, row) => sum + payloadBytes(parseMeta(row.request_metadata)), 0)),
+  });
+  styleWorksheet(ingestionSheet);
+  XLSX.utils.book_append_sheet(wb, ingestionSheet, 'Knowledge Ingestion');
 
   // Sheet 5: Usage By Call Type
   const groupedUsageData = groupByCallType(ingestionTokenLog).map(g => ({
@@ -1864,7 +1917,9 @@ function downloadExcel() {
     'Embedding Tokens': g.total || g.prompt,
     'Tool Calls': g.tools
   }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(groupedUsageData), 'Usage By Call Type');
+  const groupedUsageSheet = XLSX.utils.json_to_sheet(groupedUsageData);
+  styleWorksheet(groupedUsageSheet);
+  XLSX.utils.book_append_sheet(wb, groupedUsageSheet, 'Usage By Call Type');
 
   // Sheet 6: Largest Token Calls
   const topCallsData = [...ingestionTokenLog].sort((a,b) => (b.total_tokens||0) - (a.total_tokens||0)).slice(0,100).map(r => {
@@ -1878,7 +1933,9 @@ function downloadExcel() {
       'Token Source': meta.token_source||''
     };
   });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(topCallsData), 'Largest Token Calls');
+  const topCallsSheet = XLSX.utils.json_to_sheet(topCallsData);
+  styleWorksheet(topCallsSheet);
+  XLSX.utils.book_append_sheet(wb, topCallsSheet, 'Largest Token Calls');
 
   XLSX.writeFile(wb, `usage-report-${days}d-${new Date().toISOString().substring(0,10)}.xlsx`);
 }
