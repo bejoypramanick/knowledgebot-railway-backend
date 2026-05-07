@@ -1304,6 +1304,13 @@ function popupNumber(value, title, text) {
   const encodedText = JSON.stringify(text || '');
   return `<button type="button" class="number-link" onclick='openTextPopup(${encodedTitle}, ${encodedText})'>${fmt(value)}</button>`;
 }
+function popupValue(value, title, text, formatter='fmt') {
+  const encodedTitle = JSON.stringify(title || 'Text Details');
+  const encodedText = JSON.stringify(text || '');
+  const displayValue = formatter === 'usd' ? fmtUsd(value) : fmt(value);
+  if((value == null || value === '') && !text) return displayValue;
+  return `<button type="button" class="number-link" onclick='openTextPopup(${encodedTitle}, ${encodedText})'>${displayValue}</button>`;
+}
 function nonIngestionUsageForSession(sessionId) {
   return (RAW.token_usage_log || [])
     .filter(r => r.session_id === sessionId && !isIngestionUsage(r))
@@ -1359,7 +1366,7 @@ function renderSessionProviderUsage(sessionId) {
     </div>
     <table class="bd-table" style="margin:0">
       <thead><tr>
-        <th>Date</th><th>Call</th><th>Model</th>
+        <th>Date</th>
         <th style="text-align:right">Input Tokens</th><th style="text-align:right">Billable Input</th><th style="text-align:right">Output Tokens</th><th style="text-align:right">Total</th>
         <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th>
         <th style="text-align:right">Input Chars</th><th style="text-align:right">Response Chars</th><th style="text-align:right">Price</th>
@@ -1374,19 +1381,55 @@ function renderSessionProviderUsage(sessionId) {
           const responseText = responseMessage && String(responseMessage.role || '').toLowerCase() === 'assistant'
             ? String(responseMessage.content || '')
             : '';
+          const inputPopupText = [
+            `Date: ${fmtDateTime(r.created_at)}`,
+            `Provider: ${r.provider || '-'}`,
+            `Model: ${r.model || '-'}`,
+            `Input Tokens: ${fmt(r.prompt_tokens)}`,
+            `Billable Input Tokens: ${fmt(billablePrompt)}`,
+            `Cache Read Tokens: ${fmt(cache.read)}`,
+            `Cache Write Tokens: ${fmt(cache.write)}`,
+            '',
+            'Captured input text:',
+            inputText || 'No input text captured.',
+          ].join('\\n');
+          const responsePopupText = [
+            `Date: ${fmtDateTime(r.created_at)}`,
+            `Provider: ${r.provider || '-'}`,
+            `Model: ${r.model || '-'}`,
+            `Output Tokens: ${fmt(r.completion_tokens)}`,
+            '',
+            'Captured response text:',
+            responseText || 'No response text captured.',
+          ].join('\\n');
+          const totalPopupText = [
+            `Date: ${fmtDateTime(r.created_at)}`,
+            `Provider: ${r.provider || '-'}`,
+            `Model: ${r.model || '-'}`,
+            `Input Tokens: ${fmt(r.prompt_tokens)}`,
+            `Billable Input Tokens: ${fmt(billablePrompt)}`,
+            `Output Tokens: ${fmt(r.completion_tokens)}`,
+            `Total Tokens: ${fmt(r.total_tokens)}`,
+            `Cache Read Tokens: ${fmt(cache.read)}`,
+            `Cache Write Tokens: ${fmt(cache.write)}`,
+            '',
+            'Input text:',
+            inputText || 'No input text captured.',
+            '',
+            'Response text:',
+            responseText || 'No response text captured.',
+          ].join('\\n');
           return `<tr>
             <td>${fmtDateTime(r.created_at)}</td>
-            <td>${callTypeLabel(r.api_call_type)}</td>
-            <td>${r.model || '-'}</td>
-            <td class="bd-num">${fmt(r.prompt_tokens)}</td>
-            <td class="bd-num">${fmt(billablePrompt)}</td>
-            <td class="bd-num">${fmt(r.completion_tokens)}</td>
-            <td class="bd-num">${fmt(r.total_tokens)}</td>
-            <td class="bd-num">${fmt(cache.read)}</td>
-            <td class="bd-num">${fmt(cache.write)}</td>
+            <td class="bd-num">${popupValue(r.prompt_tokens, 'Input Tokens', inputPopupText)}</td>
+            <td class="bd-num">${popupValue(billablePrompt, 'Billable Input Tokens', inputPopupText)}</td>
+            <td class="bd-num">${popupValue(r.completion_tokens, 'Output Tokens', responsePopupText)}</td>
+            <td class="bd-num">${popupValue(r.total_tokens, 'Total Tokens', totalPopupText)}</td>
+            <td class="bd-num">${popupValue(cache.read, 'Cache Read Tokens', inputPopupText)}</td>
+            <td class="bd-num">${popupValue(cache.write, 'Cache Write Tokens', inputPopupText)}</td>
             <td class="bd-num">${popupNumber(payloadChars(meta), 'Provider Input Text', inputText)}</td>
             <td class="bd-num">${popupNumber(meta.response_char_count || (responseText || '').length, 'Provider Response Text', responseText)}</td>
-            <td class="bd-num">${fmtUsd(usageRowCostUsd(r))}</td>
+            <td class="bd-num">${popupValue(usageRowCostUsd(r), 'Provider Billing Details', totalPopupText, 'usd')}</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -1913,95 +1956,11 @@ function toggleSession(rowEl, sessionId) {
 
   rowEl.classList.add('open');
 
-  const chatMsgs = RAW.chat_messages || [];
-  const msgs = chatMsgs.filter(m => m.session_id === sessionId)
-    .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
-
-  if(msgs.length === 0) {
-    const emptyRow = document.createElement('tr');
-    emptyRow.className = 'msg-row';
-    emptyRow.innerHTML = `<td colspan="8" style="color:var(--muted);font-style:italic;padding-left:32px">No messages found for this session</td>`;
-    rowEl.after(emptyRow);
-    return;
-  }
-
-  const roleName = r => r==='assistant'?'Bot':r==='user'?'User':r==='human_agent'?'Human Agent':(r||'Unknown');
-
   let insertAfter = rowEl;
   const providerRow = document.createElement('tr');
   providerRow.className = 'msg-row';
   providerRow.innerHTML = `<td colspan="9" style="padding-left:24px">${renderSessionProviderUsage(sessionId)}</td>`;
   insertAfter.after(providerRow);
-  insertAfter = providerRow;
-
-  const turns = buildSessionTurns(msgs);
-  const turnsRow = document.createElement('tr');
-  turnsRow.className = 'msg-row';
-  turnsRow.innerHTML = `<td colspan="9" style="padding-left:24px">
-    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
-      Each row below is one billed chat turn: the full user-side prompt sent to Gemini plus the response returned by Gemini.
-      Input tokens already include system prompt, conversation history, tool definitions, and the visible user message.
-    </div>
-    <table class="bd-table">
-      <thead><tr>
-        <th>Turn</th>
-        <th>User Request</th>
-        <th>Bot Response</th>
-        <th style="text-align:right">Input Tokens</th>
-        <th style="text-align:right">Output Tokens</th>
-        <th style="text-align:right">Visible User Tokens</th>
-        <th style="text-align:right">Visible Bot Tokens</th>
-        <th>Billing Meaning</th>
-        <th>Time</th>
-      </tr></thead>
-      <tbody>
-        ${turns.map((turn, idx) => {
-          const userMsg = turn.userMsg || null;
-          const responseMsgs = turn.responseMsgs || [];
-          const responseText = responseMsgs.map(msg => msg.content || '').filter(Boolean).join('\\n\\n');
-          const outputTokens = responseMsgs.reduce((sum, msg) => sum + Number(msg.completion_token_count || 0), 0);
-          const visibleBotTokens = responseMsgs.reduce((sum, msg) => sum + Number(msg.bot_response_token_count || 0), 0);
-          const turnTime = userMsg?.created_at || responseMsgs[0]?.created_at || '';
-          return `
-            <tr>
-              <td class="bd-label">Turn ${idx + 1}</td>
-              <td class="bd-text">
-                <div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(userMsg?.content || '-')}</div>
-              </td>
-              <td class="bd-text">
-                <div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(responseText || '-')}</div>
-              </td>
-              <td class="bd-num">${fmt(userMsg?.prompt_token_count || 0)}</td>
-              <td class="bd-num">${fmt(outputTokens)}</td>
-              <td class="bd-num">${fmt(userMsg?.user_msg_token_count || 0)}</td>
-              <td class="bd-num">${fmt(visibleBotTokens)}</td>
-              <td class="bd-text" style="font-size:11px;color:var(--muted)">
-                Input is the provider-billed prompt total for this turn. Output is the provider-billed completion total for the paired response.
-              </td>
-              <td style="font-size:11px;color:var(--muted);white-space:nowrap">${fmtDateTime(turnTime)}</td>
-            </tr>
-            ${userMsg ? `
-            <tr style="background:rgba(79,70,229,.04)">
-              <td></td>
-              <td colspan="2" style="font-size:11px;color:var(--muted)">
-                Prompt breakdown: system ${fmt(userMsg.system_prompt_token_count || 0)} + history ${fmt(userMsg.history_token_count || 0)} + tools ${fmt(userMsg.tool_def_token_count || 0)} + user ${fmt(userMsg.user_msg_token_count || 0)}
-              </td>
-              <td class="bd-num" style="font-size:11px;color:var(--muted)">${fmt(userMsg.prompt_token_count || 0)}</td>
-              <td class="bd-num" style="font-size:11px;color:var(--muted)">${fmt(outputTokens)}</td>
-              <td colspan="3" style="font-size:11px;color:var(--muted)">
-                Visible message tokens are diagnostics only; billing uses the provider totals above.
-              </td>
-            </tr>
-            ${renderRunSteps(userMsg.id, sessionId) ? `
-            <tr>
-              <td colspan="9" style="padding:0 0 0 24px">${renderRunSteps(userMsg.id, sessionId)}</td>
-            </tr>` : ''}` : ''}
-          `;
-        }).join('')}
-      </tbody>
-    </table>
-  </td>`;
-  insertAfter.after(turnsRow);
 }
 
 // === EXCEL DOWNLOAD (multi-sheet XLSX via SheetJS) ===
