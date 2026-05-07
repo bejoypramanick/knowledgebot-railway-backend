@@ -1812,6 +1812,35 @@ function renderRunSteps(userMsgId, sessionId) {
   return html;
 }
 
+function buildSessionTurns(msgs) {
+  const turns = [];
+  let currentTurn = null;
+
+  (msgs || []).forEach(msg => {
+    const role = String(msg.role || '').toLowerCase();
+    if(role === 'user') {
+      currentTurn = {
+        userMsg: msg,
+        responseMsgs: [],
+      };
+      turns.push(currentTurn);
+      return;
+    }
+
+    if(!currentTurn) {
+      currentTurn = {
+        userMsg: null,
+        responseMsgs: [],
+      };
+      turns.push(currentTurn);
+    }
+
+    currentTurn.responseMsgs.push(msg);
+  });
+
+  return turns;
+}
+
 // === EXPAND/COLLAPSE SESSION MESSAGES ===
 function toggleSession(rowEl, sessionId) {
   const isOpen = rowEl.classList.contains('open');
@@ -1847,85 +1876,78 @@ function toggleSession(rowEl, sessionId) {
   let insertAfter = rowEl;
   const providerRow = document.createElement('tr');
   providerRow.className = 'msg-row';
-  providerRow.innerHTML = `<td colspan="8" style="padding-left:24px">${renderSessionProviderUsage(sessionId)}</td>`;
+  providerRow.innerHTML = `<td colspan="9" style="padding-left:24px">${renderSessionProviderUsage(sessionId)}</td>`;
   insertAfter.after(providerRow);
   insertAfter = providerRow;
 
-  msgs.forEach((m, idx) => {
-    const msgRow = document.createElement('tr');
-    msgRow.className = 'msg-row';
-
-    msgRow.innerHTML = `<td colspan="8" style="padding-left:24px">
-      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:8px">
-        <span class="badge badge-${m.role}" style="flex-shrink:0">${roleName(m.role)}</span>
-        <div class="msg-bubble msg-collapsed" onclick="this.classList.toggle('msg-collapsed')" title="Click to expand/collapse" style="flex:1">${escHtml(m.content)}</div>
-        <span style="flex-shrink:0;font-size:11px;color:var(--muted);white-space:nowrap">${fmtDateTime(m.created_at)}</span>
-      </div>
-      <table class="bd-table">
-        <thead><tr>
-          <th>Component</th><th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>What this means</th>
-        </tr></thead>
-        <tbody>
-        ${m.role==='user' ? `
-          <tr>
-            <td class="bd-label">System Prompt</td>
-            <td class="bd-num">${fmt(m.system_prompt_token_count)}</td>
-            <td class="bd-num">${fmt(m.system_prompt_word_count)}</td>
-            <td class="bd-num">${fmt(m.system_prompt_char_count)}</td>
-            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.system_prompt_text)||'-'}</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Gemini count_tokens diagnostic for the stored system prompt text.</div></td>
-          </tr>
-          <tr>
-            <td class="bd-label">Conv. History</td>
-            <td class="bd-num">${fmt(m.history_token_count)}</td>
-            <td class="bd-num">${fmt(m.history_word_count)}</td>
-            <td class="bd-num">${fmt(m.history_char_count)}</td>
-            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.history_text)||'<i style="color:var(--muted)">No history (first message)</i>'}</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Gemini count_tokens diagnostic for serialized conversation history.</div></td>
-          </tr>
-          <tr>
-            <td class="bd-label">Tool Definitions</td>
-            <td class="bd-num">${fmt(m.tool_def_token_count)}</td>
-            <td class="bd-num">${fmt(m.tool_def_word_count)}</td>
-            <td class="bd-num">${fmt(m.tool_def_char_count)}</td>
-            <td class="bd-text" style="font-size:10px;color:var(--muted)">
-              Gemini count_tokens diagnostic for the stored tool definition/schema text. Hidden provider request material is not inferred.
-            </td>
-          </tr>
-          <tr>
-            <td class="bd-label">User Message</td>
-            <td class="bd-num">${fmt(m.user_msg_token_count)}</td>
-            <td class="bd-num">${fmt(m.user_msg_word_count)}</td>
-            <td class="bd-num">${fmt(m.user_msg_char_count)}</td>
-            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Gemini count_tokens diagnostic for only the user's visible message.</div></td>
-          </tr>
-          <tr style="background:rgba(79,70,229,.06);font-weight:600">
-            <td class="bd-label">Provider Prompt Total</td>
-            <td class="bd-num">${fmt(m.prompt_token_count)}</td>
-            <td colspan="2" style="font-size:11px;color:var(--muted)">Gemini/Pydantic usage</td>
-            <td style="font-size:10px;color:var(--muted)">Provider-reported prompt total for this turn. This is the billing number; rows above are diagnostics used to explain it.</td>
-          </tr>
-        ` : `
-          <tr>
-            <td class="bd-label">Bot Message Diagnostic</td>
-            <td class="bd-num">${fmt(m.bot_response_token_count)}</td>
-            <td class="bd-num">${fmt(m.bot_response_word_count)}</td>
-            <td class="bd-num">${fmt(m.bot_response_char_count)}</td>
-            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(m.content)||'-'}</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Gemini count_tokens diagnostic for the stored bot message text.</div></td>
-          </tr>
-          <tr style="background:rgba(79,70,229,.06);font-weight:600">
-            <td class="bd-label">Provider Completion Total</td>
-            <td class="bd-num">${fmt(m.completion_token_count)}</td>
-            <td colspan="2" style="font-size:11px;color:var(--muted)">Gemini/Pydantic usage</td>
-            <td style="font-size:10px;color:var(--muted)">Provider-reported output tokens for this turn. It may include tool-call generation and final text, so it can differ from the visible bot message diagnostic.</td>
-          </tr>
-        `}
-        </tbody>
-      </table>
-      ${m.role==='user' ? renderRunSteps(m.id, sessionId) : ''}
-      <div style="font-size:10px;color:var(--muted);margin-top:2px">ID: ${m.id||'-'}</div>
-    </td>`;
-    insertAfter.after(msgRow);
-    insertAfter = msgRow;
-  });
+  const turns = buildSessionTurns(msgs);
+  const turnsRow = document.createElement('tr');
+  turnsRow.className = 'msg-row';
+  turnsRow.innerHTML = `<td colspan="9" style="padding-left:24px">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+      Each row below is one billed chat turn: the full user-side prompt sent to Gemini plus the response returned by Gemini.
+      Input tokens already include system prompt, conversation history, tool definitions, and the visible user message.
+    </div>
+    <table class="bd-table">
+      <thead><tr>
+        <th>Turn</th>
+        <th>User Request</th>
+        <th>Bot Response</th>
+        <th style="text-align:right">Input Tokens</th>
+        <th style="text-align:right">Output Tokens</th>
+        <th style="text-align:right">Visible User Tokens</th>
+        <th style="text-align:right">Visible Bot Tokens</th>
+        <th>Billing Meaning</th>
+        <th>Time</th>
+      </tr></thead>
+      <tbody>
+        ${turns.map((turn, idx) => {
+          const userMsg = turn.userMsg || null;
+          const responseMsgs = turn.responseMsgs || [];
+          const responseText = responseMsgs.map(msg => msg.content || '').filter(Boolean).join('\\n\\n');
+          const outputTokens = responseMsgs.reduce((sum, msg) => sum + Number(msg.completion_token_count || 0), 0);
+          const visibleBotTokens = responseMsgs.reduce((sum, msg) => sum + Number(msg.bot_response_token_count || 0), 0);
+          const turnTime = userMsg?.created_at || responseMsgs[0]?.created_at || '';
+          return `
+            <tr>
+              <td class="bd-label">Turn ${idx + 1}</td>
+              <td class="bd-text">
+                <div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(userMsg?.content || '-')}</div>
+              </td>
+              <td class="bd-text">
+                <div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(responseText || '-')}</div>
+              </td>
+              <td class="bd-num">${fmt(userMsg?.prompt_token_count || 0)}</td>
+              <td class="bd-num">${fmt(outputTokens)}</td>
+              <td class="bd-num">${fmt(userMsg?.user_msg_token_count || 0)}</td>
+              <td class="bd-num">${fmt(visibleBotTokens)}</td>
+              <td class="bd-text" style="font-size:11px;color:var(--muted)">
+                Input is the provider-billed prompt total for this turn. Output is the provider-billed completion total for the paired response.
+              </td>
+              <td style="font-size:11px;color:var(--muted);white-space:nowrap">${fmtDateTime(turnTime)}</td>
+            </tr>
+            ${userMsg ? `
+            <tr style="background:rgba(79,70,229,.04)">
+              <td></td>
+              <td colspan="2" style="font-size:11px;color:var(--muted)">
+                Prompt breakdown: system ${fmt(userMsg.system_prompt_token_count || 0)} + history ${fmt(userMsg.history_token_count || 0)} + tools ${fmt(userMsg.tool_def_token_count || 0)} + user ${fmt(userMsg.user_msg_token_count || 0)}
+              </td>
+              <td class="bd-num" style="font-size:11px;color:var(--muted)">${fmt(userMsg.prompt_token_count || 0)}</td>
+              <td class="bd-num" style="font-size:11px;color:var(--muted)">${fmt(outputTokens)}</td>
+              <td colspan="3" style="font-size:11px;color:var(--muted)">
+                Visible message tokens are diagnostics only; billing uses the provider totals above.
+              </td>
+            </tr>
+            ${renderRunSteps(userMsg.id, sessionId) ? `
+            <tr>
+              <td colspan="9" style="padding:0 0 0 24px">${renderRunSteps(userMsg.id, sessionId)}</td>
+            </tr>` : ''}` : ''}
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+  </td>`;
+  insertAfter.after(turnsRow);
 }
 
 // === EXCEL DOWNLOAD (multi-sheet XLSX via SheetJS) ===
