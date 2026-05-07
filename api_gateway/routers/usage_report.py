@@ -1354,7 +1354,7 @@ function renderSessionProviderUsage(sessionId) {
     <div style="padding:8px 10px;background:rgba(22,163,74,.08);border-bottom:1px solid var(--border)">
       <div style="font-size:12px;font-weight:700;color:var(--green)">Provider Billing Ledger</div>
       <div style="font-size:11px;color:var(--muted);margin-top:3px">
-        Each row is one provider-billed turn in this session. Input Chars opens the stored user-side input text and Response Chars opens the stored bot-side response text.
+        Each row is one provider-billed turn. The text columns are split by what Gemini actually saw or produced: system prompt, user prompt, tool traffic, and response text.
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
         <span><b>Provider prompt:</b> ${fmt(totals.prompt)}</span>
@@ -1370,7 +1370,7 @@ function renderSessionProviderUsage(sessionId) {
         <th>Turn</th><th>Date</th><th>User Msg ID</th><th>Bot Msg ID</th>
         <th style="text-align:right">Input Tokens</th><th style="text-align:right">Billable Input</th><th style="text-align:right">Output Tokens</th><th style="text-align:right">Total</th>
         <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th>
-        <th style="text-align:right">Input Chars</th><th style="text-align:right">Response Chars</th><th style="text-align:right">Price</th>
+        <th style="text-align:right">System Prompt Chars</th><th style="text-align:right">User Prompt Chars</th><th style="text-align:right">Tool Chars</th><th style="text-align:right">Response Chars</th><th style="text-align:right">Price</th>
       </tr></thead>
       <tbody>
         ${rows.map((r, idx) => {
@@ -1381,9 +1381,11 @@ function renderSessionProviderUsage(sessionId) {
           const userMsg = turn.userMsg || null;
           const responseMsgs = turn.responseMsgs || [];
           const turnSteps = userMsg ? runStepsForTurn(sessionId, userMsg.id) : [];
-          const inputText = formatRunStepContent(turnSteps, 'model_request');
-          const responseText = formatRunStepContent(turnSteps, 'model_response');
-          const inputPopupText = [
+          const systemPromptText = formatRunStepParts(turnSteps, ['system_prompt']);
+          const userPromptText = formatRunStepParts(turnSteps, ['user_prompt']);
+          const toolText = formatRunStepParts(turnSteps, ['tool_call', 'tool_return']);
+          const responseText = formatRunStepParts(turnSteps, ['text', 'thinking']);
+          const systemPromptPopupText = [
             `Session ID: ${sessionId}`,
             `Turn: ${idx + 1}`,
             `User Message ID: ${userMsg?.id || '-'}`,
@@ -1391,13 +1393,33 @@ function renderSessionProviderUsage(sessionId) {
             `Date: ${fmtDateTime(r.created_at)}`,
             `Provider: ${r.provider || '-'}`,
             `Model: ${r.model || '-'}`,
-            `Input Tokens: ${fmt(r.prompt_tokens)}`,
-            `Billable Input Tokens: ${fmt(billablePrompt)}`,
-            `Cache Read Tokens: ${fmt(cache.read)}`,
-            `Cache Write Tokens: ${fmt(cache.write)}`,
             '',
-            'Captured input text:',
-            inputText || 'No input text captured.',
+            'System prompt text:',
+            systemPromptText || 'No system prompt text captured.',
+          ].join('\\n');
+          const userPromptPopupText = [
+            `Session ID: ${sessionId}`,
+            `Turn: ${idx + 1}`,
+            `User Message ID: ${userMsg?.id || '-'}`,
+            `Bot Message IDs: ${responseMsgs.map(msg => msg.id).join(', ') || '-'}`,
+            `Date: ${fmtDateTime(r.created_at)}`,
+            `Provider: ${r.provider || '-'}`,
+            `Model: ${r.model || '-'}`,
+            '',
+            'User prompt text:',
+            userPromptText || 'No user prompt text captured.',
+          ].join('\\n');
+          const toolPopupText = [
+            `Session ID: ${sessionId}`,
+            `Turn: ${idx + 1}`,
+            `User Message ID: ${userMsg?.id || '-'}`,
+            `Bot Message IDs: ${responseMsgs.map(msg => msg.id).join(', ') || '-'}`,
+            `Date: ${fmtDateTime(r.created_at)}`,
+            `Provider: ${r.provider || '-'}`,
+            `Model: ${r.model || '-'}`,
+            '',
+            'Tool call / return text:',
+            toolText || 'No tool text captured.',
           ].join('\\n');
           const responsePopupText = [
             `Session ID: ${sessionId}`,
@@ -1407,9 +1429,8 @@ function renderSessionProviderUsage(sessionId) {
             `Date: ${fmtDateTime(r.created_at)}`,
             `Provider: ${r.provider || '-'}`,
             `Model: ${r.model || '-'}`,
-            `Output Tokens: ${fmt(r.completion_tokens)}`,
             '',
-            'Captured response text:',
+            'Response text:',
             responseText || 'No response text captured.',
           ].join('\\n');
           return `<tr>
@@ -1423,8 +1444,10 @@ function renderSessionProviderUsage(sessionId) {
             <td class="bd-num">${fmt(r.total_tokens)}</td>
             <td class="bd-num">${fmt(cache.read)}</td>
             <td class="bd-num">${fmt(cache.write)}</td>
-            <td class="bd-num">${popupNumber(payloadChars(meta), 'Provider Input Text', inputText)}</td>
-            <td class="bd-num">${popupNumber(meta.response_char_count || (responseText || '').length, 'Provider Response Text', responseText)}</td>
+            <td class="bd-num">${popupNumber(systemPromptText.length, 'System Prompt Text', systemPromptPopupText)}</td>
+            <td class="bd-num">${popupNumber(userPromptText.length, 'User Prompt Text', userPromptPopupText)}</td>
+            <td class="bd-num">${popupNumber(toolText.length, 'Tool Call and Return Text', toolPopupText)}</td>
+            <td class="bd-num">${popupNumber(responseText.length, 'Response Text', responsePopupText)}</td>
             <td class="bd-num">${fmtUsd(usageRowCostUsd(r))}</td>
           </tr>`;
         }).join('')}
@@ -1913,6 +1936,16 @@ function runStepsForTurn(sessionId, userMessageId) {
 
 function formatRunStepContent(steps, targetStepType) {
   const filtered = (steps || []).filter(step => String(step.step_type || '').toLowerCase() === targetStepType);
+  if(!filtered.length) return '';
+  return filtered.map(step => {
+    const label = String(step.part_type || 'content').replace(/_/g, ' ');
+    const body = step.content_full || step.content_preview || '';
+    return `[${label}]\n${body}`;
+  }).join('\\n\\n');
+}
+function formatRunStepParts(steps, partTypes) {
+  const wanted = new Set((partTypes || []).map(v => String(v || '').toLowerCase()));
+  const filtered = (steps || []).filter(step => wanted.has(String(step.part_type || '').toLowerCase()));
   if(!filtered.length) return '';
   return filtered.map(step => {
     const label = String(step.part_type || 'content').replace(/_/g, ' ');
