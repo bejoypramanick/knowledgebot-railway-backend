@@ -1918,7 +1918,7 @@ function formatRunStepContent(steps, targetStepType) {
     const label = String(step.part_type || 'content').replace(/_/g, ' ');
     const body = step.content_full || step.content_preview || '';
     return `[${label}]\n${body}`;
-  }).join('\n\n');
+  }).join('\\n\\n');
 }
 
 function buildSessionTurns(msgs) {
