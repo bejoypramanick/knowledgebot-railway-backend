@@ -424,6 +424,15 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 .header-tooltip-popover{position:fixed;display:none;max-width:320px;min-width:260px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 14px 32px rgba(15,23,42,.18);padding:12px 14px;z-index:9999}
 .header-tooltip-title{font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px}
 .header-tooltip-body{font-size:12px;line-height:1.55;color:var(--text);white-space:pre-line;text-transform:none;letter-spacing:0}
+.text-popup-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;padding:24px;z-index:10000}
+.text-popup{width:min(900px,100%);max-height:min(80vh,900px);background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 45px rgba(15,23,42,.22);display:flex;flex-direction:column;overflow:hidden}
+.text-popup-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);gap:12px}
+.text-popup-title{font-size:14px;font-weight:700;color:var(--text)}
+.text-popup-close{border:1px solid var(--border);background:#fff;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer}
+.text-popup-body{padding:16px;overflow:auto}
+.text-popup-pre{white-space:pre-wrap;word-break:break-word;font-family:'SF Mono','Fira Code',monospace;font-size:12px;line-height:1.6;color:var(--text)}
+.number-link{background:none;border:none;padding:0;margin:0;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.number-link:disabled{color:var(--muted);cursor:default;text-decoration:none}
 .token-summary{background:linear-gradient(135deg,#f0f9ff,#eef2ff);border:1px solid #bfdbfe;border-radius:12px;padding:20px;margin-bottom:32px}
 .token-summary h2{font-size:20px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #bfdbfe;color:#1d4ed8}
 .token-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
@@ -527,6 +536,17 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 </div>
 
 <div id="header-tooltip-popover" class="header-tooltip-popover" role="dialog" aria-live="polite" aria-hidden="true"></div>
+<div id="text-popup-backdrop" class="text-popup-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="text-popup">
+    <div class="text-popup-header">
+      <div id="text-popup-title" class="text-popup-title">Text Details</div>
+      <button type="button" class="text-popup-close" onclick="closeTextPopup()">Close</button>
+    </div>
+    <div class="text-popup-body">
+      <pre id="text-popup-content" class="text-popup-pre"></pre>
+    </div>
+  </div>
+</div>
 
 <script id="report-raw-data" type="application/json">"""
         + data_json
@@ -551,6 +571,7 @@ const trunc = (s,n) => s && s.length>n ? s.substring(0,n)+'...' : (s||'-');
 const escHtml = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '-';
 const FILE_SOURCE_MAP = Object.fromEntries((RAW.files || []).map(f => [String(f.id), f.original_filename || '']));
 const WEBSITE_SOURCE_MAP = Object.fromEntries((RAW.websites || []).map(w => [String(w.id), w.original_url || '']));
+const CHAT_MESSAGE_BY_ID = Object.fromEntries((RAW.chat_messages || []).map(m => [String(m.id), m]));
 const INGESTION_CHUNK_CACHE = new Map();
 const INGESTION_CHUNK_REQUESTS = new Map();
 let CURRENT_INGESTION_VIEW = {
@@ -561,6 +582,26 @@ let CURRENT_INGESTION_VIEW = {
   fileRowsById: new Map(),
 };
 let activeHeaderTooltipButton = null;
+
+function openTextPopup(title, text) {
+  const backdrop = document.getElementById('text-popup-backdrop');
+  const titleEl = document.getElementById('text-popup-title');
+  const contentEl = document.getElementById('text-popup-content');
+  if(!backdrop || !titleEl || !contentEl) return;
+  titleEl.textContent = title || 'Text Details';
+  contentEl.textContent = text || 'No text available.';
+  backdrop.style.display = 'flex';
+  backdrop.setAttribute('aria-hidden', 'false');
+}
+
+function closeTextPopup() {
+  const backdrop = document.getElementById('text-popup-backdrop');
+  const contentEl = document.getElementById('text-popup-content');
+  if(!backdrop || !contentEl) return;
+  backdrop.style.display = 'none';
+  backdrop.setAttribute('aria-hidden', 'true');
+  contentEl.textContent = '';
+}
 
 function filterByDate(arr, days, dateField='created_at') {
   const c = cutoff(days);
@@ -1256,6 +1297,13 @@ function payloadTextChunks(meta) {
   if(meta.input_text) return [meta.input_text];
   return [];
 }
+function popupNumber(value, title, text) {
+  const numericValue = Number(value || 0);
+  if(!(numericValue > 0) || !text) return fmt(value);
+  const encodedTitle = JSON.stringify(title || 'Text Details');
+  const encodedText = JSON.stringify(text || '');
+  return `<button type="button" class="number-link" onclick='openTextPopup(${encodedTitle}, ${encodedText})'>${fmt(value)}</button>`;
+}
 function nonIngestionUsageForSession(sessionId) {
   return (RAW.token_usage_log || [])
     .filter(r => r.session_id === sessionId && !isIngestionUsage(r))
@@ -1296,9 +1344,9 @@ function renderSessionProviderUsage(sessionId) {
   }, {prompt:0, billablePrompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0});
   return `<div style="margin:8px 0 12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#fff">
     <div style="padding:8px 10px;background:rgba(22,163,74,.08);border-bottom:1px solid var(--border)">
-      <div style="font-size:12px;font-weight:700;color:var(--green)">Provider Usage Ledger</div>
+      <div style="font-size:12px;font-weight:700;color:var(--green)">Provider Billing Ledger</div>
       <div style="font-size:11px;color:var(--muted);margin-top:3px">
-        These rows are rooted in provider usage. Billable prompt is provider prompt minus provider cache read; completion is billable; cache read/write are cached; captured step rows below are non-billable diagnostics.
+        Numeric view only. Click the input or response character counts to open the actual stored text in a scrollable popup.
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
         <span><b>Provider prompt:</b> ${fmt(totals.prompt)}</span>
@@ -1311,19 +1359,24 @@ function renderSessionProviderUsage(sessionId) {
     </div>
     <table class="bd-table" style="margin:0">
       <thead><tr>
-        <th>Date</th><th>Call</th><th>Provider</th><th>Model</th>
-        <th style="text-align:right">Provider Prompt</th><th style="text-align:right">Billable Prompt</th><th style="text-align:right">Completion</th><th style="text-align:right">Total</th>
-        <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th><th>Billing</th><th>Source</th>
+        <th>Date</th><th>Call</th><th>Model</th>
+        <th style="text-align:right">Input Tokens</th><th style="text-align:right">Billable Input</th><th style="text-align:right">Output Tokens</th><th style="text-align:right">Total</th>
+        <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th>
+        <th style="text-align:right">Input Chars</th><th style="text-align:right">Response Chars</th><th style="text-align:right">Price</th>
       </tr></thead>
       <tbody>
         ${rows.map(r => {
           const meta = parseMeta(r.request_metadata);
           const cache = getCacheTokens(meta);
           const billablePrompt = Math.max(0, (r.prompt_tokens || 0) - cache.read);
+          const inputText = payloadTextChunks(meta).join('\\n\\n--- chunk ---\\n\\n');
+          const responseMessage = CHAT_MESSAGE_BY_ID[String(r.message_id || '')];
+          const responseText = responseMessage && String(responseMessage.role || '').toLowerCase() === 'assistant'
+            ? String(responseMessage.content || '')
+            : '';
           return `<tr>
             <td>${fmtDateTime(r.created_at)}</td>
             <td>${callTypeLabel(r.api_call_type)}</td>
-            <td>${r.provider || '-'}</td>
             <td>${r.model || '-'}</td>
             <td class="bd-num">${fmt(r.prompt_tokens)}</td>
             <td class="bd-num">${fmt(billablePrompt)}</td>
@@ -1331,8 +1384,9 @@ function renderSessionProviderUsage(sessionId) {
             <td class="bd-num">${fmt(r.total_tokens)}</td>
             <td class="bd-num">${fmt(cache.read)}</td>
             <td class="bd-num">${fmt(cache.write)}</td>
-            <td>${billingBadge('prompt billable','billable')} ${billingBadge('completion billable','billable')} ${cache.read || cache.write ? billingBadge('cache cached','cached') : ''}</td>
-            <td><div class="metadata-snippet" title="${escHtml(JSON.stringify(meta))}">${escHtml(usageTokenSource(meta))}</div></td>
+            <td class="bd-num">${popupNumber(payloadChars(meta), 'Provider Input Text', inputText)}</td>
+            <td class="bd-num">${popupNumber(meta.response_char_count || (responseText || '').length, 'Provider Response Text', responseText)}</td>
+            <td class="bd-num">${fmtUsd(usageRowCostUsd(r))}</td>
           </tr>`;
         }).join('')}
       </tbody>
