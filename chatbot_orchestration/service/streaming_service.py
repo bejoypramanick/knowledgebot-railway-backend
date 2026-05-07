@@ -2284,6 +2284,9 @@ class StreamingService:
                 await asyncio.sleep(6)  # Wait for write-through to flush
 
                 async with get_db_session() as db:
+                    user_message_id = None
+                    bot_message_id = None
+
                     # Update the latest user message
                     result = await db.execute(
                         text("""
@@ -2338,6 +2341,18 @@ class StreamingService:
                     )
                     user_updated = result.rowcount > 0
 
+                    user_id_result = await db.execute(
+                        text("""
+                            SELECT id FROM chat_messages
+                            WHERE session_id = CAST(:session_id AS UUID) AND role = 'user'
+                            ORDER BY created_at DESC LIMIT 1
+                        """),
+                        {"session_id": session_id},
+                    )
+                    user_row = user_id_result.fetchone()
+                    if user_row:
+                        user_message_id = str(user_row[0])
+
                     # Update the latest assistant message
                     result = await db.execute(
                         text("""
@@ -2367,6 +2382,53 @@ class StreamingService:
                         },
                     )
                     bot_updated = result.rowcount > 0
+
+                    bot_id_result = await db.execute(
+                        text("""
+                            SELECT id FROM chat_messages
+                            WHERE session_id = CAST(:session_id AS UUID) AND role = 'assistant'
+                            ORDER BY created_at DESC LIMIT 1
+                        """),
+                        {"session_id": session_id},
+                    )
+                    bot_row = bot_id_result.fetchone()
+                    if bot_row:
+                        bot_message_id = str(bot_row[0])
+
+                    # Backfill the latest provider usage row with the canonical PG
+                    # message UUID once write-through has materialized chat_messages.
+                    if user_message_id:
+                        token_usage_result = await db.execute(
+                            text("""
+                                WITH target AS (
+                                    SELECT id
+                                    FROM token_usage_log
+                                    WHERE session_id = CAST(:session_id AS UUID)
+                                      AND api_call_type = 'agent_stream'
+                                      AND message_id IS NULL
+                                    ORDER BY created_at DESC
+                                    LIMIT 1
+                                )
+                                UPDATE token_usage_log tul
+                                SET message_id = CAST(:user_message_id AS UUID),
+                                    request_metadata = COALESCE(tul.request_metadata, '{}'::jsonb)
+                                        || jsonb_build_object(
+                                            'user_message_id', CAST(:user_message_id AS text),
+                                            'bot_message_id', CAST(:bot_message_id AS text)
+                                        ),
+                                    updated_at = NOW()
+                                FROM target
+                                WHERE tul.id = target.id
+                            """),
+                            {
+                                "session_id": session_id,
+                                "user_message_id": user_message_id,
+                                "bot_message_id": bot_message_id,
+                            },
+                        )
+                        token_usage_updated = token_usage_result.rowcount > 0
+                    else:
+                        token_usage_updated = False
 
                     # Update session aggregates (add this turn's metrics)
                     total_char = user_char_count + bot_char_count
@@ -2418,6 +2480,9 @@ class StreamingService:
                     )
                     logger.info(
                         f"   Bot msg: {bot_char_count} chars, {bot_word_count} words, msg_tokens={bot_message_tokens}, completion_tokens={output_tokens} (updated={bot_updated})"
+                    )
+                    logger.info(
+                        f"   Token usage linkage: user_message_id={user_message_id or '-'}, bot_message_id={bot_message_id or '-'}, token_usage_updated={token_usage_updated}"
                     )
                     logger.info(
                         f"   Components: sys_prompt={sp_tokens}t/{sp_char}c/{sp_word}w, history={hist_tokens}t/{hist_char}c/{hist_word}w, tools={td_tokens}t/{td_char}c/{td_word}w"
