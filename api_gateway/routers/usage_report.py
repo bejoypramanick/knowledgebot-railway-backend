@@ -1330,6 +1330,13 @@ function billingBadge(label, cls) {
 }
 function renderSessionProviderUsage(sessionId) {
   const rows = nonIngestionUsageForSession(sessionId);
+  const sessionSteps = (RAW.run_steps || [])
+    .filter(step => step.session_id === sessionId)
+    .sort((a, b) => {
+      const userCmp = String(a.user_message_id || '').localeCompare(String(b.user_message_id || ''));
+      if(userCmp !== 0) return userCmp;
+      return Number(a.step_number || 0) - Number(b.step_number || 0);
+    });
   if(!rows.length) {
     return `<div style="margin:8px 0 12px;padding:10px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--muted);font-size:12px">
       No provider usage rows were recorded for this session.
@@ -1346,15 +1353,11 @@ function renderSessionProviderUsage(sessionId) {
     acc.cacheWrite += cache.write;
     return acc;
   }, {prompt:0, billablePrompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0});
-  const sessionMsgs = (RAW.chat_messages || [])
-    .filter(m => m.session_id === sessionId)
-    .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
-  const sessionTurns = buildSessionTurns(sessionMsgs);
   return `<div style="margin:8px 0 12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#fff">
     <div style="padding:8px 10px;background:rgba(22,163,74,.08);border-bottom:1px solid var(--border)">
       <div style="font-size:12px;font-weight:700;color:var(--green)">Provider Billing Ledger</div>
       <div style="font-size:11px;color:var(--muted);margin-top:3px">
-        Each row is one provider-billed turn. The text columns are split by what Gemini actually saw or produced: system prompt, user prompt, tool traffic, and response text.
+        This table shows only billing-related provider usage rows from token_usage_log. The raw agent_run_steps rows are shown separately below as diagnostics.
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
         <span><b>Provider prompt:</b> ${fmt(totals.prompt)}</span>
@@ -1367,46 +1370,55 @@ function renderSessionProviderUsage(sessionId) {
     </div>
     <table class="bd-table" style="margin:0">
       <thead><tr>
-        <th>Turn</th><th>Date</th><th>User Msg ID</th><th>Bot Msg ID</th>
-        <th style="text-align:right">Input Tokens</th><th style="text-align:right">Billable Input</th><th style="text-align:right">Output Tokens</th><th style="text-align:right">Total</th>
-        <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th>
-        <th style="text-align:right">System Prompt Chars</th><th style="text-align:right">User Prompt Chars</th><th style="text-align:right">Tool Chars</th><th style="text-align:right">Response Chars</th><th style="text-align:right">Price</th>
+        <th>Date</th><th>Provider</th><th>Model</th>
+        <th style="text-align:right">Prompt Tokens</th><th style="text-align:right">Billable Prompt</th><th style="text-align:right">Completion Tokens</th><th style="text-align:right">Total Tokens</th>
+        <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th><th style="text-align:right">Price</th>
       </tr></thead>
       <tbody>
-        ${rows.map((r, idx) => {
+        ${rows.map(r => {
           const meta = parseMeta(r.request_metadata);
           const cache = getCacheTokens(meta);
           const billablePrompt = Math.max(0, (r.prompt_tokens || 0) - cache.read);
-          const turn = sessionTurns[idx] || { userMsg: null, responseMsgs: [] };
-          const userMsg = turn.userMsg || null;
-          const responseMsgs = turn.responseMsgs || [];
-          const turnSteps = userMsg ? runStepsForTurn(sessionId, userMsg.id) : [];
-          const systemPromptText = formatRunStepParts(turnSteps, ['system_prompt']);
-          const userPromptText = formatRunStepParts(turnSteps, ['user_prompt']);
-          const toolText = formatRunStepParts(turnSteps, ['tool_call', 'tool_return']);
-          const responseText = formatRunStepParts(turnSteps, ['text', 'thinking']);
-          const systemPromptPopupText = systemPromptText || 'No system prompt text captured.';
-          const userPromptPopupText = userPromptText || 'No user prompt text captured.';
-          const toolPopupText = toolText || 'No tool text captured.';
-          const responsePopupText = responseText || 'No response text captured.';
           return `<tr>
-            <td class="bd-label">Turn ${idx + 1}</td>
             <td>${fmtDateTime(r.created_at)}</td>
-            <td class="mono" title="${escHtml(userMsg?.id || '')}">${escHtml(userMsg?.id || '-')}</td>
-            <td class="mono" title="${escHtml(responseMsgs.map(msg => msg.id).join(', ') || '')}">${escHtml(responseMsgs.map(msg => msg.id).join(', ') || '-')}</td>
+            <td>${escHtml(r.provider || '-')}</td>
+            <td>${escHtml(r.model || '-')}</td>
             <td class="bd-num">${fmt(r.prompt_tokens)}</td>
             <td class="bd-num">${fmt(billablePrompt)}</td>
             <td class="bd-num">${fmt(r.completion_tokens)}</td>
             <td class="bd-num">${fmt(r.total_tokens)}</td>
             <td class="bd-num">${fmt(cache.read)}</td>
             <td class="bd-num">${fmt(cache.write)}</td>
-            <td class="bd-num">${popupNumber(systemPromptText.length, 'System Prompt Text', systemPromptPopupText)}</td>
-            <td class="bd-num">${popupNumber(userPromptText.length, 'User Prompt Text', userPromptPopupText)}</td>
-            <td class="bd-num">${popupNumber(toolText.length, 'Tool Call and Return Text', toolPopupText)}</td>
-            <td class="bd-num">${popupNumber(responseText.length, 'Response Text', responsePopupText)}</td>
             <td class="bd-num">${fmtUsd(usageRowCostUsd(r))}</td>
           </tr>`;
-        }).join('')}
+        }).join('') || `<tr><td colspan="10" style="color:var(--muted)">No provider usage rows were recorded for this session.</td></tr>`}
+      </tbody>
+    </table>
+    <div style="padding:8px 10px;background:rgba(79,70,229,.08);border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-size:12px;font-weight:700;color:var(--accent)">
+      Agent Run Diagnostics
+      <div style="font-weight:400;color:var(--muted);margin-top:3px;font-size:11px">Raw agent_run_steps rows for this session as stored in the database. These are diagnostic counts, not billing totals.</div>
+    </div>
+    <table class="bd-table" style="margin:0">
+      <thead><tr>
+        <th>User Msg ID</th><th>Step #</th><th>Direction</th><th>Part Type</th><th>Tool</th>
+        <th style="text-align:right">Tokens</th><th style="text-align:right">Words</th><th style="text-align:right">Chars</th><th>Source</th><th>Content</th>
+      </tr></thead>
+      <tbody>
+        ${sessionSteps.map(step => {
+          const stepContent = step.content_full || step.content_preview || '';
+          return `<tr>
+            <td class="mono" title="${escHtml(step.user_message_id || '')}">${escHtml(step.user_message_id || '-')}</td>
+            <td class="bd-num">${fmt(step.step_number)}</td>
+            <td><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:${step.step_type==='model_request'?'rgba(37,99,235,.1)':'rgba(22,163,74,.1)'};color:${step.step_type==='model_request'?'var(--blue)':'var(--green)'}">${step.step_type==='model_request'?'INPUT':'OUTPUT'}</span></td>
+            <td style="font-weight:600">${escHtml(step.part_type || '-')}</td>
+            <td>${escHtml(step.tool_name || '-')}</td>
+            <td class="bd-num">${fmt(step.token_count)}</td>
+            <td class="bd-num">${fmt(step.word_count)}</td>
+            <td class="bd-num">${popupNumber(step.char_count, String(step.part_type || 'Content'), stepContent)}</td>
+            <td style="font-size:10px;color:var(--muted)">${escHtml(step.token_source || '-')}</td>
+            <td class="bd-text"><div class="bd-text-preview" onclick="this.classList.toggle('expanded')">${escHtml(stepContent || '-')}</div></td>
+          </tr>`;
+        }).join('') || `<tr><td colspan="10" style="color:var(--muted)">No agent_run_steps rows were recorded for this session.</td></tr>`}
       </tbody>
     </table>
   </div>`;
