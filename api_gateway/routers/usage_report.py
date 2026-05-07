@@ -1385,54 +1385,10 @@ function renderSessionProviderUsage(sessionId) {
           const userPromptText = formatRunStepParts(turnSteps, ['user_prompt']);
           const toolText = formatRunStepParts(turnSteps, ['tool_call', 'tool_return']);
           const responseText = formatRunStepParts(turnSteps, ['text', 'thinking']);
-          const systemPromptPopupText = [
-            `Session ID: ${sessionId}`,
-            `Turn: ${idx + 1}`,
-            `User Message ID: ${userMsg?.id || '-'}`,
-            `Bot Message IDs: ${responseMsgs.map(msg => msg.id).join(', ') || '-'}`,
-            `Date: ${fmtDateTime(r.created_at)}`,
-            `Provider: ${r.provider || '-'}`,
-            `Model: ${r.model || '-'}`,
-            '',
-            'System prompt text:',
-            systemPromptText || 'No system prompt text captured.',
-          ].join('\\n');
-          const userPromptPopupText = [
-            `Session ID: ${sessionId}`,
-            `Turn: ${idx + 1}`,
-            `User Message ID: ${userMsg?.id || '-'}`,
-            `Bot Message IDs: ${responseMsgs.map(msg => msg.id).join(', ') || '-'}`,
-            `Date: ${fmtDateTime(r.created_at)}`,
-            `Provider: ${r.provider || '-'}`,
-            `Model: ${r.model || '-'}`,
-            '',
-            'User prompt text:',
-            userPromptText || 'No user prompt text captured.',
-          ].join('\\n');
-          const toolPopupText = [
-            `Session ID: ${sessionId}`,
-            `Turn: ${idx + 1}`,
-            `User Message ID: ${userMsg?.id || '-'}`,
-            `Bot Message IDs: ${responseMsgs.map(msg => msg.id).join(', ') || '-'}`,
-            `Date: ${fmtDateTime(r.created_at)}`,
-            `Provider: ${r.provider || '-'}`,
-            `Model: ${r.model || '-'}`,
-            '',
-            'Tool call / return text:',
-            toolText || 'No tool text captured.',
-          ].join('\\n');
-          const responsePopupText = [
-            `Session ID: ${sessionId}`,
-            `Turn: ${idx + 1}`,
-            `User Message ID: ${userMsg?.id || '-'}`,
-            `Bot Message IDs: ${responseMsgs.map(msg => msg.id).join(', ') || '-'}`,
-            `Date: ${fmtDateTime(r.created_at)}`,
-            `Provider: ${r.provider || '-'}`,
-            `Model: ${r.model || '-'}`,
-            '',
-            'Response text:',
-            responseText || 'No response text captured.',
-          ].join('\\n');
+          const systemPromptPopupText = systemPromptText || 'No system prompt text captured.';
+          const userPromptPopupText = userPromptText || 'No user prompt text captured.';
+          const toolPopupText = toolText || 'No tool text captured.';
+          const responsePopupText = responseText || 'No response text captured.';
           return `<tr>
             <td class="bd-label">Turn ${idx + 1}</td>
             <td>${fmtDateTime(r.created_at)}</td>
@@ -1947,11 +1903,10 @@ function formatRunStepParts(steps, partTypes) {
   const wanted = new Set((partTypes || []).map(v => String(v || '').toLowerCase()));
   const filtered = (steps || []).filter(step => wanted.has(String(step.part_type || '').toLowerCase()));
   if(!filtered.length) return '';
-  return filtered.map(step => {
-    const label = String(step.part_type || 'content').replace(/_/g, ' ');
-    const body = step.content_full || step.content_preview || '';
-    return `[${label}]\n${body}`;
-  }).join('\\n\\n');
+  return filtered
+    .map(step => step.content_full || step.content_preview || '')
+    .filter(Boolean)
+    .join('\\n\\n');
 }
 
 function buildSessionTurns(msgs) {
