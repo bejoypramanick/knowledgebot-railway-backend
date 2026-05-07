@@ -785,11 +785,66 @@ function fmtUsd(value) {
   if(amount < 0.01) return `$${amount.toFixed(6)}`;
   return `$${amount.toFixed(4)}`;
 }
+function geminiPricingForChatModel(model) {
+  const normalizedModel = String(model || '').toLowerCase();
+  if(normalizedModel.includes('2.5-flash-lite')) {
+    return {
+      standard_input: 0.10,
+      completion: 0.40,
+      cache_read: 0.025,
+      cache_write: 0.0,
+    };
+  }
+  if(normalizedModel.includes('1.5-flash')) {
+    return {
+      standard_input: 0.075,
+      completion: 0.30,
+      cache_read: 0.01875,
+      cache_write: 0.0,
+    };
+  }
+  return {
+    standard_input: 0.10,
+    completion: 0.40,
+    cache_read: 0.01,
+    cache_write: 0.10,
+  };
+}
 function usageRowCostUsd(row) {
   const meta = parseMeta(row && row.request_metadata);
   const direct = Number(meta.cost_usd ?? row.cost_usd ?? 0);
   if(Number.isFinite(direct) && direct > 0) return direct;
-  return 0;
+  const provider = String(meta.provider ?? row.provider ?? '').toLowerCase();
+  const model = String(meta.model ?? row.model ?? '');
+  const pricing = meta.pricing_usd_per_1m || (provider === 'gemini' ? geminiPricingForChatModel(model) : null);
+  if(!pricing) return 0;
+
+  const promptTokens = Number(row && row.prompt_tokens || 0);
+  const completionTokens = Number(row && row.completion_tokens || 0);
+  const cacheRead = Number(meta.cache_read_tokens || 0);
+  const cacheWrite = Number(meta.cache_write_tokens || 0);
+  const standardInput = Math.max(0, promptTokens - cacheRead);
+  const inputRate = Number(pricing.standard_input || 0);
+  const outputRate = Number(pricing.completion || 0);
+  const cacheReadRate = Number(pricing.cache_read || 0);
+  const cacheWriteRate = Number(pricing.cache_write || 0);
+  const computed = (
+    (standardInput * inputRate) +
+    (completionTokens * outputRate) +
+    (cacheRead * cacheReadRate) +
+    (cacheWrite * cacheWriteRate)
+  ) / 1000000;
+  return Number.isFinite(computed) && computed > 0 ? computed : 0;
+}
+function chatUnitRateLabel(model) {
+  const resolvedModel = String(model || '').trim() || 'gemini-2.5-flash-lite';
+  const pricing = geminiPricingForChatModel(resolvedModel);
+  return `${resolvedModel} • In $${Number(pricing.standard_input || 0).toFixed(3)}/1M • Out $${Number(pricing.completion || 0).toFixed(3)}/1M • Cache $${Number(pricing.cache_read || 0).toFixed(3)}/1M`;
+}
+function ingestionUnitRateLabel(model) {
+  const resolvedModel = String(model || '').trim() || 'text-embedding-3-small';
+  const unitRate = Number(EMBEDDING_PRICING_PER_1M[resolvedModel] || 0);
+  return `${resolvedModel} • $${unitRate.toFixed(2)}/1M tokens`;
 }
 function summarizeWebsiteChunksByPage(chunks) {
   const grouped = new Map();
@@ -1613,6 +1668,13 @@ function render() {
     (sum, row) => sum + estimatedEmbeddingCostUsd(row.model || '', row.total_tokens || row.prompt_tokens || 0),
     0
   );
+  const ingestionModels = Array.from(new Set(ingestionTokenLog.map(r => String(r.model || '')).filter(Boolean)));
+  const primaryIngestionModel = ingestionModels[0] || 'text-embedding-3-small';
+  const chatUsageRows = tokenLog.filter(r => !isIngestionUsage(r));
+  const chatModels = Array.from(new Set(chatUsageRows.map(r => String(r.model || '')).filter(Boolean)));
+  const primaryChatModel = chatModels.find(model => String(model).toLowerCase().includes('2.5-flash-lite'))
+    || chatModels[0]
+    || 'gemini-2.5-flash-lite';
 
   // === KNOWLEDGE BASE INGESTION SUMMARY ===
   document.getElementById('token-summary').innerHTML = `
@@ -1643,6 +1705,11 @@ function render() {
         <div class="token-value" style="font-size:20px">${fmtUsd(ingestionPriceUsd)}</div>
         <div class="token-detail">Estimated total embedding cost</div>
       </div>
+      <div class="token-item">
+        <div class="token-label">Unit Rate</div>
+        <div class="token-value" style="font-size:16px">${escHtml(primaryIngestionModel)}</div>
+        <div class="token-detail">${escHtml(ingestionUnitRateLabel(primaryIngestionModel))}</div>
+      </div>
     </div>
   `;
 
@@ -1655,6 +1722,7 @@ function render() {
         <div class="kpi"><div class="label">Total Tokens</div><div class="value green">${fmt(totalPromptTokens + totalCompletionTokens)}</div><div class="sub">Input plus output chat tokens</div></div>
         <div class="kpi"><div class="label">Input Tokens</div><div class="value cyan">${fmt(totalPromptTokens)}</div><div class="sub">Prompt tokens returned by provider usage</div></div>
         <div class="kpi"><div class="label">Output Tokens</div><div class="value accent2">${fmt(totalCompletionTokens)}</div><div class="sub">Completion tokens from chat sessions</div></div>
+        <div class="kpi"><div class="label">Unit Rate</div><div class="value" style="font-size:18px">${escHtml(primaryChatModel)}</div><div class="sub">${escHtml(chatUnitRateLabel(primaryChatModel))}</div></div>
       </div>
     </div>
   `;
@@ -1681,6 +1749,7 @@ function render() {
     const sessionRow = document.createElement('tr');
     sessionRow.className = 'session-row';
     sessionRow.dataset.sessionId = r.id;
+    sessionRow.setAttribute('onclick', `toggleSession(this, '${r.id}')`);
     const sessionPrice = sessionPriceUsd(r.id);
     sessionRow.innerHTML = `
       <td class="mono">${r.id}</td>

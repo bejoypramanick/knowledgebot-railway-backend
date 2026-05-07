@@ -12,6 +12,36 @@ from shared.otel_logger import get_otel_logger
 logger = get_otel_logger("token_dao", "chatbot-orchestration")
 
 
+def gemini_pricing_for_model(model: str) -> Dict[str, float]:
+    """Return paid-tier USD per 1M token rates for Gemini chat usage."""
+    normalized_model = (model or "").lower()
+
+    if "2.5-flash-lite" in normalized_model:
+        return {
+            "standard_input": 0.10,
+            "completion": 0.40,
+            "cache_read": 0.025,
+            "cache_write": 0.0,
+        }
+
+    if "1.5-flash" in normalized_model:
+        return {
+            "standard_input": 0.075,
+            "completion": 0.30,
+            "cache_read": 0.01875,
+            "cache_write": 0.0,
+        }
+
+    # Default to the rate card used for the current chat models
+    # such as gemini-2.5-flash-lite and gemini-2.0-flash.
+    return {
+        "standard_input": 0.10,
+        "completion": 0.40,
+        "cache_read": 0.01,
+        "cache_write": 0.10,
+    }
+
+
 class TokenDAO:
     """Data access object for token operations"""
 
@@ -126,9 +156,7 @@ class TokenDAO:
                 # First, update the llm_providers table with total tokens
                 await self.update_llm_usage(provider, total_tokens)
 
-                # Then, log the detailed token usage
-                # Calculate cost_cents Based on Gemini 2.5 Flash Lite pricing
-                # Input: $0.10/1M, Output: $0.40/1M, Cache Read: $0.01/1M, Cache Write: $0.10/1M
+                # Then, log the detailed token usage using model-aware Gemini pricing.
                 cache_read = 0
                 cache_write = 0
                 if request_metadata:
@@ -137,11 +165,21 @@ class TokenDAO:
 
                 # prompt_tokens includes cache_read
                 standard_input = max(0, (prompt_tokens or 0) - (cache_read or 0))
+                pricing = (
+                    gemini_pricing_for_model(model)
+                    if provider == "gemini"
+                    else {
+                        "standard_input": 0.0,
+                        "completion": 0.0,
+                        "cache_read": 0.0,
+                        "cache_write": 0.0,
+                    }
+                )
                 cost_usd = (
-                    (standard_input * 0.10)
-                    + (cache_read * 0.01)
-                    + (completion_tokens * 0.40)
-                    + (cache_write * 0.10)
+                    (standard_input * float(pricing.get("standard_input", 0.0) or 0.0))
+                    + (cache_read * float(pricing.get("cache_read", 0.0) or 0.0))
+                    + (completion_tokens * float(pricing.get("completion", 0.0) or 0.0))
+                    + (cache_write * float(pricing.get("cache_write", 0.0) or 0.0))
                 ) / 1_000_000.0
 
                 # Keep a coarse cents value for the legacy column, and store exact USD
@@ -175,12 +213,7 @@ class TokenDAO:
                             },
                         },
                         "total_token_source": "provider_total_tokens",
-                        "pricing_usd_per_1m": {
-                            "standard_input": 0.10,
-                            "cache_read": 0.01,
-                            "cache_write": 0.10,
-                            "completion": 0.40,
-                        },
+                        "pricing_usd_per_1m": pricing,
                     }
                 )
 
