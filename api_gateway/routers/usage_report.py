@@ -1304,13 +1304,6 @@ function popupNumber(value, title, text) {
   const encodedText = JSON.stringify(text || '');
   return `<button type="button" class="number-link" onclick='openTextPopup(${encodedTitle}, ${encodedText})'>${fmt(value)}</button>`;
 }
-function popupValue(value, title, text, formatter='fmt') {
-  const encodedTitle = JSON.stringify(title || 'Text Details');
-  const encodedText = JSON.stringify(text || '');
-  const displayValue = formatter === 'usd' ? fmtUsd(value) : fmt(value);
-  if((value == null || value === '') && !text) return displayValue;
-  return `<button type="button" class="number-link" onclick='openTextPopup(${encodedTitle}, ${encodedText})'>${displayValue}</button>`;
-}
 function nonIngestionUsageForSession(sessionId) {
   return (RAW.token_usage_log || [])
     .filter(r => r.session_id === sessionId && !isIngestionUsage(r))
@@ -1349,11 +1342,15 @@ function renderSessionProviderUsage(sessionId) {
     acc.cacheWrite += cache.write;
     return acc;
   }, {prompt:0, billablePrompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0});
+  const sessionMsgs = (RAW.chat_messages || [])
+    .filter(m => m.session_id === sessionId)
+    .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+  const sessionTurns = buildSessionTurns(sessionMsgs);
   return `<div style="margin:8px 0 12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#fff">
     <div style="padding:8px 10px;background:rgba(22,163,74,.08);border-bottom:1px solid var(--border)">
       <div style="font-size:12px;font-weight:700;color:var(--green)">Provider Billing Ledger</div>
       <div style="font-size:11px;color:var(--muted);margin-top:3px">
-        Numeric view only. Click the input or response character counts to open the actual stored text in a scrollable popup.
+        Each row is one provider-billed turn in this session. Input Chars opens the stored user-side input text and Response Chars opens the stored bot-side response text.
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
         <span><b>Provider prompt:</b> ${fmt(totals.prompt)}</span>
@@ -1366,22 +1363,27 @@ function renderSessionProviderUsage(sessionId) {
     </div>
     <table class="bd-table" style="margin:0">
       <thead><tr>
-        <th>Date</th>
+        <th>Turn</th><th>Date</th><th>User Msg ID</th><th>Bot Msg ID</th>
         <th style="text-align:right">Input Tokens</th><th style="text-align:right">Billable Input</th><th style="text-align:right">Output Tokens</th><th style="text-align:right">Total</th>
         <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th>
         <th style="text-align:right">Input Chars</th><th style="text-align:right">Response Chars</th><th style="text-align:right">Price</th>
       </tr></thead>
       <tbody>
-        ${rows.map(r => {
+        ${rows.map((r, idx) => {
           const meta = parseMeta(r.request_metadata);
           const cache = getCacheTokens(meta);
           const billablePrompt = Math.max(0, (r.prompt_tokens || 0) - cache.read);
-          const inputText = payloadTextChunks(meta).join('\\n\\n--- chunk ---\\n\\n');
-          const responseMessage = CHAT_MESSAGE_BY_ID[String(r.message_id || '')];
-          const responseText = responseMessage && String(responseMessage.role || '').toLowerCase() === 'assistant'
-            ? String(responseMessage.content || '')
-            : '';
+          const turn = sessionTurns[idx] || { userMsg: null, responseMsgs: [] };
+          const userMsg = turn.userMsg || null;
+          const responseMsgs = turn.responseMsgs || [];
+          const turnSteps = userMsg ? runStepsForTurn(sessionId, userMsg.id) : [];
+          const inputText = formatRunStepContent(turnSteps, 'model_request');
+          const responseText = formatRunStepContent(turnSteps, 'model_response');
           const inputPopupText = [
+            `Session ID: ${sessionId}`,
+            `Turn: ${idx + 1}`,
+            `User Message ID: ${userMsg?.id || '-'}`,
+            `Bot Message IDs: ${responseMsgs.map(msg => msg.id).join(', ') || '-'}`,
             `Date: ${fmtDateTime(r.created_at)}`,
             `Provider: ${r.provider || '-'}`,
             `Model: ${r.model || '-'}`,
@@ -1394,6 +1396,10 @@ function renderSessionProviderUsage(sessionId) {
             inputText || 'No input text captured.',
           ].join('\\n');
           const responsePopupText = [
+            `Session ID: ${sessionId}`,
+            `Turn: ${idx + 1}`,
+            `User Message ID: ${userMsg?.id || '-'}`,
+            `Bot Message IDs: ${responseMsgs.map(msg => msg.id).join(', ') || '-'}`,
             `Date: ${fmtDateTime(r.created_at)}`,
             `Provider: ${r.provider || '-'}`,
             `Model: ${r.model || '-'}`,
@@ -1402,34 +1408,20 @@ function renderSessionProviderUsage(sessionId) {
             'Captured response text:',
             responseText || 'No response text captured.',
           ].join('\\n');
-          const totalPopupText = [
-            `Date: ${fmtDateTime(r.created_at)}`,
-            `Provider: ${r.provider || '-'}`,
-            `Model: ${r.model || '-'}`,
-            `Input Tokens: ${fmt(r.prompt_tokens)}`,
-            `Billable Input Tokens: ${fmt(billablePrompt)}`,
-            `Output Tokens: ${fmt(r.completion_tokens)}`,
-            `Total Tokens: ${fmt(r.total_tokens)}`,
-            `Cache Read Tokens: ${fmt(cache.read)}`,
-            `Cache Write Tokens: ${fmt(cache.write)}`,
-            '',
-            'Input text:',
-            inputText || 'No input text captured.',
-            '',
-            'Response text:',
-            responseText || 'No response text captured.',
-          ].join('\\n');
           return `<tr>
+            <td class="bd-label">Turn ${idx + 1}</td>
             <td>${fmtDateTime(r.created_at)}</td>
-            <td class="bd-num">${popupValue(r.prompt_tokens, 'Input Tokens', inputPopupText)}</td>
-            <td class="bd-num">${popupValue(billablePrompt, 'Billable Input Tokens', inputPopupText)}</td>
-            <td class="bd-num">${popupValue(r.completion_tokens, 'Output Tokens', responsePopupText)}</td>
-            <td class="bd-num">${popupValue(r.total_tokens, 'Total Tokens', totalPopupText)}</td>
-            <td class="bd-num">${popupValue(cache.read, 'Cache Read Tokens', inputPopupText)}</td>
-            <td class="bd-num">${popupValue(cache.write, 'Cache Write Tokens', inputPopupText)}</td>
+            <td class="mono" title="${escHtml(userMsg?.id || '')}">${escHtml(userMsg?.id || '-')}</td>
+            <td class="mono" title="${escHtml(responseMsgs.map(msg => msg.id).join(', ') || '')}">${escHtml(responseMsgs.map(msg => msg.id).join(', ') || '-')}</td>
+            <td class="bd-num">${fmt(r.prompt_tokens)}</td>
+            <td class="bd-num">${fmt(billablePrompt)}</td>
+            <td class="bd-num">${fmt(r.completion_tokens)}</td>
+            <td class="bd-num">${fmt(r.total_tokens)}</td>
+            <td class="bd-num">${fmt(cache.read)}</td>
+            <td class="bd-num">${fmt(cache.write)}</td>
             <td class="bd-num">${popupNumber(payloadChars(meta), 'Provider Input Text', inputText)}</td>
             <td class="bd-num">${popupNumber(meta.response_char_count || (responseText || '').length, 'Provider Response Text', responseText)}</td>
-            <td class="bd-num">${popupValue(usageRowCostUsd(r), 'Provider Billing Details', totalPopupText, 'usd')}</td>
+            <td class="bd-num">${fmtUsd(usageRowCostUsd(r))}</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -1907,6 +1899,22 @@ function renderRunSteps(userMsgId, sessionId) {
   });
   html += `</tbody></table></div></div>`;
   return html;
+}
+
+function runStepsForTurn(sessionId, userMessageId) {
+  return (RAW.run_steps || [])
+    .filter(step => step.session_id === sessionId && step.user_message_id === userMessageId)
+    .sort((a, b) => Number(a.step_number || 0) - Number(b.step_number || 0));
+}
+
+function formatRunStepContent(steps, targetStepType) {
+  const filtered = (steps || []).filter(step => String(step.step_type || '').toLowerCase() === targetStepType);
+  if(!filtered.length) return '';
+  return filtered.map(step => {
+    const label = String(step.part_type || 'content').replace(/_/g, ' ');
+    const body = step.content_full || step.content_preview || '';
+    return `[${label}]\n${body}`;
+  }).join('\n\n');
 }
 
 function buildSessionTurns(msgs) {
