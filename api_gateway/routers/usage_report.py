@@ -593,6 +593,12 @@ function openTextPopup(title, text) {
   backdrop.style.display = 'flex';
   backdrop.setAttribute('aria-hidden', 'false');
 }
+function openTextPopupFromButton(buttonEl) {
+  if(!buttonEl) return;
+  const title = buttonEl.getAttribute('data-popup-title') || 'Text Details';
+  const text = buttonEl.getAttribute('data-popup-text') || '';
+  openTextPopup(title, text);
+}
 
 function closeTextPopup() {
   const backdrop = document.getElementById('text-popup-backdrop');
@@ -1300,9 +1306,7 @@ function payloadTextChunks(meta) {
 function popupNumber(value, title, text) {
   const numericValue = Number(value || 0);
   if(!(numericValue > 0) || !text) return fmt(value);
-  const encodedTitle = JSON.stringify(title || 'Text Details');
-  const encodedText = JSON.stringify(text || '');
-  return `<button type="button" class="number-link" onclick='openTextPopup(${encodedTitle}, ${encodedText})'>${fmt(value)}</button>`;
+  return `<button type="button" class="number-link" data-popup-title="${escHtml(title || 'Text Details')}" data-popup-text="${escHtml(text || '')}" onclick="openTextPopupFromButton(this)">${fmt(value)}</button>`;
 }
 function nonIngestionUsageForSession(sessionId) {
   return (RAW.token_usage_log || [])
