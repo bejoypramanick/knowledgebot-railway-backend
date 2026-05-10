@@ -883,6 +883,45 @@ function usageRowCostUsd(row) {
   ) / 1000000;
   return Number.isFinite(computed) && computed > 0 ? computed : 0;
 }
+function usageRowCostBreakdown(row) {
+  const meta = parseMeta(row && row.request_metadata);
+  const provider = String(meta.provider ?? row.provider ?? '').toLowerCase();
+  const model = String(meta.model ?? row.model ?? '');
+  const pricing = meta.pricing_usd_per_1m || (provider === 'gemini' ? geminiPricingForChatModel(model) : null);
+  const promptTokens = Number(row && row.prompt_tokens || 0);
+  const completionTokens = Number(row && row.completion_tokens || 0);
+  const cacheRead = Number(meta.cache_read_tokens || 0);
+  const cacheWrite = Number(meta.cache_write_tokens || 0);
+  const standardInput = Math.max(0, promptTokens - cacheRead);
+  const inputRate = Number(pricing && pricing.standard_input || 0);
+  const outputRate = Number(pricing && pricing.completion || 0);
+  const cacheReadRate = Number(pricing && pricing.cache_read || 0);
+  const cacheWriteRate = Number(pricing && pricing.cache_write || 0);
+  const direct = Number(meta.cost_usd ?? row.cost_usd ?? 0);
+  const total = usageRowCostUsd(row);
+  const lines = [];
+  if(Number.isFinite(standardInput) && standardInput > 0 && inputRate > 0) {
+    lines.push(`Input: ${fmt(standardInput)} x $${inputRate.toFixed(3)}/1M`);
+  }
+  if(Number.isFinite(cacheRead) && cacheRead > 0 && cacheReadRate > 0) {
+    lines.push(`Cache read: ${fmt(cacheRead)} x $${cacheReadRate.toFixed(3)}/1M`);
+  }
+  if(Number.isFinite(completionTokens) && completionTokens > 0 && outputRate > 0) {
+    lines.push(`Output: ${fmt(completionTokens)} x $${outputRate.toFixed(3)}/1M`);
+  }
+  if(Number.isFinite(cacheWrite) && cacheWrite > 0) {
+    if(cacheWriteRate > 0) {
+      lines.push(`Cached stored: ${fmt(cacheWrite)} x $${cacheWriteRate.toFixed(3)}/1M`);
+    } else {
+      lines.push(`Cached stored: ${fmt(cacheWrite)} tokens`);
+    }
+  }
+  if(Number.isFinite(direct) && direct > 0) {
+    lines.push(`Logged cost: ${fmtUsd(direct)}`);
+  }
+  lines.push(`Total: ${fmtUsd(total)}`);
+  return lines;
+}
 function chatUnitRateLabel(model) {
   const resolvedModel = String(model || '').trim() || 'gemini-2.5-flash-lite';
   const pricing = geminiPricingForChatModel(resolvedModel);
@@ -1402,7 +1441,12 @@ function renderSessionProviderUsage(sessionId) {
             <td class="bd-num">${fmt(derivedTotal)}</td>
             <td class="bd-num">${fmt(cache.read)}</td>
             <td class="bd-num">${fmt(cache.write)}</td>
-            <td class="bd-num">${fmtUsd(usageRowCostUsd(r))}</td>
+            <td class="bd-num">
+              <div>${fmtUsd(usageRowCostUsd(r))}</div>
+              <div style="margin-top:4px;font-size:10px;line-height:1.35;color:var(--muted);text-align:left">
+                ${usageRowCostBreakdown(r).map(line => `<div>${escHtml(line)}</div>`).join('')}
+              </div>
+            </td>
           </tr>`;
         }).join('') || `<tr><td colspan="10" style="color:var(--muted)">No provider usage rows were recorded for this session.</td></tr>`}
       </tbody>
