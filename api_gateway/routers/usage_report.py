@@ -1368,14 +1368,14 @@ function renderSessionProviderUsage(sessionId) {
         <span><b>Completion:</b> ${fmt(totals.completion)} ${billingBadge('billable','billable')}</span>
         <span><b>Total:</b> ${fmt(totals.total)}</span>
         <span><b>Cache read:</b> ${fmt(totals.cacheRead)} ${billingBadge('cached','cached')}</span>
-        <span><b>Cache write:</b> ${fmt(totals.cacheWrite)} ${billingBadge('cached','cached')}</span>
+        <span><b>Cached tokens stored:</b> ${fmt(totals.cacheWrite)} ${billingBadge('cached','cached')}</span>
       </div>
     </div>
     <table class="bd-table" style="margin:0">
       <thead><tr>
         <th>Date</th><th>Provider</th><th>Model</th>
         <th style="text-align:right">Prompt Tokens</th><th style="text-align:right">Non-Cached Input</th><th style="text-align:right">Completion Tokens</th><th style="text-align:right">Total Tokens</th>
-        <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th><th style="text-align:right">Price</th>
+        <th style="text-align:right">Cache Read</th><th style="text-align:right">Cached Tokens Stored</th><th style="text-align:right">Price</th>
       </tr></thead>
       <tbody>
         ${rows.map(r => {
