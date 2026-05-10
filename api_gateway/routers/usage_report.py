@@ -838,7 +838,7 @@ function geminiPricingForChatModel(model) {
     return {
       standard_input: 0.10,
       completion: 0.40,
-      cache_read: 0.025,
+      cache_read: 0.01,
       cache_write: 0.0,
     };
   }
@@ -886,7 +886,10 @@ function usageRowCostUsd(row) {
 function chatUnitRateLabel(model) {
   const resolvedModel = String(model || '').trim() || 'gemini-2.5-flash-lite';
   const pricing = geminiPricingForChatModel(resolvedModel);
-  return `${resolvedModel} • In $${Number(pricing.standard_input || 0).toFixed(3)}/1M • Out $${Number(pricing.completion || 0).toFixed(3)}/1M • Cache $${Number(pricing.cache_read || 0).toFixed(3)}/1M`;
+  if(String(resolvedModel).toLowerCase().includes('2.5-flash-lite')) {
+    return `${resolvedModel} • In $${Number(pricing.standard_input || 0).toFixed(3)}/1M • Out $${Number(pricing.completion || 0).toFixed(3)}/1M • Cache read $${Number(pricing.cache_read || 0).toFixed(3)}/1M • Cache storage $1.000/1M tok/hr`;
+  }
+  return `${resolvedModel} • In $${Number(pricing.standard_input || 0).toFixed(3)}/1M • Out $${Number(pricing.completion || 0).toFixed(3)}/1M • Cache read $${Number(pricing.cache_read || 0).toFixed(3)}/1M`;
 }
 function ingestionUnitRateLabel(model) {
   const resolvedModel = String(model || '').trim() || 'text-embedding-3-small';
@@ -1361,7 +1364,7 @@ function renderSessionProviderUsage(sessionId) {
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
         <span><b>Provider prompt:</b> ${fmt(totals.prompt)}</span>
-        <span><b>Billable prompt:</b> ${fmt(totals.billablePrompt)} ${billingBadge('billable','billable')}</span>
+        <span><b>Non-cached input:</b> ${fmt(totals.billablePrompt)} ${billingBadge('billable','billable')}</span>
         <span><b>Completion:</b> ${fmt(totals.completion)} ${billingBadge('billable','billable')}</span>
         <span><b>Total:</b> ${fmt(totals.total)}</span>
         <span><b>Cache read:</b> ${fmt(totals.cacheRead)} ${billingBadge('cached','cached')}</span>
@@ -1371,7 +1374,7 @@ function renderSessionProviderUsage(sessionId) {
     <table class="bd-table" style="margin:0">
       <thead><tr>
         <th>Date</th><th>Provider</th><th>Model</th>
-        <th style="text-align:right">Prompt Tokens</th><th style="text-align:right">Billable Prompt</th><th style="text-align:right">Completion Tokens</th><th style="text-align:right">Total Tokens</th>
+        <th style="text-align:right">Prompt Tokens</th><th style="text-align:right">Non-Cached Input</th><th style="text-align:right">Completion Tokens</th><th style="text-align:right">Total Tokens</th>
         <th style="text-align:right">Cache Read</th><th style="text-align:right">Cache Write</th><th style="text-align:right">Price</th>
       </tr></thead>
       <tbody>

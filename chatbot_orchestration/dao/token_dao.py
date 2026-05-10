@@ -13,14 +13,21 @@ logger = get_otel_logger("token_dao", "chatbot-orchestration")
 
 
 def gemini_pricing_for_model(model: str) -> Dict[str, float]:
-    """Return paid-tier USD per 1M token rates for Gemini chat usage."""
+    """Return paid-tier Gemini chat rates used for billing fallback.
+
+    Note:
+    - standard_input / completion / cache_read are per-1M-token rates.
+    - Gemini's current docs present cache storage as an hourly storage price,
+      not a simple one-shot per-token "write" rate, so cache_write remains 0.0
+      here to avoid over-claiming precision from token_usage_log alone.
+    """
     normalized_model = (model or "").lower()
 
     if "2.5-flash-lite" in normalized_model:
         return {
             "standard_input": 0.10,
             "completion": 0.40,
-            "cache_read": 0.025,
+            "cache_read": 0.01,
             "cache_write": 0.0,
         }
 
