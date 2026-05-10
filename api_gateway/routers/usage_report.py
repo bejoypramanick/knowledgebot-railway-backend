@@ -1368,6 +1368,9 @@ function renderSessionProviderUsage(sessionId) {
       <div style="font-size:11px;color:var(--muted);margin-top:3px">
         This table shows only billing-related provider usage rows from token_usage_log. The raw agent_run_steps rows are shown separately below as diagnostics.
       </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">
+        <b>Token meaning:</b> <b>Prompt Tokens</b> includes the full provider input for that call, such as the current user message, prior conversation history, and any cached/system/tool context Gemini counted as input. <b>Cache Read</b> is the cached portion already included inside Prompt Tokens. <b>Non-Cached Input</b> is the standard-priced input portion after subtracting Cache Read. <b>Completion Tokens</b> is the provider output. <b>Total Tokens</b> is Prompt Tokens plus Completion Tokens.
+      </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:11px">
         <span><b>Provider prompt:</b> ${fmt(totals.prompt)}</span>
         <span><b>Non-cached input:</b> ${fmt(totals.billablePrompt)} ${billingBadge('billable','billable')}</span>
