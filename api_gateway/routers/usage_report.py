@@ -519,7 +519,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <div id="details-panel">
 <div class="section"><h2>Chat Sessions</h2><div class="table-wrap" style="max-height:700px"><table>
-  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Provider-reported input tokens">Prompt Tokens</th><th title="Provider-reported output tokens">Completion Tokens</th><th title="Provider-reported billed total tokens for the session">Total Tokens</th><th>Status</th><th>Price</th></tr></thead>
+  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Provider-reported input tokens, including cached prompt tokens">Prompt Tokens</th><th title="Prompt tokens reused from Gemini cache and already included inside Prompt Tokens">Cache Read</th><th title="Prompt tokens billed at the standard input rate: Prompt Tokens minus Cache Read">Non-Cached Input</th><th title="Provider-reported output tokens">Completion Tokens</th><th title="Provider-reported total tokens: Prompt Tokens plus Completion Tokens">Total Tokens</th><th>Status</th><th>Price</th></tr></thead>
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
@@ -1316,6 +1316,22 @@ function nonIngestionUsageForSession(sessionId) {
     .filter(r => r.session_id === sessionId && !isIngestionUsage(r))
     .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
 }
+function sessionBillingTotals(sessionId) {
+  const rows = nonIngestionUsageForSession(sessionId);
+  return rows.reduce((acc, r) => {
+    const meta = parseMeta(r.request_metadata);
+    const cache = getCacheTokens(meta);
+    const prompt = Number(r.prompt_tokens || 0);
+    const completion = Number(r.completion_tokens || 0);
+    acc.prompt += prompt;
+    acc.billablePrompt += Math.max(0, prompt - cache.read);
+    acc.completion += completion;
+    acc.total += prompt + completion;
+    acc.cacheRead += cache.read;
+    acc.cacheWrite += cache.write;
+    return acc;
+  }, {prompt:0, billablePrompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0});
+}
 function sessionPriceUsd(sessionId) {
   return nonIngestionUsageForSession(sessionId).reduce((sum, row) => sum + usageRowCostUsd(row), 0);
 }
@@ -1345,17 +1361,7 @@ function renderSessionProviderUsage(sessionId) {
       No provider usage rows were recorded for this session.
     </div>`;
   }
-  const totals = rows.reduce((acc, r) => {
-    const meta = parseMeta(r.request_metadata);
-    const cache = getCacheTokens(meta);
-    acc.prompt += r.prompt_tokens || 0;
-    acc.billablePrompt += Math.max(0, (r.prompt_tokens || 0) - cache.read);
-    acc.completion += r.completion_tokens || 0;
-    acc.total += r.total_tokens || 0;
-    acc.cacheRead += cache.read;
-    acc.cacheWrite += cache.write;
-    return acc;
-  }, {prompt:0, billablePrompt:0, completion:0, total:0, cacheRead:0, cacheWrite:0});
+  const totals = sessionBillingTotals(sessionId);
   return `<div style="margin:8px 0 12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#fff">
     <div style="padding:8px 10px;background:rgba(22,163,74,.08);border-bottom:1px solid var(--border)">
       <div style="font-size:12px;font-weight:700;color:var(--green)">Provider Billing Ledger</div>
@@ -1382,6 +1388,7 @@ function renderSessionProviderUsage(sessionId) {
           const meta = parseMeta(r.request_metadata);
           const cache = getCacheTokens(meta);
           const billablePrompt = Math.max(0, (r.prompt_tokens || 0) - cache.read);
+          const derivedTotal = (Number(r.prompt_tokens || 0) + Number(r.completion_tokens || 0));
           return `<tr>
             <td>${fmtDateTime(r.created_at)}</td>
             <td>${escHtml(r.provider || '-')}</td>
@@ -1389,7 +1396,7 @@ function renderSessionProviderUsage(sessionId) {
             <td class="bd-num">${fmt(r.prompt_tokens)}</td>
             <td class="bd-num">${fmt(billablePrompt)}</td>
             <td class="bd-num">${fmt(r.completion_tokens)}</td>
-            <td class="bd-num">${fmt(r.total_tokens)}</td>
+            <td class="bd-num">${fmt(derivedTotal)}</td>
             <td class="bd-num">${fmt(cache.read)}</td>
             <td class="bd-num">${fmt(cache.write)}</td>
             <td class="bd-num">${fmtUsd(usageRowCostUsd(r))}</td>
@@ -1727,8 +1734,8 @@ function render() {
   // === AGGREGATE CALCULATIONS ===
   const totalSessions = sessions.length;
   const totalMsgs = sessions.reduce((a,r) => a+(r.message_count||0), 0);
-  const totalPromptTokens = sessions.reduce((a,r) => a+(r.total_prompt_token_count||0), 0);
-  const totalCompletionTokens = sessions.reduce((a,r) => a+(r.total_completion_token_count||0), 0);
+  const totalPromptTokens = sessions.reduce((a,r) => a + sessionBillingTotals(r.id).prompt, 0);
+  const totalCompletionTokens = sessions.reduce((a,r) => a + sessionBillingTotals(r.id).completion, 0);
   const totalMsgTokens = sessions.reduce((a,r) => a+(r.total_message_token_count||0), 0);
   const totalChars = sessions.reduce((a,r) => a+(r.total_character_count||0), 0);
   const totalFiles = files.length;
@@ -1838,12 +1845,20 @@ function render() {
     sessionRow.dataset.sessionId = r.id;
     sessionRow.setAttribute('onclick', `toggleSession(this, '${r.id}')`);
     const sessionPrice = sessionPriceUsd(r.id);
+    const billingTotals = sessionBillingTotals(r.id);
+    const promptTokens = billingTotals.prompt || Number(r.total_prompt_token_count || 0);
+    const cacheReadTokens = billingTotals.cacheRead || 0;
+    const nonCachedInputTokens = Math.max(0, promptTokens - cacheReadTokens);
+    const completionTokens = billingTotals.completion || Number(r.total_completion_token_count || 0);
+    const totalTokens = billingTotals.total || (promptTokens + completionTokens);
     sessionRow.innerHTML = `
       <td class="mono">${r.id}</td>
       <td>${fmtDateTime(r.started_at)}</td><td>${r.message_count||0}</td>
-      <td class="token-cell">${fmt(r.total_prompt_token_count)}</td>
-      <td class="token-cell">${fmt(r.total_completion_token_count)}</td>
-      <td class="token-cell">${fmt((r.total_prompt_token_count||0) + (r.total_completion_token_count||0))}</td>
+      <td class="token-cell">${fmt(promptTokens)}</td>
+      <td class="token-cell">${fmt(cacheReadTokens)}</td>
+      <td class="token-cell">${fmt(nonCachedInputTokens)}</td>
+      <td class="token-cell">${fmt(completionTokens)}</td>
+      <td class="token-cell">${fmt(totalTokens)}</td>
       <td>${badge(r.archive_status)}</td>
       <td>${fmtUsd(sessionPrice)}</td>`;
     sessionsEl.appendChild(sessionRow);
