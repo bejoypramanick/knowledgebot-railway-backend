@@ -519,7 +519,7 @@ th[title]{cursor:help;border-bottom:2px dashed var(--border)}
 
 <div id="details-panel">
 <div class="section"><h2>Chat Sessions</h2><div class="table-wrap" style="max-height:700px"><table>
-  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Provider-reported input tokens">Prompt Tokens</th><th title="Provider-reported output tokens">Completion Tokens</th><th title="Gemini count_tokens totals for captured context text only">Captured Context Tokens</th><th title="Gemini count_tokens totals for visible message text">Message Tokens</th><th>Status</th><th>Price</th></tr></thead>
+  <thead><tr><th>Session ID</th><th>Started</th><th title="Total messages in this session">Msgs</th><th title="Provider-reported input tokens">Prompt Tokens</th><th title="Provider-reported output tokens">Completion Tokens</th><th title="Provider-reported billed total tokens for the session">Total Tokens</th><th>Status</th><th>Price</th></tr></thead>
   <tbody id="sessions-table"></tbody>
 </table></div></div>
 
@@ -1843,8 +1843,7 @@ function render() {
       <td>${fmtDateTime(r.started_at)}</td><td>${r.message_count||0}</td>
       <td class="token-cell">${fmt(r.total_prompt_token_count)}</td>
       <td class="token-cell">${fmt(r.total_completion_token_count)}</td>
-      <td class="token-cell">${fmt((r.total_system_prompt_token_count||0)+(r.total_history_token_count||0)+(r.total_tool_def_token_count||0))}</td>
-      <td class="token-cell">${fmt((r.total_user_msg_token_count||0)+(r.total_bot_response_token_count||0))}</td>
+      <td class="token-cell">${fmt((r.total_prompt_token_count||0) + (r.total_completion_token_count||0))}</td>
       <td>${badge(r.archive_status)}</td>
       <td>${fmtUsd(sessionPrice)}</td>`;
     sessionsEl.appendChild(sessionRow);
