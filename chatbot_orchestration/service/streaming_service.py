@@ -2114,10 +2114,10 @@ class StreamingService:
                         f"⚠️ Could not extract usage from run object: {usage_error}"
                     )
 
-            total_tokens = input_tokens + output_tokens + cache_read_tokens
-            prompt_tokens = (
-                input_tokens + cache_read_tokens
-            )  # Total billable prompt including cached
+            # Gemini reports input_tokens/prompt_token_count INCLUDING cached input.
+            # cache_read_tokens is a subset of prompt/input, so do not add it again.
+            total_tokens = input_tokens + output_tokens
+            prompt_tokens = input_tokens
             completion_tokens = output_tokens
             token_source = (
                 "ACTUAL (from Gemini API)"
@@ -2144,7 +2144,7 @@ class StreamingService:
                 "tool_def_text": tool_def_text,
                 "cache_name": cache_name,
                 "extended_thinking_enabled": ENABLE_EXTENDED_THINKING,
-                "pricing_note": "Gemini 2.5 Flash Lite: input $0.10/1M, output $0.40/1M, cache read $0.01/1M, cache write $0.10/1M",
+                "pricing_note": "Gemini 2.5 Flash Lite: input $0.10/1M, output $0.40/1M, cache read $0.01/1M, cache storage billed separately by Google",
             }
 
             # Capture actual text and stats for the report
@@ -2319,9 +2319,9 @@ class StreamingService:
                         """),
                         {
                             "session_id": session_id,
-                            "token_count": input_tokens + cache_read_tokens,
+                            "token_count": input_tokens,
                             "message_token_count": user_message_tokens,
-                            "prompt_token_count": input_tokens + cache_read_tokens,
+                            "prompt_token_count": input_tokens,
                             "sp_char": sp_char,
                             "sp_word": sp_word,
                             "sp_tokens": sp_tokens,
@@ -2433,7 +2433,7 @@ class StreamingService:
                     # Update session aggregates (add this turn's metrics)
                     total_char = user_char_count + bot_char_count
                     total_word = user_word_count + bot_word_count
-                    total_prompt_with_cache = input_tokens + cache_read_tokens
+                    total_prompt_with_cache = input_tokens
                     total_token = total_prompt_with_cache + output_tokens
                     total_msg_tokens = user_message_tokens + bot_message_tokens
 

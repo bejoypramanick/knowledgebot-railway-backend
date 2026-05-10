@@ -189,10 +189,10 @@ async def track_gemini_usage_detailed(
 
     total_token_source = "provider_total_tokens"
     if total_tokens <= 0:
-        total_tokens = (
-            prompt_tokens + completion_tokens + cache_read_tokens + cache_write_tokens
-        )
-        total_token_source = "sum_of_provider_reported_categories"
+        # Gemini prompt/input tokens already include cached-content tokens.
+        # cache_read_tokens is a subset of prompt_tokens, not an additional bucket.
+        total_tokens = prompt_tokens + completion_tokens + cache_write_tokens
+        total_token_source = "sum_of_provider_reported_prompt_completion_and_cache_write"
 
     if total_tokens <= 0:
         await log_async("No tokens to track - skipping", "warning")
