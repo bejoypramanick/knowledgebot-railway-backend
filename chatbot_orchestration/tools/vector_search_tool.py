@@ -359,6 +359,21 @@ async def search_knowledge_base(
 
             final_context = compressed_context
 
+            try:
+                from ..core.rag_debug_capture import add_rag_raw_stage
+
+                if ctx.deps.session_id:
+                    add_rag_raw_stage(
+                        ctx.deps.session_id,
+                        rows=[dict(row) for row in rows],
+                        chunks=chunks,
+                        top_chunks=top_chunks,
+                        grounding_chunks=grounding_chunks,
+                        final_context=final_context,
+                    )
+            except Exception:
+                pass
+
             total_duration = (time.time() - rag_start) * 1000
 
             # Theoretical storage savings per chunk (standard vector 3072B -> halfvec 1536B for 768d)

@@ -34,6 +34,11 @@ class RagDebugTurn:
     model_name: Optional[str] = None
     rag_queries: List[str] = field(default_factory=list)
     rag_responses: List[str] = field(default_factory=list)
+    rag_raw_rows: List[Any] = field(default_factory=list)
+    rag_raw_chunks: List[Any] = field(default_factory=list)
+    rag_top_chunks: List[Any] = field(default_factory=list)
+    rag_grounding_chunks: List[str] = field(default_factory=list)
+    rag_final_contexts: List[str] = field(default_factory=list)
     final_response: str = ""
 
 
@@ -105,6 +110,30 @@ def add_rag_response(
     turn.rag_responses.append(response or "")
 
 
+def add_rag_raw_stage(
+    session_id: str,
+    *,
+    rows: Optional[List[Any]] = None,
+    chunks: Optional[List[Any]] = None,
+    top_chunks: Optional[List[Any]] = None,
+    grounding_chunks: Optional[List[str]] = None,
+    final_context: Optional[str] = None,
+) -> None:
+    turn = _turns.get(session_id)
+    if not turn or not turn.enabled:
+        return
+    if rows is not None:
+        turn.rag_raw_rows.append(rows)
+    if chunks is not None:
+        turn.rag_raw_chunks.append(chunks)
+    if top_chunks is not None:
+        turn.rag_top_chunks.append(top_chunks)
+    if grounding_chunks is not None:
+        turn.rag_grounding_chunks.extend(grounding_chunks)
+    if final_context is not None:
+        turn.rag_final_contexts.append(final_context)
+
+
 def set_final_response(session_id: str, response: str) -> None:
     turn = _turns.get(session_id)
     if not turn:
@@ -146,20 +175,50 @@ def _stage_objects(turn: RagDebugTurn) -> List[Dict[str, Any]]:
             "body": ("\n\n---\n\n".join(turn.rag_queries) if turn.rag_queries else "").encode("utf-8"),
         },
         {
+            "label": "RAG Raw DB Rows",
+            "filename": "04_rag_raw_db_rows.json",
+            "content_type": "application/json",
+            "body": _json_bytes(turn.rag_raw_rows),
+        },
+        {
+            "label": "RAG Candidate Chunks",
+            "filename": "05_rag_candidate_chunks.json",
+            "content_type": "application/json",
+            "body": _json_bytes(turn.rag_raw_chunks),
+        },
+        {
+            "label": "RAG Top Chunks",
+            "filename": "06_rag_top_chunks.json",
+            "content_type": "application/json",
+            "body": _json_bytes(turn.rag_top_chunks),
+        },
+        {
+            "label": "RAG Grounding Chunks",
+            "filename": "07_rag_grounding_chunks.txt",
+            "content_type": "text/plain; charset=utf-8",
+            "body": ("\n\n---\n\n".join(turn.rag_grounding_chunks) if turn.rag_grounding_chunks else "").encode("utf-8"),
+        },
+        {
+            "label": "RAG Final Context",
+            "filename": "08_rag_final_context.txt",
+            "content_type": "text/plain; charset=utf-8",
+            "body": ("\n\n---\n\n".join(turn.rag_final_contexts) if turn.rag_final_contexts else "").encode("utf-8"),
+        },
+        {
             "label": "RAG Search Output",
-            "filename": "04_rag_search_output.txt",
+            "filename": "09_rag_search_output.txt",
             "content_type": "text/plain; charset=utf-8",
             "body": ("\n\n---\n\n".join(turn.rag_responses) if turn.rag_responses else "").encode("utf-8"),
         },
         {
             "label": "Model Input (After RAG)",
-            "filename": "05_model_input_after_rag.json",
+            "filename": "10_model_input_after_rag.json",
             "content_type": "application/json",
             "body": _json_bytes(post_rag_payload),
         },
         {
             "label": "Final Model Response",
-            "filename": "06_final_model_response.txt",
+            "filename": "11_final_model_response.txt",
             "content_type": "text/plain; charset=utf-8",
             "body": (turn.final_response or "").encode("utf-8"),
         },
