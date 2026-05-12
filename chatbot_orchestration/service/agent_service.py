@@ -41,7 +41,7 @@ class PydanticAIGatewayService:
         self,
         message: str,
         session_id: str,
-        user_email: str = "anonymous@example.com"
+        user_email: str = "anonymous@example.com",
     ) -> AsyncGenerator[str, None]:
         """Stream agent response (ONLY streaming is supported)."""
         logger.info(f"🌊 Starting stream for session: {session_id}")
@@ -51,7 +51,10 @@ class PydanticAIGatewayService:
 
         # Stream response
         async for chunk in streaming_service.stream_agent_response(
-            agent, message, session_id, user_email
+            agent,
+            message,
+            session_id,
+            user_email,
         ):
             yield chunk
 

@@ -409,6 +409,9 @@ class StreamingService:
 
             # Pipeline performance timer - tracks each phase
             pipeline_timer = PipelineTimer(session_id)
+            enable_rag_stage_attachments = (
+                os.getenv("ENABLE_RAG_STAGE_ATTACHMENTS", "false").lower() == "true"
+            )
 
             # 📁 UPLOAD AGENT REQUEST TO S3 (if enabled)
             agent_request_download_url = None
@@ -483,6 +486,22 @@ class StreamingService:
             # System Prompt Strategy: explicit Gemini cache is required.
             cache_name = await agent_manager.ensure_session_cache(session_id)
             cache_diag = agent_manager.get_cache_diag(session_id)
+
+            try:
+                from ..core.rag_debug_capture import begin_turn
+
+                begin_turn(
+                    session_id,
+                    enabled=enable_rag_stage_attachments,
+                    current_user_message=message,
+                    conversation_history=chat_history,
+                    cache_name=cache_name,
+                    model_name=os.getenv("CHATBOT_MODEL", settings.chatbot_model),
+                )
+            except Exception as capture_init_error:
+                logger.warning(
+                    f"Failed to initialize RAG stage capture for session {session_id[:16]}: {capture_init_error}"
+                )
 
             logger.info(
                 f"System prompt strategy: cache={'active: ' + cache_name if cache_name else 'none'}, "
@@ -1243,6 +1262,14 @@ class StreamingService:
                     full_response = (run_result.output or "").strip()
                     all_messages = run_result.all_messages()
                     run_messages = all_messages
+                    try:
+                        from ..core.rag_debug_capture import set_final_response
+
+                        set_final_response(session_id, full_response)
+                    except Exception as capture_output_error:
+                        logger.warning(
+                            f"Failed to store final response for RAG stage capture: {capture_output_error}"
+                        )
                     logger.info(
                         f"📋 Total messages in conversation: {len(all_messages)}"
                     )
@@ -1768,6 +1795,24 @@ class StreamingService:
                     logger.info(
                         f"📁 ✅ Added agent response download link: {agent_s3_download_url}"
                     )
+
+                if enable_rag_stage_attachments:
+                    try:
+                        from ..core.rag_debug_capture import publish_turn_stage_files
+
+                        rag_stage_links = await publish_turn_stage_files(session_id)
+                        for item in rag_stage_links:
+                            download_links.append(
+                                f'[{item["label"]}]({item["url"]})'
+                            )
+                        if rag_stage_links:
+                            logger.info(
+                                f"📁 ✅ Added {len(rag_stage_links)} RAG stage attachment links for session={session_id[:16]}"
+                            )
+                    except Exception as rag_stage_error:
+                        logger.error(
+                            f"📁 ❌ Failed to publish RAG stage attachments: {rag_stage_error}"
+                        )
 
                 if download_links:
                     agent_download_section = (

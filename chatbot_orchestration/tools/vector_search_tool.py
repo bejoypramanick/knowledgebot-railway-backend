@@ -164,6 +164,13 @@ async def search_knowledge_base(
     flashrank_query = effective_query
 
     logger.info(f"🔍 Starting advanced retrieval for: '{effective_query}'")
+    try:
+        from ..core.rag_debug_capture import add_rag_query
+
+        if ctx.deps.session_id:
+            add_rag_query(ctx.deps.session_id, query=effective_query)
+    except Exception:
+        pass
 
     try:
         query_embedding = await generate_embedding(effective_query)
@@ -466,6 +473,14 @@ async def search_knowledge_base(
                     f"🔎 [DEBUG] Tool Result: status=success payload_size_bytes={len(response.encode('utf-8'))} "
                     f"preview={response[:500]!r}"
                 )
+            except Exception:
+                pass
+
+            try:
+                from ..core.rag_debug_capture import add_rag_response
+
+                if ctx.deps.session_id:
+                    add_rag_response(ctx.deps.session_id, response=response)
             except Exception:
                 pass
 

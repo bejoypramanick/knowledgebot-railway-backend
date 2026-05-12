@@ -84,7 +84,11 @@ async def chat_with_agent_stream(request: Request):
             logger.info(f"💬 [CHAT_STREAM_START] session={session_id[:16]} user_hash={hash_pii(user_email)} msg_chars={len(message)}")
             if session_created:
                 yield f"data: {json.dumps({'type': 'session_created', 'session_id': session_id})}\n\n"
-            async for chunk in agent_service.stream_agent_response(message, session_id, user_email):
+            async for chunk in agent_service.stream_agent_response(
+                message,
+                session_id,
+                user_email,
+            ):
                 yield chunk
             logger.info(f"💬 [CHAT_STREAM_END] session={session_id[:16]}")
 
