@@ -1996,6 +1996,7 @@ class StreamingService:
             completion_data = {
                 "type": "complete",
                 "session_id": session_id,
+                "content": full_response,
                 "total_chunks": chunk_count,
                 "total_length": len(full_response),
                 "tool_calls": tool_call_count,
